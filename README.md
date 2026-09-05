@@ -6,13 +6,15 @@ whole database is one file (SQLite) that lives on your machine.
 
 ## What's in here right now
 
-- `server/` — Node.js + TypeScript + Express backend, with a SQLite
-  database and full schema for all 13 areas of the business
-  (Inventory, Products, Sales, Customers, Suppliers, Purchases,
-  Payments, Deliveries, Couriers, Cash Book).
+- `server/` — a complete Node.js + TypeScript + Express backend: full
+  SQLite database schema, plus working API routes for every module
+  (Business Info, Customers + Addresses, Suppliers, Products, Inventory,
+  Sales/POS, Purchases, Supplier Payments, Deliveries, Courier Payments,
+  Cash Book).
 - `SCHEMA_DESIGN.md` — the human-readable design doc explaining every
-  table and why it's structured the way it is. Read this if you want
-  to understand the "why" behind any field.
+  table and why it's structured the way it is.
+- `API_REFERENCE.md` — every API endpoint, what it does, and example
+  request bodies. Read this before building the frontend against it.
 - `client/` — reserved for the React frontend (not built yet — this is
   the next step).
 
@@ -65,13 +67,25 @@ To back up: just copy that file somewhere safe (a USB drive, a Google
 Drive folder, etc.) — ideally after closing the server. That's the whole
 backup process, no export/import needed.
 
+## Try it out
+
+Once `npm run dev` is running, open a browser (or use a tool like
+Postman/Insomnia, or just `curl`) and hit:
+
+```
+http://localhost:4000/api/health
+```
+
+You should get back `{"status":"ok","time":"..."}` — confirming the
+server is alive. From there, see `API_REFERENCE.md` for every real
+endpoint (suppliers, products, inventory, sales, purchases, etc.) with
+example request bodies.
+
 ## What's next
 
-1. Confirm the database schema works as expected (`npm run db:migrate`
-   should complete with no errors).
-2. Backend API routes for each module (Inventory, Sales/POS, Customers,
-   Purchasing, Deliveries, Cash Book).
-3. React frontend that talks to that API.
+1. ✅ Database schema
+2. ✅ Backend API for all modules
+3. React frontend that talks to that API — this is the next step.
 4. A static public catalog site (separate, deployed free on Netlify)
    pulling from the same product data.
 
