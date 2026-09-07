@@ -3,13 +3,23 @@ import { z } from "zod";
 import { db } from "../db/connection";
 import { nextPurchaseCode, nextSku } from "../lib/codes";
 import { ApiError, asyncHandler } from "../lib/errors";
+import { requireAuth, requireRole } from "../lib/auth";
 
 export const purchasesRouter = Router();
+
+// Purchasing is financial/supplier data — admin only.
+purchasesRouter.use(requireAuth, requireRole("admin"));
 
 const purchaseItemInput = z.object({
   product_id: z.number().int().positive(),
   quantity: z.number().int().positive(),
   unit_cost: z.number().nonnegative(),
+  // Per-unit selling price for THIS batch — lets the same product sell at
+  // different prices across older/newer stock. Falls back to the
+  // product's current selling_price if not given.
+  unit_selling_price: z.number().nonnegative().optional(),
+  size: z.string().optional(),
+  color: z.string().optional(),
 });
 
 const purchaseInput = z.object({
@@ -17,6 +27,45 @@ const purchaseInput = z.object({
   items: z.array(purchaseItemInput).min(1),
   amount_paid: z.number().nonnegative().default(0),
 });
+
+// Barcodes are generated server-side, continuing from the highest
+// existing barcode in the whole system (barcodes are globally unique, not
+// per-product) — so a restock never restarts at a random, disconnected
+// number, and there's never a race between client-generated codes and
+// what the database actually has.
+const BARCODE_PREFIX = "890";
+
+function nextBarcodeBatch(count: number): string[] {
+  const row = db
+    .prepare(`SELECT barcode FROM inventory WHERE barcode LIKE ? ORDER BY barcode DESC LIMIT 1`)
+    .get(`${BARCODE_PREFIX}%`) as { barcode: string } | undefined;
+
+  let nextNum = 100_000_000; // same starting range as the previous client-side generator
+  if (row?.barcode) {
+    const numericPart = row.barcode.slice(BARCODE_PREFIX.length);
+    const parsed = parseInt(numericPart, 10);
+    if (!isNaN(parsed)) nextNum = parsed + 1;
+  }
+
+  return Array.from({ length: count }, (_, i) => `${BARCODE_PREFIX}${String(nextNum + i).padStart(10, "0")}`);
+}
+
+// Sizes are normalized to uppercase before storage so "m" and "M" are
+// always treated as the exact same size — otherwise they'd silently
+// split into two different inventory groups.
+function normalizeSize(size: string | undefined): string | null {
+  if (!size) return null;
+  return size.trim().toUpperCase();
+}
+
+function normalizeColor(color: string | undefined): string | null {
+  if (!color) return null;
+  // Title-case the color for consistency (Black, not black/BLACK) without
+  // being as strict as uppercasing, since color names read better this way.
+  const trimmed = color.trim();
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase();
+}
+
 
 // GET /api/purchases
 purchasesRouter.get(
@@ -96,21 +145,47 @@ purchasesRouter.post(
       const purchaseId = purchaseResult.lastInsertRowid;
 
       for (const item of data.items) {
-        db.prepare(
-          `INSERT INTO purchase_items (purchase_id, product_id, quantity, unit_cost)
-           VALUES (?, ?, ?, ?)`
-        ).run(purchaseId, item.product_id, item.quantity, item.unit_cost);
+        const size = normalizeSize(item.size);
+        const color = normalizeColor(item.color);
 
-        // Generate one inventory row per physical unit received.
+        db.prepare(
+          `INSERT INTO purchase_items (purchase_id, product_id, quantity, unit_cost, size, color)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        ).run(purchaseId, item.product_id, item.quantity, item.unit_cost, size, color);
+
+        // Look up the product's current selling_price as the fallback for
+        // this batch's unit_selling_price, and continue barcodes from
+        // wherever the whole system last left off.
+        const product = db
+          .prepare(`SELECT selling_price FROM products WHERE id = ?`)
+          .get(item.product_id) as { selling_price: number };
+        const unitSellingPrice = item.unit_selling_price ?? product.selling_price;
+        const barcodes = nextBarcodeBatch(item.quantity);
+
+        // Generate one inventory row per physical unit received, each
+        // carrying its OWN cost and selling price for this batch — so an
+        // older-cost batch and a newer-cost batch of the same product can
+        // sit in stock and sell at their own real prices simultaneously.
         for (let i = 0; i < item.quantity; i++) {
           const sku = nextSku(item.product_id);
           const invResult = db
             .prepare(
-              `INSERT INTO inventory (product_id, sku, status) VALUES (?, ?, 'available')`
+              `INSERT INTO inventory (product_id, size, color, sku, barcode, cost_price, selling_price, status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'available')`
             )
-            .run(item.product_id, sku);
+            .run(item.product_id, size, color, sku, barcodes[i], item.unit_cost, unitSellingPrice);
           createdInventoryIds.push(Number(invResult.lastInsertRowid));
         }
+
+        // The product's own cost_price/selling_price become "current" —
+        // i.e. what shows as the default for the NEXT restock and in
+        // product listings — reflecting this latest batch. Historical
+        // units keep their own real cost/price regardless of this update.
+        db.prepare(`UPDATE products SET cost_price = ?, selling_price = ? WHERE id = ?`).run(
+          item.unit_cost,
+          unitSellingPrice,
+          item.product_id
+        );
       }
 
       if (data.amount_paid > 0) {
@@ -147,7 +222,7 @@ purchasesRouter.post(
     res.status(201).json({
       ...(created as object),
       new_inventory_ids: createdInventoryIds,
-      note: "New inventory units created as 'available' with auto-generated SKUs. Edit each to assign size/color/barcode.",
+      note: "New inventory units created as 'available' with server-generated sequential barcodes and this batch's cost/selling price.",
     });
   })
 );

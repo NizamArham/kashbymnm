@@ -2,8 +2,12 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "../db/connection";
 import { ApiError, asyncHandler } from "../lib/errors";
+import { requireAuth, requireRole } from "../lib/auth";
 
 export const supplierPaymentsRouter = Router();
+
+// Financial data — admin only.
+supplierPaymentsRouter.use(requireAuth, requireRole("admin"));
 
 const paymentInput = z.object({
   supplier_id: z.number().int().positive(),

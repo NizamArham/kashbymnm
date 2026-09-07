@@ -3,8 +3,12 @@ import { z } from "zod";
 import { db } from "../db/connection";
 import { nextSku } from "../lib/codes";
 import { ApiError, asyncHandler } from "../lib/errors";
+import { requireAuth, requireRole } from "../lib/auth";
 
 export const inventoryRouter = Router();
+
+// Everyone using this API must be logged in.
+inventoryRouter.use(requireAuth);
 
 const inventoryInput = z.object({
   product_id: z.number().int().positive(),
@@ -33,7 +37,8 @@ inventoryRouter.get(
 
     const rows = db
       .prepare(
-        `SELECT inventory.*, products.product_title, products.brand, products.selling_price
+        `SELECT inventory.*, products.product_title, products.brand, products.category,
+                products.selling_price AS product_selling_price
          FROM inventory
          JOIN products ON products.id = inventory.product_id
          ${where}
@@ -51,7 +56,8 @@ inventoryRouter.get(
   asyncHandler(async (req, res) => {
     const row = db
       .prepare(
-        `SELECT inventory.*, products.product_title, products.brand, products.selling_price
+        `SELECT inventory.*, products.product_title, products.brand, products.category,
+                products.selling_price AS product_selling_price
          FROM inventory
          JOIN products ON products.id = inventory.product_id
          WHERE inventory.id = ?`
@@ -68,7 +74,8 @@ inventoryRouter.get(
   asyncHandler(async (req, res) => {
     const row = db
       .prepare(
-        `SELECT inventory.*, products.product_title, products.brand, products.selling_price
+        `SELECT inventory.*, products.product_title, products.brand, products.category,
+                products.selling_price AS product_selling_price
          FROM inventory
          JOIN products ON products.id = inventory.product_id
          WHERE inventory.barcode = ?`
@@ -78,6 +85,10 @@ inventoryRouter.get(
     res.json(row);
   })
 );
+
+// Everything below (add/edit/delete units) is admin-only — staff can view
+// and sell via POS, but not manage inventory records directly.
+inventoryRouter.use(requireRole("admin"));
 
 // POST /api/inventory — add a single physical unit (also used internally when receiving a purchase)
 inventoryRouter.post(
@@ -117,6 +128,52 @@ inventoryRouter.put(
       merged.barcode,
       req.params.id
     );
+
+    const updated = db.prepare(`SELECT * FROM inventory WHERE id = ?`).get(req.params.id);
+    res.json(updated);
+  })
+);
+
+const removalReasons = ["Damaged", "Gifted", "Staff Use", "Stolen", "Lost", "Other"] as const;
+
+const removalInput = z.object({
+  reason: z.enum(removalReasons),
+  note: z.string().optional(),
+});
+
+// PUT /api/inventory/:id/remove — take one specific unit out of sellable
+// stock for a non-sale reason (damage, gift, staff use, theft, loss, etc).
+// The unit's status becomes a reason-specific value so it's never confused
+// with a real sale, and the reason + note are kept permanently for that
+// unit's record.
+inventoryRouter.put(
+  "/:id/remove",
+  asyncHandler(async (req, res) => {
+    const data = removalInput.parse(req.body);
+    const existing = db.prepare(`SELECT * FROM inventory WHERE id = ?`).get(req.params.id) as any;
+    if (!existing) throw new ApiError(404, "Inventory unit not found");
+
+    if (existing.status !== "available") {
+      throw new ApiError(409, `This unit is already ${existing.status} — only available units can be removed.`);
+    }
+
+    // Map the reason to a storable status. Damage keeps the existing
+    // 'damaged' status (already used elsewhere, e.g. returns); the rest
+    // map onto their own explicit statuses, with 'Staff Use'/'Other'
+    // sharing the general 'removed' status since neither is a distinct
+    // stock-tracking category on its own.
+    const statusByReason: Record<(typeof removalReasons)[number], string> = {
+      Damaged: "damaged",
+      Gifted: "gifted",
+      Stolen: "stolen",
+      Lost: "lost",
+      "Staff Use": "removed",
+      Other: "removed",
+    };
+
+    db.prepare(
+      `UPDATE inventory SET status = ?, removal_reason = ?, removal_note = ? WHERE id = ?`
+    ).run(statusByReason[data.reason], data.reason, data.note ?? null, req.params.id);
 
     const updated = db.prepare(`SELECT * FROM inventory WHERE id = ?`).get(req.params.id);
     res.json(updated);

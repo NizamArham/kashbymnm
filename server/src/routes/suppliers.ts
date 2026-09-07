@@ -3,8 +3,12 @@ import { z } from "zod";
 import { db } from "../db/connection";
 import { nextSupplierCode } from "../lib/codes";
 import { ApiError, asyncHandler } from "../lib/errors";
+import { requireAuth, requireRole } from "../lib/auth";
 
 export const suppliersRouter = Router();
+
+// Suppliers are financial/business data — admin only, per the access model.
+suppliersRouter.use(requireAuth, requireRole("admin"));
 
 const supplierInput = z.object({
   name: z.string().min(1),

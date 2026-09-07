@@ -2,8 +2,12 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "../db/connection";
 import { ApiError, asyncHandler } from "../lib/errors";
+import { requireAuth, requireRole } from "../lib/auth";
 
 export const cashBookRouter = Router();
+
+// The master financial ledger — admin only.
+cashBookRouter.use(requireAuth, requireRole("admin"));
 
 const entryInput = z.object({
   type: z.enum(["income", "expense"]),

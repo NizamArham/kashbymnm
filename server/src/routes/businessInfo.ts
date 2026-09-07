@@ -1,8 +1,12 @@
 import { Router } from "express";
 import { z } from "zod";
 import { db } from "../db/connection";
+import { requireAuth, requireRole } from "../lib/auth";
 
 export const businessInfoRouter = Router();
+
+// Business settings — admin only.
+businessInfoRouter.use(requireAuth, requireRole("admin"));
 
 const infoInput = z.object({
   business_name: z.string().optional(),

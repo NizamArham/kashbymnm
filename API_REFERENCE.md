@@ -5,6 +5,53 @@ Base URL when running locally: `http://localhost:4000/api`
 All request/response bodies are JSON. All endpoints validate input and
 return clear error messages (400/404/409) rather than crashing.
 
+**Every endpoint below except `/auth/login` requires a valid login.**
+Send the token from login as a header on every request:
+`Authorization: Bearer <token>`
+
+---
+
+## Auth & roles
+
+Two roles: `admin` (full access) and `staff` (POS + Inventory view + Customers only).
+
+- `POST /auth/login` — the only public endpoint. Body: `{ "username": "...", "password": "..." }`. Returns `{ token, user }`.
+- `GET /auth/me` — confirms who the current token belongs to.
+- `POST /auth/users` — **admin only**. Create a new login (e.g. a staff account). Body: `{ "username": "...", "password": "...", "role": "staff", "name": "..." }`
+- `GET /auth/users` — **admin only**. List all logins.
+- `DELETE /auth/users/:id` — **admin only**. Remove a login.
+
+**First-time setup:** run `npm run db:seed` once — it creates a bootstrap
+admin account (`admin` / `changeme123`). Log in with that, then either
+change its password or create your own real admin account via
+`POST /auth/users` and delete the bootstrap one.
+
+**Backfilling barcodes:** if inventory units exist without a barcode (e.g.
+imported from a spreadsheet that never had one), run
+`npm run db:backfill-barcodes` — it assigns a sequential barcode to every
+unit currently missing one, and is safe to run repeatedly (only touches
+rows where `barcode IS NULL`).
+
+**Access by module:**
+
+| Module | Staff | Admin |
+|---|---|---|
+| Sales / POS | ✅ | ✅ |
+| Customers (+ addresses) | ✅ | ✅ |
+| Inventory | View + barcode lookup only | Full (add/edit/delete units) |
+| Products | View only, `cost_price` hidden | Full, including `cost_price` |
+| Suppliers | ❌ | ✅ |
+| Purchases | ❌ | ✅ |
+| Supplier Payments | ❌ | ✅ |
+| Deliveries | ❌ | ✅ |
+| Courier Payments | ❌ | ✅ |
+| Cash Book | ❌ | ✅ |
+| Business Info | ❌ | ✅ |
+
+A staff token hitting an admin-only route gets a `403 Forbidden` — this
+is enforced on the backend itself, not just hidden in the UI, so it holds
+even if someone bypasses the frontend and calls the API directly.
+
 ---
 
 ## Business Info
@@ -61,7 +108,7 @@ return clear error messages (400/404/409) rather than crashing.
   ```
   This one call: creates the sale, creates its line items, **flips each
   sold inventory unit's status to `sold`**, calculates loyalty points
-  (1 point per Rs. 1000 of total), and logs the payment to the cash book.
+  (1% of the sale's total), and logs the payment to the cash book.
   All of it happens in a single transaction — if anything fails (e.g. an
   item is already sold), nothing is saved.
 - `PUT /sales/:id/payment` — record an additional payment on a
@@ -108,7 +155,7 @@ return clear error messages (400/404/409) rather than crashing.
 
 ## Design notes worth knowing
 
-- **Loyalty points**: 1 point per Rs. 1000 of a sale's total, calculated
+- **Loyalty points**: 1% of a sale's total, calculated
   and stored at the moment of sale (so it doesn't change if you edit
   prices later).
 - **Codes** (`customer_code`, `supplier_code`, `invoice`, `purchase_code`,

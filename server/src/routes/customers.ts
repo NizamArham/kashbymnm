@@ -3,12 +3,19 @@ import { z } from "zod";
 import { db } from "../db/connection";
 import { nextCustomerCode } from "../lib/codes";
 import { ApiError, asyncHandler } from "../lib/errors";
+import { requireAuth } from "../lib/auth";
 
 export const customersRouter = Router();
+
+// Both admin and staff can view/create/manage customers — no role
+// restriction needed here beyond being logged in at all.
+customersRouter.use(requireAuth);
 
 const customerInput = z.object({
   name: z.string().min(1),
   phone: z.string().optional(),
+  phone2: z.string().optional(),
+  bonus_points: z.number().int().nonnegative().optional(),
 });
 
 const addressInput = z.object({
@@ -18,11 +25,19 @@ const addressInput = z.object({
   is_default: z.boolean().optional(),
 });
 
-// loyalty_points = sum of loyalty_points_earned across their sales
+// loyalty_points = bonus_points (manually granted, kept for backward
+// compatibility with the legacy-customer import) + sum of every real
+// loyalty_transactions entry (earned, granted, redeemed, or reversed).
 // balance_due = sum of (total - amount_paid) across their sales
+// last_order_date = most recent sale date, so repeat customers are easy
+// to spot at a glance without opening their full sale history
+// A voided sale contributes to none of these — it's kept for audit but
+// otherwise treated as if it never happened.
 const CALC_SUBQUERY = `
-  COALESCE((SELECT SUM(loyalty_points_earned) FROM sales WHERE customer_id = customers.id), 0) AS loyalty_points,
-  COALESCE((SELECT SUM(total - amount_paid) FROM sales WHERE customer_id = customers.id), 0) AS balance_due
+  customers.bonus_points +
+  COALESCE((SELECT SUM(points) FROM loyalty_transactions WHERE customer_id = customers.id), 0) AS loyalty_points,
+  COALESCE((SELECT SUM(total - amount_paid) FROM sales WHERE customer_id = customers.id AND is_voided = 0), 0) AS balance_due,
+  (SELECT MAX(date) FROM sales WHERE customer_id = customers.id AND is_voided = 0) AS last_order_date
 `;
 
 // GET /api/customers
@@ -33,6 +48,23 @@ customersRouter.get(
       .prepare(`SELECT customers.*, ${CALC_SUBQUERY} FROM customers ORDER BY id DESC`)
       .all();
     res.json(rows);
+  })
+);
+
+// GET /api/customers/check-phone?phone=... — used by Add Customer to warn
+// if this phone number (checked against BOTH phone and phone2) already
+// belongs to an existing customer, avoiding accidental duplicate entries.
+customersRouter.get(
+  "/check-phone",
+  asyncHandler(async (req, res) => {
+    const phone = String(req.query.phone ?? "").trim();
+    if (!phone) return res.json({ exists: false });
+
+    const existing = db
+      .prepare(`SELECT id, name, customer_code FROM customers WHERE phone = ? OR phone2 = ?`)
+      .get(phone, phone);
+
+    res.json({ exists: !!existing, customer: existing ?? null });
   })
 );
 
@@ -61,8 +93,8 @@ customersRouter.post(
     const customer_code = nextCustomerCode();
 
     const result = db
-      .prepare(`INSERT INTO customers (customer_code, name, phone) VALUES (?, ?, ?)`)
-      .run(customer_code, data.name, data.phone ?? null);
+      .prepare(`INSERT INTO customers (customer_code, name, phone, phone2, bonus_points) VALUES (?, ?, ?, ?, ?)`)
+      .run(customer_code, data.name, data.phone ?? null, data.phone2 ?? null, data.bonus_points ?? 0);
 
     const created = db.prepare(`SELECT * FROM customers WHERE id = ?`).get(result.lastInsertRowid);
     res.status(201).json(created);
@@ -78,9 +110,10 @@ customersRouter.put(
     if (!existing) throw new ApiError(404, "Customer not found");
 
     const merged = { ...existing, ...data };
-    db.prepare(`UPDATE customers SET name = ?, phone = ? WHERE id = ?`).run(
+    db.prepare(`UPDATE customers SET name = ?, phone = ?, phone2 = ? WHERE id = ?`).run(
       merged.name,
       merged.phone,
+      merged.phone2,
       req.params.id
     );
 
@@ -191,5 +224,22 @@ customersRouter.delete(
 
     db.prepare(`DELETE FROM customer_addresses WHERE id = ?`).run(req.params.addressId);
     res.status(204).send();
+  })
+);
+
+// GET /api/customers/:id/loyalty-history — the real transaction ledger
+// behind a customer's point balance: every sale that earned points,
+// every manual grant, every reversal — not just the computed total.
+customersRouter.get(
+  "/:id/loyalty-history",
+  asyncHandler(async (req, res) => {
+    const customer = db.prepare(`SELECT id FROM customers WHERE id = ?`).get(req.params.id);
+    if (!customer) throw new ApiError(404, "Customer not found");
+
+    const rows = db
+      .prepare(`SELECT * FROM loyalty_transactions WHERE customer_id = ? ORDER BY id DESC`)
+      .all(req.params.id);
+
+    res.json(rows);
   })
 );

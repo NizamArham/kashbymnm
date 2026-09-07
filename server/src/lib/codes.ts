@@ -48,7 +48,27 @@ export function nextSupplierCode(): string {
 }
 
 export function nextInvoiceCode(): string {
-  return nextSequentialCode("sales", "invoice", "INV");
+  // Format: INV-YYMM followed by an ever-increasing sequence number that
+  // never resets (e.g. INV-26090047 in September 2026). The YYMM prefix
+  // makes the invoice's rough date obvious at a glance; the sequence
+  // keeps counting across months so two invoices are never mixed up.
+  const now = new Date();
+  const yymm = `${String(now.getFullYear()).slice(-2)}${String(now.getMonth() + 1).padStart(2, "0")}`;
+
+  const row = db
+    .prepare(`SELECT invoice FROM sales WHERE invoice LIKE 'INV-%' ORDER BY id DESC LIMIT 1`)
+    .get() as { invoice: string } | undefined;
+
+  let nextNum = 1;
+  if (row?.invoice) {
+    // Existing invoices look like INV-2609XXXX — the sequence is
+    // everything after the YYMM digits that follow "INV-".
+    const digits = row.invoice.replace("INV-", "");
+    const existingSeq = parseInt(digits.slice(4), 10);
+    if (!isNaN(existingSeq)) nextNum = existingSeq + 1;
+  }
+
+  return `INV-${yymm}${String(nextNum).padStart(4, "0")}`;
 }
 
 export function nextPurchaseCode(): string {

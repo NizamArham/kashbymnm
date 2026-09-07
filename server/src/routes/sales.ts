@@ -3,11 +3,17 @@ import { z } from "zod";
 import { db } from "../db/connection";
 import { nextInvoiceCode } from "../lib/codes";
 import { ApiError, asyncHandler } from "../lib/errors";
+import { requireAuth, requireRole } from "../lib/auth";
 
 export const salesRouter = Router();
 
-// 1 loyalty point per Rs. 1000 spent (based on total, floored to whole points)
-const LOYALTY_RATE = 1000;
+// POS is used by both admin and staff — just needs login, no role restriction.
+salesRouter.use(requireAuth);
+
+// Loyalty points = 1% of the sale's total, rounded down to a whole point
+// (e.g. Rs. 2500 spent -> 25 points). Matches the business's real,
+// established rule.
+const LOYALTY_RATE_PERCENT = 0.01;
 
 const saleItemInput = z.object({
   inventory_id: z.number().int().positive(),
@@ -21,7 +27,30 @@ const saleInput = z.object({
   discount: z.number().nonnegative().default(0),
   amount_paid: z.number().nonnegative().default(0),
   payment_method: z.string().optional(),
+  sale_type: z.enum(["in_store", "online"]).default("in_store"),
+  // Delivery details — only meaningful for sale_type "online", ignored
+  // otherwise. Weight and partner determine the delivery fee (Rs. 450
+  // first kg + Rs. 100/extra kg), which is skipped entirely if
+  // is_free_delivery is set — though the underlying order total still
+  // needs settling either now or as COD.
+  delivery_partner: z.enum(["CPAK", "D2D", "DEX"]).optional(),
+  package_weight_kg: z.number().nonnegative().optional(),
+  is_free_delivery: z.boolean().default(false),
+  // When true, the product total is tracked as customer credit (balance
+  // due) rather than collected at all today — only the delivery fee is
+  // ever COD in this case, regardless of amount_paid.
+  is_credit_order: z.boolean().default(false),
 });
+
+// Rs. 450 for the first kg, Rs. 100 for each additional kg (rounded up —
+// couriers bill by whole kg increments). Kept server-side as the single
+// source of truth so the fee actually charged can never drift from what
+// the frontend displayed.
+function calculateDeliveryFee(weightKg: number | undefined, isFree: boolean): number {
+  if (isFree || !weightKg || weightKg <= 0) return 0;
+  const extraKg = Math.max(0, Math.ceil(weightKg - 1));
+  return 450 + extraKg * 100;
+}
 
 // GET /api/sales — list all, with customer name
 salesRouter.get(
@@ -45,17 +74,19 @@ salesRouter.get(
   asyncHandler(async (req, res) => {
     const sale = db
       .prepare(
-        `SELECT sales.*, customers.name as customer_name, customers.customer_code
+        `SELECT sales.*, customers.name as customer_name, customers.customer_code,
+                customers.phone as customer_phone
          FROM sales
          LEFT JOIN customers ON customers.id = sales.customer_id
          WHERE sales.id = ?`
       )
-      .get(req.params.id);
+      .get(req.params.id) as any;
     if (!sale) throw new ApiError(404, "Sale not found");
 
     const items = db
       .prepare(
         `SELECT sale_items.*, inventory.sku, inventory.size, inventory.color, inventory.barcode,
+                inventory.selling_price AS original_selling_price,
                 products.product_title, products.brand
          FROM sale_items
          JOIN inventory ON inventory.id = sale_items.inventory_id
@@ -64,7 +95,21 @@ salesRouter.get(
       )
       .all(req.params.id);
 
-    res.json({ ...sale, items });
+    // Online/COD orders ship somewhere — pull that delivery address in
+    // too, so a receipt for one of these can show where it was sent.
+    let delivery_address: { address_line1: string | null; address_line2: string | null; city: string | null } | null = null;
+    if (sale.sale_type === "online") {
+      delivery_address = db
+        .prepare(
+          `SELECT customer_addresses.address_line1, customer_addresses.address_line2, customer_addresses.city
+           FROM deliveries
+           LEFT JOIN customer_addresses ON customer_addresses.id = deliveries.address_id
+           WHERE deliveries.sale_id = ?`
+        )
+        .get(req.params.id) as typeof delivery_address;
+    }
+
+    res.json({ ...sale, items, delivery_address });
   })
 );
 
@@ -101,7 +146,7 @@ salesRouter.post(
 
     const subtotal = data.items.reduce((sum, item) => sum + item.unit_price, 0);
     const total = Math.max(0, subtotal - data.discount);
-    const loyalty_points_earned = Math.floor(total / LOYALTY_RATE);
+    const loyalty_points_earned = Math.floor(total * LOYALTY_RATE_PERCENT);
 
     let payment_status: "paid" | "partial" | "unpaid" = "unpaid";
     if (data.amount_paid >= total && total > 0) payment_status = "paid";
@@ -114,8 +159,8 @@ salesRouter.post(
     const runSaleTransaction = db.transaction(() => {
       const saleResult = db
         .prepare(
-          `INSERT INTO sales (invoice, customer_id, salesperson, subtotal, discount, total, amount_paid, payment_status, payment_method, loyalty_points_earned)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO sales (invoice, customer_id, salesperson, subtotal, discount, total, amount_paid, payment_status, payment_method, sale_type, loyalty_points_earned)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           invoice,
@@ -127,10 +172,21 @@ salesRouter.post(
           data.amount_paid,
           payment_status,
           data.payment_method ?? null,
+          data.sale_type,
           loyalty_points_earned
         );
 
       const saleId = saleResult.lastInsertRowid;
+
+      // Record this as a real transaction, not just a number on the sale
+      // — this is what lets a customer's loyalty history actually be
+      // reviewed later (when points were earned, from which sale).
+      if (data.customer_id && loyalty_points_earned > 0) {
+        db.prepare(
+          `INSERT INTO loyalty_transactions (customer_id, points, reason, reference_id, notes)
+           VALUES (?, ?, 'sale', ?, ?)`
+        ).run(data.customer_id, loyalty_points_earned, saleId, `Earned from invoice ${invoice}`);
+      }
 
       for (const item of data.items) {
         db.prepare(
@@ -148,6 +204,47 @@ salesRouter.post(
           `INSERT INTO cash_book (type, category, reference_id, amount, notes)
            VALUES ('income', 'sale', ?, ?, ?)`
         ).run(saleId, data.amount_paid, `Payment for invoice ${invoice}`);
+      }
+
+      // Online sales need to ship — auto-create a pending delivery using
+      // the customer's default saved address, if they have one and a
+      // customer was attached to the sale at all.
+      if (data.sale_type === "online") {
+        let defaultAddressId: number | null = null;
+        if (data.customer_id) {
+          const defaultAddress = db
+            .prepare(
+              `SELECT id FROM customer_addresses WHERE customer_id = ? AND is_default = 1 LIMIT 1`
+            )
+            .get(data.customer_id) as { id: number } | undefined;
+          defaultAddressId = defaultAddress?.id ?? null;
+        }
+
+        const delivery_fee = calculateDeliveryFee(data.package_weight_kg, data.is_free_delivery);
+        // COD to collect = whatever of the order wasn't already paid,
+        // plus the delivery fee (0 if free) — a fixed figure computed
+        // once at order time, not recalculated later against a sale
+        // that may since have had a return or an added payment.
+        // COD = (order total + delivery fee) minus whatever was already
+        // paid, floored at 0 — UNLESS the product is on credit, in which
+        // case COD is only ever the delivery fee, since the product
+        // total is tracked as balance due instead of being collected now.
+        const cod_amount = data.is_credit_order ? delivery_fee : Math.max(0, total + delivery_fee - data.amount_paid);
+
+        db.prepare(
+          `INSERT INTO deliveries
+             (sale_id, address_id, delivery_status, delivery_partner, package_weight_kg,
+              is_free_delivery, delivery_fee, cod_amount)
+           VALUES (?, ?, 'pending', ?, ?, ?, ?, ?)`
+        ).run(
+          saleId,
+          defaultAddressId,
+          data.delivery_partner ?? null,
+          data.package_weight_kg ?? null,
+          data.is_free_delivery ? 1 : 0,
+          delivery_fee,
+          cod_amount
+        );
       }
 
       return saleId;
@@ -197,6 +294,66 @@ salesRouter.put(
     });
 
     runPaymentTransaction();
+
+    const updated = db.prepare(`SELECT * FROM sales WHERE id = ?`).get(req.params.id);
+    res.json(updated);
+  })
+);
+
+// PUT /api/sales/:id/void — admin-only. Reverses a sale that was a
+// billing mistake: every sold unit goes back to 'available', the income
+// entry is reversed in the cash book, and any pending delivery is
+// cancelled. The sale record itself is kept (is_voided = 1) rather than
+// deleted, so it stays visible in Sale History for audit — including
+// the original prices, which is what lets a receipt still show
+// "was Rs. X, sold at Rs. Y" after the fact.
+salesRouter.put(
+  "/:id/void",
+  requireRole("admin"),
+  asyncHandler(async (req, res) => {
+    const reasonInput = z.object({ reason: z.string().optional() }).parse(req.body);
+
+    const sale = db.prepare(`SELECT * FROM sales WHERE id = ?`).get(req.params.id) as any;
+    if (!sale) throw new ApiError(404, "Sale not found");
+    if (sale.is_voided) throw new ApiError(409, "This sale has already been voided.");
+
+    const items = db.prepare(`SELECT * FROM sale_items WHERE sale_id = ?`).all(req.params.id) as any[];
+
+    const runVoidTransaction = db.transaction(() => {
+      // Return each physical unit to sellable stock.
+      for (const item of items) {
+        db.prepare(`UPDATE inventory SET status = 'available' WHERE id = ?`).run(item.inventory_id);
+      }
+
+      // Reverse the income entry, so cash-on-hand and reports reflect
+      // that this money was never actually kept.
+      if (sale.amount_paid > 0) {
+        db.prepare(
+          `INSERT INTO cash_book (type, category, reference_id, amount, notes)
+           VALUES ('expense', 'sale_void', ?, ?, ?)`
+        ).run(sale.id, sale.amount_paid, `Reversal of voided invoice ${sale.invoice}`);
+      }
+
+      // Cancel any delivery tied to this sale rather than leaving it
+      // stranded in the pipeline for an order that no longer exists.
+      db.prepare(`UPDATE deliveries SET delivery_status = 'cancelled', notes = 'Sale voided' WHERE sale_id = ?`).run(sale.id);
+
+      // Reverse any loyalty points this sale earned with an explicit
+      // negative entry, so the ledger itself tells the full story rather
+      // than relying only on customer queries filtering out voided sales.
+      if (sale.customer_id && sale.loyalty_points_earned > 0) {
+        db.prepare(
+          `INSERT INTO loyalty_transactions (customer_id, points, reason, reference_id, notes)
+           VALUES (?, ?, 'manual_adjustment', ?, ?)`
+        ).run(sale.customer_id, -sale.loyalty_points_earned, sale.id, `Reversal — invoice ${sale.invoice} voided`);
+      }
+
+      db.prepare(
+        `UPDATE sales SET is_voided = 1, voided_at = datetime('now'), void_reason = ? WHERE id = ?`
+      ).run(reasonInput.reason ?? null, req.params.id);
+    });
+
+    runVoidTransaction();
 
     const updated = db.prepare(`SELECT * FROM sales WHERE id = ?`).get(req.params.id);
     res.json(updated);
