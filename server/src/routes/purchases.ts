@@ -148,10 +148,13 @@ purchasesRouter.post(
         const size = normalizeSize(item.size);
         const color = normalizeColor(item.color);
 
-        db.prepare(
-          `INSERT INTO purchase_items (purchase_id, product_id, quantity, unit_cost, size, color)
-           VALUES (?, ?, ?, ?, ?, ?)`
-        ).run(purchaseId, item.product_id, item.quantity, item.unit_cost, size, color);
+        const purchaseItemResult = db
+          .prepare(
+            `INSERT INTO purchase_items (purchase_id, product_id, quantity, unit_cost, size, color)
+             VALUES (?, ?, ?, ?, ?, ?)`
+          )
+          .run(purchaseId, item.product_id, item.quantity, item.unit_cost, size, color);
+        const purchaseItemId = purchaseItemResult.lastInsertRowid;
 
         // Look up the product's current selling_price as the fallback for
         // this batch's unit_selling_price, and continue barcodes from
@@ -166,14 +169,17 @@ purchasesRouter.post(
         // carrying its OWN cost and selling price for this batch — so an
         // older-cost batch and a newer-cost batch of the same product can
         // sit in stock and sell at their own real prices simultaneously.
+        // Each unit also links back to purchase_items, so it can always
+        // be traced to the exact batch (and therefore supplier) it came
+        // from — not just its cost.
         for (let i = 0; i < item.quantity; i++) {
           const sku = nextSku(item.product_id);
           const invResult = db
             .prepare(
-              `INSERT INTO inventory (product_id, size, color, sku, barcode, cost_price, selling_price, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 'available')`
+              `INSERT INTO inventory (product_id, size, color, sku, barcode, cost_price, selling_price, purchase_item_id, status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'available')`
             )
-            .run(item.product_id, size, color, sku, barcodes[i], item.unit_cost, unitSellingPrice);
+            .run(item.product_id, size, color, sku, barcodes[i], item.unit_cost, unitSellingPrice, purchaseItemId);
           createdInventoryIds.push(Number(invResult.lastInsertRowid));
         }
 

@@ -1,10 +1,21 @@
-import { useEffect, useState, Fragment, useMemo, MouseEvent } from "react";
-import { Receipt, Printer, Ban } from "lucide-react";
+import { useEffect, useState, Fragment, useMemo, MouseEvent, useRef } from "react";
+import { Receipt, Printer, MoreVertical } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Sale } from "../lib/types";
 import { PageHeader, Card, Table, Th, Td, Badge, paymentStatusTone, EmptyState, ErrorText, DateRangePicker } from "../components/ui";
 import ReceiptOptionsModal from "../components/ReceiptOptionsModal";
 import { useAuth } from "../context/AuthContext";
+
+type HistoryTab = "today" | "week" | "month" | "cash" | "credit_cod" | "voided";
+
+const TABS: { value: HistoryTab; label: string }[] = [
+  { value: "today", label: "Today" },
+  { value: "week", label: "This Week" },
+  { value: "month", label: "This Month" },
+  { value: "cash", label: "Cash Sales" },
+  { value: "credit_cod", label: "Credit / COD" },
+  { value: "voided", label: "Voided" },
+];
 
 function toISODate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -20,15 +31,13 @@ export default function SaleHistoryPage() {
   const [error, setError] = useState<string | null>(null);
   const [receiptSale, setReceiptSale] = useState<Sale | null>(null);
   const [voidingId, setVoidingId] = useState<number | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<number | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
-  // Defaults to the past month, per the usual "recent activity" view —
-  // the date picker lets the person widen or narrow this at will.
-  const [startDate, setStartDate] = useState<string | null>(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 30);
-    return toISODate(d);
-  });
-  const [endDate, setEndDate] = useState<string | null>(() => toISODate(new Date()));
+  const [activeTab, setActiveTab] = useState<HistoryTab>("month");
+
+  const [startDate, setStartDate] = useState<string | null>(null);
+  const [endDate, setEndDate] = useState<string | null>(null);
 
   useEffect(() => {
     api
@@ -38,15 +47,50 @@ export default function SaleHistoryPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    function handleClickOutside(e: globalThis.MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setOpenMenuId(null);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   const filteredSales = useMemo(() => {
-    if (!startDate || !endDate) return sales;
-    // sale.date is a full datetime string; compare just the date portion
-    // so the end date is inclusive of the whole day.
-    return sales.filter((s) => {
-      const saleDate = s.date.slice(0, 10);
-      return saleDate >= startDate && saleDate <= endDate;
-    });
-  }, [sales, startDate, endDate]);
+    let result = sales;
+
+    if (startDate && endDate) {
+      result = result.filter((s) => {
+        const d = s.date.slice(0, 10);
+        return d >= startDate && d <= endDate;
+      });
+    } else {
+      const today = toISODate(new Date());
+      if (activeTab === "today") {
+        result = result.filter((s) => s.date.slice(0, 10) === today);
+      } else if (activeTab === "week") {
+        const weekAgo = new Date();
+        weekAgo.setDate(weekAgo.getDate() - 6);
+        const start = toISODate(weekAgo);
+        result = result.filter((s) => s.date.slice(0, 10) >= start);
+      } else if (activeTab === "month") {
+        const now = new Date();
+        const monthStart = toISODate(new Date(now.getFullYear(), now.getMonth(), 1));
+        result = result.filter((s) => s.date.slice(0, 10) >= monthStart);
+      }
+    }
+
+    if (activeTab === "cash") {
+      result = result.filter((s) => s.payment_method === "cash" && !s.is_voided);
+    } else if (activeTab === "credit_cod") {
+      result = result.filter((s) => (s.payment_method === "credit" || s.sale_type === "online") && !s.is_voided);
+    } else if (activeTab === "voided") {
+      result = result.filter((s) => s.is_voided);
+    } else {
+      result = result.filter((s) => !s.is_voided);
+    }
+
+    return result;
+  }, [sales, activeTab, startDate, endDate]);
 
   const periodTotal = filteredSales.reduce((sum, s) => sum + s.total, 0);
 
@@ -58,26 +102,21 @@ export default function SaleHistoryPage() {
     setExpanded(await api.get<Sale>(`/sales/${sale.id}`));
   }
 
-  async function openReceipt(sale: Sale, e: MouseEvent) {
-    e.stopPropagation();
-    // Receipts need the itemized breakdown, so fetch the full sale even
-    // if this row hasn't been expanded yet.
+  async function openReceipt(sale: Sale) {
+    setOpenMenuId(null);
     const full = expanded?.id === sale.id ? expanded : await api.get<Sale>(`/sales/${sale.id}`);
     setReceiptSale(full);
   }
 
-  async function handleVoid(sale: Sale, e: MouseEvent) {
-    e.stopPropagation();
+  async function handleVoid(sale: Sale) {
+    setOpenMenuId(null);
     setError(null);
 
     const saleDay = sale.date.slice(0, 10);
     const today = toISODate(new Date());
-    // Not hard-blocked past the same day — a genuine dispute or mistake
-    // found later shouldn't be impossible to fix — but flagged clearly,
-    // since same-day is when this is meant to catch billing mistakes.
     const sameDayWarning = saleDay !== today ? "\n\nNote: this sale was NOT made today — voiding an older sale should be rare." : "";
     const reason = prompt(`Void invoice ${sale.invoice}? Stock will be returned and any payment reversed in the cash book.${sameDayWarning}\n\nReason (optional):`);
-    if (reason === null) return; // cancelled
+    if (reason === null) return;
 
     setVoidingId(sale.id);
     try {
@@ -97,21 +136,52 @@ export default function SaleHistoryPage() {
       <PageHeader
         title="Sale history"
         subtitle="Click a row to see the items included."
-        action={<DateRangePicker startDate={startDate} endDate={endDate} onChange={(s, e) => { setStartDate(s); setEndDate(e); }} />}
+        action={
+          <DateRangePicker
+            startDate={startDate}
+            endDate={endDate}
+            onChange={(s, e) => {
+              setStartDate(s);
+              setEndDate(e);
+            }}
+          />
+        }
       />
+
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        {TABS.map((tab) => (
+          <button
+            key={tab.value}
+            onClick={() => {
+              setActiveTab(tab.value);
+              setStartDate(null);
+              setEndDate(null);
+            }}
+            className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition ${
+              activeTab === tab.value && !startDate
+                ? tab.value === "voided"
+                  ? "bg-red-600 text-white"
+                  : "bg-black text-white"
+                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
       {error && <ErrorText>{error}</ErrorText>}
 
       {!loading && (
         <p className="text-xs text-gray-400 mb-3">
-          {filteredSales.length} sale{filteredSales.length !== 1 ? "s" : ""} in this range · Rs. {periodTotal.toLocaleString()} total
+          {filteredSales.length} sale{filteredSales.length !== 1 ? "s" : ""} · Rs. {periodTotal.toLocaleString()} total
         </p>
       )}
 
       {loading ? (
         <p className="text-sm text-gray-400">Loading...</p>
       ) : filteredSales.length === 0 ? (
-        <EmptyState icon={Receipt} title="No sales in this date range" />
+        <EmptyState icon={Receipt} title="No sales match this view" />
       ) : (
         <Card className="p-0 overflow-hidden">
           <Table>
@@ -123,6 +193,7 @@ export default function SaleHistoryPage() {
                 <Th>Type</Th>
                 <Th>Total</Th>
                 <Th>Paid</Th>
+                <Th>Payment</Th>
                 <Th>Status</Th>
                 <Th></Th>
               </tr>
@@ -144,33 +215,66 @@ export default function SaleHistoryPage() {
                     <Td>Rs. {sale.total.toLocaleString()}</Td>
                     <Td>Rs. {sale.amount_paid.toLocaleString()}</Td>
                     <Td>
+                      <div className="capitalize">{sale.payment_method?.replace("_", " ") ?? "—"}</div>
+                      {sale.change_due > 0 && <div className="text-xs text-gray-400">Change: Rs. {sale.change_due.toLocaleString()}</div>}
+                      {sale.overpaid_amount > 0 && (
+                        <div className="text-xs text-amber-600">Overpaid: Rs. {sale.overpaid_amount.toLocaleString()}</div>
+                      )}
+                    </Td>
+                    <Td>
                       {sale.is_voided ? <Badge label="voided" tone="danger" /> : <Badge label={sale.payment_status} tone={paymentStatusTone(sale.payment_status)} />}
                     </Td>
                     <Td>
-                      <div className="flex items-center gap-3">
+                      <div className="relative" ref={openMenuId === sale.id ? menuRef : undefined}>
                         <button
-                          onClick={(e) => openReceipt(sale, e)}
-                          className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-900 transition"
-                          title="Get receipt"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenMenuId(openMenuId === sale.id ? null : sale.id);
+                          }}
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition"
+                          title="Actions"
                         >
-                          <Printer size={14} />
+                          <MoreVertical size={16} />
                         </button>
-                        {isAdmin && !sale.is_voided && (
-                          <button
-                            onClick={(e) => handleVoid(sale, e)}
-                            disabled={voidingId === sale.id}
-                            className="inline-flex items-center gap-1.5 text-xs text-red-400 hover:text-red-600 transition disabled:opacity-50"
-                            title="Void this sale"
+                        {openMenuId === sale.id && (
+                          <div
+                            onClick={(e: MouseEvent) => e.stopPropagation()}
+                            className="absolute right-0 z-20 mt-1 w-44 bg-white border border-gray-200 rounded-xl shadow-lg py-1"
                           >
-                            <Ban size={14} />
-                          </button>
+                            <button
+                              onClick={() => openReceipt(sale)}
+                              className="w-full flex items-center gap-2 px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition"
+                            >
+                              <Printer size={14} />
+                              Get receipt
+                            </button>
+                            <button
+                              onClick={() => {
+                                setOpenMenuId(null);
+                                toggleExpand(sale);
+                              }}
+                              className="w-full flex items-center gap-2 px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition"
+                            >
+                              <Receipt size={14} />
+                              View details
+                            </button>
+                            {isAdmin && !sale.is_voided && (
+                              <button
+                                onClick={() => handleVoid(sale)}
+                                disabled={voidingId === sale.id}
+                                className="w-full flex items-center gap-2 px-3.5 py-2 text-left text-sm text-red-600 hover:bg-red-50 transition disabled:opacity-50 border-t border-gray-100 mt-1 pt-2"
+                              >
+                                Void sale
+                              </button>
+                            )}
+                          </div>
                         )}
                       </div>
                     </Td>
                   </tr>
                   {expanded?.id === sale.id && (
                     <tr>
-                      <Td colSpan={8} className="bg-gray-50">
+                      <Td colSpan={9} className="bg-gray-50">
                         <div className="py-2">
                           <strong className="text-xs text-gray-700">Items</strong>
                           <table className="w-full text-sm mt-2">
@@ -184,25 +288,40 @@ export default function SaleHistoryPage() {
                             </thead>
                             <tbody>
                               {expanded.items?.map((item) => (
-                                <tr key={item.id}>
-                                  <Td>{item.sku}</Td>
-                                  <Td>{item.product_title}</Td>
-                                  <Td>
+                                <tr key={item.id} className={item.is_returned ? "opacity-60" : ""}>
+                                  <Td className={item.is_returned ? "line-through" : ""}>{item.sku}</Td>
+                                  <Td className={item.is_returned ? "line-through" : ""}>
+                                    {item.product_title}
+                                    {item.is_returned ? (
+                                      <span className="ml-2 not-italic no-underline">
+                                        <Badge label="RTN" tone="danger" />
+                                      </span>
+                                    ) : null}
+                                  </Td>
+                                  <Td className={item.is_returned ? "line-through" : ""}>
                                     {item.size ?? "—"} / {item.color ?? "—"}
                                   </Td>
-                                  <Td>Rs. {item.unit_price.toLocaleString()}</Td>
+                                  <Td className={item.is_returned ? "line-through" : ""}>Rs. {item.unit_price.toLocaleString()}</Td>
                                 </tr>
                               ))}
                             </tbody>
                           </table>
-                          <p className="text-xs text-gray-400 mt-2">
-                            Loyalty points earned: {expanded.is_voided ? 0 : expanded.loyalty_points_earned}
-                            {expanded.is_voided && <span className="text-gray-300"> (was {expanded.loyalty_points_earned}, reversed)</span>}
-                          </p>
+                          {expanded.discount > 0 && (
+                            <p className="text-xs text-gray-400 mt-2">
+                              Discounts & Coupons: Rs. {expanded.discount.toLocaleString()}
+                              {expanded.manual_discount > 0 && ` (manual: Rs. ${expanded.manual_discount.toLocaleString()})`}
+                              {expanded.coupon_discount > 0 &&
+                                ` (coupon ${expanded.coupon_code}: Rs. ${expanded.coupon_discount.toLocaleString()})`}
+                            </p>
+                          )}
+                          {!expanded.is_voided && (
+                            <p className="text-xs text-gray-400 mt-1">Loyalty points earned: {expanded.loyalty_points_earned}</p>
+                          )}
                           {expanded.is_voided && (
-                            <p className="text-xs text-red-500 mt-1">
+                            <p className="text-xs text-red-500 mt-2">
                               Voided {expanded.voided_at?.slice(0, 16).replace("T", " ")}
                               {expanded.void_reason ? ` — ${expanded.void_reason}` : ""}
+                              {expanded.loyalty_points_earned > 0 && ` · ${expanded.loyalty_points_earned} loyalty points reversed`}
                             </p>
                           )}
                         </div>

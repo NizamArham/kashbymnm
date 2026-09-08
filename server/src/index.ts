@@ -16,6 +16,7 @@ import { cashBookRouter } from "./routes/cashBook";
 import { authRouter } from "./routes/auth";
 import { returnsRouter } from "./routes/returns";
 import { attendanceRouter } from "./routes/attendance";
+import { couponsRouter } from "./routes/coupons";
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -42,6 +43,7 @@ app.use("/api/deliveries", deliveriesRouter);
 app.use("/api/courier-payments", courierPaymentsRouter);
 app.use("/api/cash-book", cashBookRouter);
 app.use("/api/attendance", attendanceRouter);
+app.use("/api/coupons", couponsRouter);
 
 // Must be registered last — Express error-handling middleware.
 app.use(errorHandler);

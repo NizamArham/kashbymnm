@@ -1,6 +1,7 @@
 import { ReactNode, useState, useRef, useEffect } from "react";
 import { ChevronDown, Check, Plus, CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
+import { cities } from "../lib/cities";
 
 export function PageHeader({ title, subtitle, action }: { title: string; subtitle?: string; action?: ReactNode }) {
   return (
@@ -376,7 +377,13 @@ export function NewSupplierModal({
         </FormGroup>
         <FormGroup>
           <Label>City</Label>
-          <Input value={city} onChange={(e) => setCity(e.target.value)} />
+          <Dropdown
+            value={city}
+            onChange={setCity}
+            options={cities.map((entry) => ({ value: entry.name, label: entry.name, sublabel: entry.code }))}
+            placeholder="— Search for a city —"
+            searchable
+          />
         </FormGroup>
         {error && <ErrorText>{error}</ErrorText>}
         <div className="flex gap-2 mt-2">

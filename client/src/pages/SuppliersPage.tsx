@@ -1,19 +1,27 @@
 import { useEffect, useState, FormEvent, Fragment } from "react";
-import { Truck, ChevronDown, ChevronRight, Pencil } from "lucide-react";
+import { Truck, ChevronDown, ChevronRight, Pencil, Plus, X } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Supplier } from "../lib/types";
 import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Table, Th, Td, EmptyState } from "../components/ui";
 import { CityPicker } from "../components/CityPicker";
+
+function displayPhone(phone: string | null): string {
+  if (!phone) return "—";
+  const digits = phone.replace(/\D/g, "");
+  return digits.length === 9 ? `0${digits}` : phone;
+}
 
 export default function SuppliersPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [showAddModal, setShowAddModal] = useState(false);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [city, setCity] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const [formSuccess, setFormSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -40,6 +48,7 @@ export default function SuppliersPage() {
   async function handleAdd(e: FormEvent) {
     e.preventDefault();
     setFormError(null);
+    setFormSuccess(null);
     if (!name.trim()) {
       setFormError("Supplier name is required");
       return;
@@ -47,10 +56,12 @@ export default function SuppliersPage() {
     setSubmitting(true);
     try {
       await api.post("/suppliers", { name: name.trim(), phone: phone.trim() || undefined, city: city.trim() || undefined });
+      setFormSuccess("Supplier added successfully!");
       setName("");
       setPhone("");
       setCity("");
       load();
+      setTimeout(() => setShowAddModal(false), 900);
     } catch (err) {
       setFormError(err instanceof ApiRequestError ? err.message : "Failed to add supplier");
     } finally {
@@ -111,31 +122,60 @@ export default function SuppliersPage() {
 
   return (
     <div>
-      <PageHeader title="Suppliers" subtitle="Click a supplier to view and edit their details. Balance owed is calculated live from purchases minus payments." />
+      <PageHeader
+        title="Suppliers"
+        subtitle="Click a supplier to view and edit their details. Balance owed is calculated live from purchases minus payments."
+        action={
+          <button
+            onClick={() => {
+              setShowAddModal(true);
+              setFormError(null);
+              setFormSuccess(null);
+            }}
+            className="flex items-center gap-2 px-4 py-2.5 bg-black text-white rounded-xl text-sm font-medium hover:bg-gray-800 transition"
+          >
+            <Plus size={16} />
+            Add supplier
+          </button>
+        }
+      />
 
-      <Card className="max-w-lg mb-5">
-        <h2 className="text-base font-semibold text-gray-900 mb-3">Add supplier</h2>
-        <form onSubmit={handleAdd}>
-          <div className="grid grid-cols-2 gap-3">
-            <FormGroup>
-              <Label>Name</Label>
-              <Input value={name} onChange={(e) => setName(e.target.value)} />
-            </FormGroup>
-            <FormGroup>
-              <Label>Phone</Label>
-              <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
-            </FormGroup>
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl">
+            <div className="p-5 border-b border-gray-100 flex items-center justify-between">
+              <h2 className="text-base font-semibold text-gray-900">Add supplier</h2>
+              <button onClick={() => setShowAddModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={handleAdd} className="p-5">
+              <FormGroup>
+                <Label>Name</Label>
+                <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+              </FormGroup>
+              <FormGroup>
+                <Label>Contact</Label>
+                <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone number" />
+              </FormGroup>
+              <FormGroup>
+                <Label>Location</Label>
+                <CityPicker value={city} onChange={setCity} />
+              </FormGroup>
+              {formError && <ErrorText>{formError}</ErrorText>}
+              {formSuccess && <SuccessText>{formSuccess}</SuccessText>}
+              <div className="flex gap-3 mt-2">
+                <Button type="button" onClick={() => setShowAddModal(false)} className="flex-1">
+                  Cancel
+                </Button>
+                <Button type="submit" variant="primary" disabled={submitting} className="flex-1">
+                  {submitting ? "Adding..." : "Add supplier"}
+                </Button>
+              </div>
+            </form>
           </div>
-          <FormGroup>
-            <Label>City</Label>
-            <CityPicker value={city} onChange={setCity} />
-          </FormGroup>
-          {formError && <ErrorText>{formError}</ErrorText>}
-          <Button type="submit" variant="primary" disabled={submitting}>
-            {submitting ? "Adding..." : "Add supplier"}
-          </Button>
-        </form>
-      </Card>
+        </div>
+      )}
 
       {error && <ErrorText>{error}</ErrorText>}
 
@@ -167,7 +207,7 @@ export default function SuppliersPage() {
                       </Td>
                       <Td>{s.supplier_code}</Td>
                       <Td className="font-medium">{s.name}</Td>
-                      <Td>{s.phone ?? "—"}</Td>
+                      <Td>{displayPhone(s.phone)}</Td>
                       <Td>{s.city ?? "—"}</Td>
                       <Td>{s.balance_owed > 0 ? `Rs. ${s.balance_owed.toLocaleString()}` : "Settled"}</Td>
                     </tr>
@@ -231,7 +271,7 @@ export default function SuppliersPage() {
                                   </div>
                                   <div>
                                     <p className="text-xs text-gray-400">Phone</p>
-                                    <p className="text-gray-900">{s.phone ?? "—"}</p>
+                                    <p className="text-gray-900">{displayPhone(s.phone)}</p>
                                   </div>
                                   <div>
                                     <p className="text-xs text-gray-400">City</p>

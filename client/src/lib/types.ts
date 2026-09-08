@@ -91,6 +91,7 @@ export interface Product {
   supplier_code?: string;
   image_path: string | null;
   is_public: number;
+  allow_returns: number;
   qty: number;
   created_at: string;
 }
@@ -114,6 +115,9 @@ export interface InventoryUnit {
   barcode: string | null;
   cost_price?: number | null;
   selling_price?: number | null;
+  purchase_item_id?: number | null;
+  batch_supplier_id?: number | null;
+  batch_supplier_name?: string | null;
   status: InventoryStatus;
   removal_reason?: RemovalReason | null;
   removal_note?: string | null;
@@ -141,6 +145,7 @@ export interface Customer {
   phone2: string | null;
   loyalty_points: number;
   balance_due: number;
+  store_credit_balance: number;
   last_order_date: string | null;
   created_at: string;
   addresses?: CustomerAddress[];
@@ -157,6 +162,7 @@ export interface SaleItem {
   unit_price: number;
   line_total: number;
   original_selling_price?: number;
+  is_returned?: number;
   sku?: string;
   size?: string | null;
   color?: string | null;
@@ -176,17 +182,33 @@ export interface Sale {
   date: string;
   subtotal: number;
   discount: number;
+  manual_discount: number;
+  coupon_discount: number;
+  coupon_code: string | null;
   total: number;
   amount_paid: number;
   payment_status: PaymentStatus;
   payment_method: string | null;
   sale_type: SaleType;
   loyalty_points_earned: number;
+  amount_received: number | null;
+  change_due: number;
+  overpaid_amount: number;
   is_voided: number;
   voided_at: string | null;
   void_reason: string | null;
   items?: SaleItem[];
   delivery_address?: { address_line1: string | null; address_line2: string | null; city: string | null } | null;
+}
+
+export interface Coupon {
+  id: number;
+  code: string;
+  discount_type: "percent" | "fixed";
+  discount_value: number;
+  is_active: number;
+  expires_at: string | null;
+  created_at: string;
 }
 
 export interface ReturnRecord {
@@ -203,6 +225,36 @@ export interface ReturnRecord {
   invoice?: string;
   sku?: string;
   product_title?: string;
+}
+
+export interface ReturnRequest {
+  id: number;
+  sale_item_id: number;
+  quantity: number;
+  condition: "clean" | "damaged";
+  resolution: "refund" | "exchange";
+  exchange_inventory_id: number | null;
+  reason: string;
+  status: "pending" | "approved" | "declined";
+  requested_by: number | null;
+  requested_by_name: string | null;
+  requested_at: string;
+  decided_by: number | null;
+  decided_by_name: string | null;
+  decided_at: string | null;
+  decision_reason: string | null;
+  is_admin_override: number;
+  return_id: number | null;
+  // Joined fields for display
+  sale_id: number;
+  unit_price: number;
+  item_quantity: number;
+  invoice: string;
+  customer_id: number | null;
+  customer_name: string | null;
+  sku: string;
+  product_title: string;
+  allow_returns: number;
 }
 
 export type DeliveryStatus = "pending" | "packed" | "dispatched" | "delivered" | "returned" | "cancelled";
@@ -254,6 +306,7 @@ export interface CashBookEntry {
   entry_date: string;
   type: "income" | "expense";
   category: string;
+  payment_method: string | null;
   reference_id: number | null;
   amount: number;
   running_balance: number;

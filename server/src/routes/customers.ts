@@ -37,6 +37,7 @@ const CALC_SUBQUERY = `
   customers.bonus_points +
   COALESCE((SELECT SUM(points) FROM loyalty_transactions WHERE customer_id = customers.id), 0) AS loyalty_points,
   COALESCE((SELECT SUM(total - amount_paid) FROM sales WHERE customer_id = customers.id AND is_voided = 0), 0) AS balance_due,
+  COALESCE((SELECT SUM(amount) FROM store_credit_transactions WHERE customer_id = customers.id), 0) AS store_credit_balance,
   (SELECT MAX(date) FROM sales WHERE customer_id = customers.id AND is_voided = 0) AS last_order_date
 `;
 

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { db } from "../db/connection";
-import { nextInvoiceCode } from "../lib/codes";
+import { nextInvoiceCode, InvoiceCategory } from "../lib/codes";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth, requireRole } from "../lib/auth";
 
@@ -24,9 +24,23 @@ const saleInput = z.object({
   customer_id: z.number().int().positive().optional(),
   salesperson: z.string().optional(),
   items: z.array(saleItemInput).min(1),
-  discount: z.number().nonnegative().default(0),
+  // Manual discount — staff-entered, either a percentage of the subtotal
+  // or a flat amount. Kept separate from any coupon applied, per the
+  // requirement that the two be tracked separately for audit even
+  // though they combine into one line on the receipt.
+  manual_discount_type: z.enum(["percent", "fixed"]).optional(),
+  manual_discount_value: z.number().nonnegative().optional(),
+  coupon_code: z.string().optional(),
   amount_paid: z.number().nonnegative().default(0),
   payment_method: z.string().optional(),
+  // Store credit the customer has from a past overpayment, applied
+  // against this sale's total. Validated server-side against their real
+  // balance — never trusted as a client-supplied final amount.
+  store_credit_applied: z.number().nonnegative().default(0),
+  // Cash-specific: how much cash was actually handed over, so change due
+  // can be computed and shown later in Sale History rather than just
+  // the net amount_paid after change was given.
+  amount_received: z.number().nonnegative().optional(),
   sale_type: z.enum(["in_store", "online"]).default("in_store"),
   // Delivery details — only meaningful for sale_type "online", ignored
   // otherwise. Weight and partner determine the delivery fee (Rs. 450
@@ -87,7 +101,8 @@ salesRouter.get(
       .prepare(
         `SELECT sale_items.*, inventory.sku, inventory.size, inventory.color, inventory.barcode,
                 inventory.selling_price AS original_selling_price,
-                products.product_title, products.brand
+                products.product_title, products.brand,
+                (SELECT COUNT(*) FROM returns WHERE returns.sale_item_id = sale_items.id) as is_returned
          FROM sale_items
          JOIN inventory ON inventory.id = sale_items.inventory_id
          JOIN products ON products.id = inventory.product_id
@@ -127,6 +142,14 @@ salesRouter.post(
       if (!customer) throw new ApiError(400, "Referenced customer does not exist");
     }
 
+    // Credit — in-store or online — is never extended to a walk-in.
+    // Enforced here, not just in the UI, since a balance owed needs a
+    // real customer record to actually be collectable later.
+    const isCredit = data.payment_method === "credit" || data.is_credit_order;
+    if (isCredit && !data.customer_id) {
+      throw new ApiError(400, "Credit sales require a selected customer — it isn't offered to walk-ins.");
+    }
+
     // Validate every inventory item up front: must exist and be available.
     const inventoryRows = data.items.map((item) => {
       const row = db
@@ -145,38 +168,142 @@ salesRouter.post(
     });
 
     const subtotal = data.items.reduce((sum, item) => sum + item.unit_price, 0);
-    const total = Math.max(0, subtotal - data.discount);
+
+    // Manual discount: a flat amount, or a percentage of the subtotal.
+    const manual_discount =
+      data.manual_discount_type === "percent"
+        ? Math.round((subtotal * (data.manual_discount_value ?? 0)) / 100)
+        : data.manual_discount_value ?? 0;
+
+    // Coupon discount: validated server-side against the real coupon
+    // record — never trust a discount amount computed on the client,
+    // since that would let a stale/invalid/expired code still apply.
+    let coupon_discount = 0;
+    let coupon_code: string | null = null;
+    if (data.coupon_code) {
+      const code = data.coupon_code.trim().toUpperCase();
+      const coupon = db.prepare(`SELECT * FROM coupons WHERE code = ?`).get(code) as any;
+      if (!coupon) throw new ApiError(400, `No coupon with code "${code}"`);
+      if (!coupon.is_active) throw new ApiError(400, `Coupon "${code}" is no longer active`);
+      if (coupon.expires_at && new Date(coupon.expires_at) < new Date()) {
+        throw new ApiError(400, `Coupon "${code}" has expired`);
+      }
+      coupon_discount =
+        coupon.discount_type === "percent" ? Math.round((subtotal * coupon.discount_value) / 100) : coupon.discount_value;
+      coupon_code = code;
+    }
+
+    const discount = manual_discount + coupon_discount;
+    const total = Math.max(0, subtotal - discount);
     const loyalty_points_earned = Math.floor(total * LOYALTY_RATE_PERCENT);
 
-    let payment_status: "paid" | "partial" | "unpaid" = "unpaid";
-    if (data.amount_paid >= total && total > 0) payment_status = "paid";
-    else if (data.amount_paid > 0) payment_status = "partial";
+    // Store credit applied — validated against the customer's REAL
+    // balance (sum of their store_credit_transactions), never trusted as
+    // a client-supplied number, and capped so it can never exceed either
+    // what they actually have or what's owed on this sale.
+    let storeCreditApplied = 0;
+    if (data.store_credit_applied > 0) {
+      if (!data.customer_id) {
+        throw new ApiError(400, "Store credit can only be applied for a selected customer.");
+      }
+      const balanceRow = db
+        .prepare(`SELECT COALESCE(SUM(amount), 0) as balance FROM store_credit_transactions WHERE customer_id = ?`)
+        .get(data.customer_id) as { balance: number };
+      storeCreditApplied = Math.min(data.store_credit_applied, balanceRow.balance, total);
+    }
 
-    const invoice = nextInvoiceCode();
+    // Effective amount paid now includes whatever store credit was
+    // applied, on top of whatever was actually handed over/transferred.
+    const effectiveAmountPaid = data.amount_paid + storeCreditApplied;
+
+    let payment_status: "paid" | "partial" | "unpaid" = "unpaid";
+    if (effectiveAmountPaid >= total && total > 0) payment_status = "paid";
+    else if (effectiveAmountPaid > 0) payment_status = "partial";
+
+    // Cash change due: only meaningful when cash was tendered above the
+    // total. amount_received itself is stored as given, so Sale History
+    // can show exactly what was handed over, not just the net kept.
+    const change_due =
+      data.payment_method === "cash" && data.amount_received != null && data.amount_received > total
+        ? data.amount_received - total
+        : 0;
+
+    // Overpayment on a non-cash (e.g. online/bank transfer) payment —
+    // tracked so it can be offered back as store credit, rather than
+    // silently treated as extra income the customer never gets credit for.
+    const overpaid_amount =
+      data.payment_method !== "cash" && data.amount_paid > total ? data.amount_paid - total : 0;
+
+    // Which of the 5 invoice categories this sale falls into, driving
+    // both the invoice prefix and its own independent sequence:
+    // STR (in-store paid), SCR (in-store credit), OCD (online COD),
+    // OCR (online credit), OPS (online fully paid, nothing owed).
+    // is_credit_order is the source of truth for "is this a credit sale"
+    // — payment_method may legitimately be "cash"/"card"/"bank_transfer"
+    // even on a credit sale, if a partial amount came in through one of
+    // those channels, so it can't be used to infer credit status.
+    let invoiceCategory: InvoiceCategory;
+    if (data.sale_type === "in_store") {
+      invoiceCategory = data.is_credit_order || data.payment_method === "credit" ? "SCR" : "STR";
+    } else {
+      if (data.is_credit_order) invoiceCategory = "OCR";
+      else if (payment_status === "paid") invoiceCategory = "OPS";
+      else invoiceCategory = "OCD";
+    }
+
+    const invoice = nextInvoiceCode(invoiceCategory);
 
     // better-sqlite3 transactions are synchronous, which fits perfectly
     // here — no partial writes possible if something throws mid-way.
     const runSaleTransaction = db.transaction(() => {
       const saleResult = db
         .prepare(
-          `INSERT INTO sales (invoice, customer_id, salesperson, subtotal, discount, total, amount_paid, payment_status, payment_method, sale_type, loyalty_points_earned)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO sales
+             (invoice, customer_id, salesperson, subtotal, discount, manual_discount, coupon_discount, coupon_code,
+              total, amount_paid, payment_status, payment_method, sale_type, loyalty_points_earned,
+              amount_received, change_due, overpaid_amount)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           invoice,
           data.customer_id ?? null,
           data.salesperson ?? null,
           subtotal,
-          data.discount,
+          discount,
+          manual_discount,
+          coupon_discount,
+          coupon_code,
           total,
-          data.amount_paid,
+          effectiveAmountPaid,
           payment_status,
           data.payment_method ?? null,
           data.sale_type,
-          loyalty_points_earned
+          loyalty_points_earned,
+          data.amount_received ?? null,
+          change_due,
+          overpaid_amount
         );
 
       const saleId = saleResult.lastInsertRowid;
+
+      // Redeeming store credit spends it back down with a negative entry
+      // — the ledger is what makes the running balance trustworthy.
+      if (storeCreditApplied > 0 && data.customer_id) {
+        db.prepare(
+          `INSERT INTO store_credit_transactions (customer_id, amount, reason, reference_id, notes)
+           VALUES (?, ?, 'redemption', ?, ?)`
+        ).run(data.customer_id, -storeCreditApplied, saleId, `Applied to invoice ${invoice}`);
+      }
+
+      // An overpayment grants store credit for a future purchase, rather
+      // than being silently kept as extra income with no record of whom
+      // it's owed back to.
+      if (overpaid_amount > 0 && data.customer_id) {
+        db.prepare(
+          `INSERT INTO store_credit_transactions (customer_id, amount, reason, reference_id, notes)
+           VALUES (?, ?, 'overpayment', ?, ?)`
+        ).run(data.customer_id, overpaid_amount, saleId, `Overpayment on invoice ${invoice}`);
+      }
 
       // Record this as a real transaction, not just a number on the sale
       // — this is what lets a customer's loyalty history actually be
@@ -201,9 +328,9 @@ salesRouter.post(
       // Mirror the sale into the cash book as an income entry.
       if (data.amount_paid > 0) {
         db.prepare(
-          `INSERT INTO cash_book (type, category, reference_id, amount, notes)
-           VALUES ('income', 'sale', ?, ?, ?)`
-        ).run(saleId, data.amount_paid, `Payment for invoice ${invoice}`);
+          `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
+           VALUES ('income', 'sale', ?, ?, ?, ?)`
+        ).run(data.payment_method ?? null, saleId, data.amount_paid, `Payment for invoice ${invoice}`);
       }
 
       // Online sales need to ship — auto-create a pending delivery using
@@ -269,8 +396,8 @@ salesRouter.post(
 salesRouter.put(
   "/:id/payment",
   asyncHandler(async (req, res) => {
-    const amountSchema = z.object({ amount: z.number().positive() });
-    const { amount } = amountSchema.parse(req.body);
+    const amountSchema = z.object({ amount: z.number().positive(), payment_method: z.string().optional() });
+    const { amount, payment_method } = amountSchema.parse(req.body);
 
     const sale = db.prepare(`SELECT * FROM sales WHERE id = ?`).get(req.params.id) as any;
     if (!sale) throw new ApiError(404, "Sale not found");
@@ -288,9 +415,9 @@ salesRouter.put(
       );
 
       db.prepare(
-        `INSERT INTO cash_book (type, category, reference_id, amount, notes)
-         VALUES ('income', 'sale', ?, ?, ?)`
-      ).run(req.params.id, amount, `Additional payment for invoice ${sale.invoice}`);
+        `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
+         VALUES ('income', 'sale', ?, ?, ?, ?)`
+      ).run(payment_method ?? null, req.params.id, amount, `Additional payment for invoice ${sale.invoice}`);
     });
 
     runPaymentTransaction();
@@ -329,9 +456,9 @@ salesRouter.put(
       // that this money was never actually kept.
       if (sale.amount_paid > 0) {
         db.prepare(
-          `INSERT INTO cash_book (type, category, reference_id, amount, notes)
-           VALUES ('expense', 'sale_void', ?, ?, ?)`
-        ).run(sale.id, sale.amount_paid, `Reversal of voided invoice ${sale.invoice}`);
+          `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
+           VALUES ('expense', 'sale_void', ?, ?, ?, ?)`
+        ).run(sale.payment_method ?? null, sale.id, sale.amount_paid, `Reversal of voided invoice ${sale.invoice}`);
       }
 
       // Cancel any delivery tied to this sale rather than leaving it
@@ -346,6 +473,19 @@ salesRouter.put(
           `INSERT INTO loyalty_transactions (customer_id, points, reason, reference_id, notes)
            VALUES (?, ?, 'manual_adjustment', ?, ?)`
         ).run(sale.customer_id, -sale.loyalty_points_earned, sale.id, `Reversal — invoice ${sale.invoice} voided`);
+      }
+
+      // Reverse any store credit this sale granted (overpayment) or spent
+      // (redemption) — a voided sale should leave the customer's credit
+      // balance exactly as if the sale had never happened.
+      const creditEntries = db
+        .prepare(`SELECT * FROM store_credit_transactions WHERE reference_id = ?`)
+        .all(sale.id) as { amount: number }[];
+      for (const entry of creditEntries) {
+        db.prepare(
+          `INSERT INTO store_credit_transactions (customer_id, amount, reason, reference_id, notes)
+           VALUES (?, ?, 'manual_adjustment', ?, ?)`
+        ).run(sale.customer_id, -entry.amount, sale.id, `Reversal — invoice ${sale.invoice} voided`);
       }
 
       db.prepare(

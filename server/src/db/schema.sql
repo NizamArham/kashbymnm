@@ -115,6 +115,25 @@ CREATE TABLE IF NOT EXISTS loyalty_transactions (
 
 CREATE INDEX IF NOT EXISTS idx_loyalty_transactions_customer ON loyalty_transactions(customer_id);
 
+-- 2b. store_credit_transactions ----------------------------------------------
+-- A running store-credit ledger, same shape as loyalty_transactions: an
+-- overpaid online order grants a positive entry; applying it toward a
+-- future sale spends it back down with a negative entry. A customer's
+-- current store credit balance is the sum of their entries here — never
+-- a raw mutable number, so there's always a real trail of where credit
+-- came from and where it went.
+CREATE TABLE IF NOT EXISTS store_credit_transactions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  customer_id INTEGER NOT NULL REFERENCES customers(id),
+  amount REAL NOT NULL, -- positive = granted (overpayment), negative = redeemed against a sale
+  reason TEXT NOT NULL CHECK (reason IN ('overpayment','redemption','manual_adjustment')),
+  reference_id INTEGER, -- the sale id that generated or redeemed this entry
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_store_credit_transactions_customer ON store_credit_transactions(customer_id);
+
 -- 2b. customer_addresses --------------------------------------------------
 CREATE TABLE IF NOT EXISTS customer_addresses (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -149,6 +168,11 @@ CREATE TABLE IF NOT EXISTS products (
   supplier_id INTEGER REFERENCES suppliers(id),
   image_path TEXT,
   is_public INTEGER NOT NULL DEFAULT 1 CHECK (is_public IN (0,1)),
+  -- Return policy at the product level: ON by default. When OFF ("Final
+  -- Sale — No Returns"), the return button is disabled in POS and
+  -- customer-facing sale history — an admin can still force one through
+  -- with a logged reason, but it's not offered as a normal action.
+  allow_returns INTEGER NOT NULL DEFAULT 1 CHECK (allow_returns IN (0,1)),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -168,6 +192,11 @@ CREATE TABLE IF NOT EXISTS inventory (
   -- same product coexist at different costs/prices simultaneously.
   cost_price REAL,
   selling_price REAL,
+  -- Which purchase batch this specific unit came from — this is what
+  -- actually lets a physical unit be traced back to its supplier, not
+  -- just its cost. Nullable because older units (created before this
+  -- link existed) won't have one; new restocks always set it.
+  purchase_item_id INTEGER REFERENCES purchase_items(id),
   status TEXT NOT NULL DEFAULT 'available'
     CHECK (status IN ('available','sold','damaged','gifted','stolen','lost','removed')),
   -- Only set when status is a write-off reason (not 'available' or 'sold').
@@ -179,6 +208,22 @@ CREATE TABLE IF NOT EXISTS inventory (
 CREATE INDEX IF NOT EXISTS idx_inventory_product ON inventory(product_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_status ON inventory(status);
 
+-- 5a. coupons ----------------------------------------------------------------
+-- Admin-managed discount codes. discount_type/discount_value together
+-- define the reward (e.g. type='percent', value=10 -> "10% off"; or
+-- type='fixed', value=500 -> "Rs. 500 off"). is_active lets a code be
+-- turned off without deleting its history of past use. expires_at is
+-- optional — a code with no expiry stays valid indefinitely.
+CREATE TABLE IF NOT EXISTS coupons (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT UNIQUE NOT NULL,
+  discount_type TEXT NOT NULL CHECK (discount_type IN ('percent','fixed')),
+  discount_value REAL NOT NULL,
+  is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
+  expires_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- 6. sales -------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS sales (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -187,13 +232,30 @@ CREATE TABLE IF NOT EXISTS sales (
   salesperson TEXT,
   date TEXT NOT NULL DEFAULT (datetime('now')),
   subtotal REAL NOT NULL DEFAULT 0,
+  -- discount is the COMBINED total (manual_discount + coupon_discount) —
+  -- what actually reduces the sale total, and what the receipt shows as
+  -- one line. manual_discount and coupon_discount are kept separately
+  -- alongside it purely for audit, so a report can answer "how much did
+  -- coupons cost us" vs "how much did staff discount by hand" without
+  -- the two ever being confused on the customer-facing receipt.
   discount REAL NOT NULL DEFAULT 0,
+  manual_discount REAL NOT NULL DEFAULT 0,
+  coupon_discount REAL NOT NULL DEFAULT 0,
+  coupon_code TEXT,
   total REAL NOT NULL DEFAULT 0,
   amount_paid REAL NOT NULL DEFAULT 0,
   payment_status TEXT NOT NULL DEFAULT 'unpaid' CHECK (payment_status IN ('paid','partial','unpaid')),
   payment_method TEXT,
   sale_type TEXT NOT NULL DEFAULT 'in_store' CHECK (sale_type IN ('in_store','online')),
   loyalty_points_earned INTEGER NOT NULL DEFAULT 0,
+  -- Cash-payment specifics, needed to show change due in Sale History
+  -- rather than just the net amount_paid.
+  amount_received REAL,
+  change_due REAL NOT NULL DEFAULT 0,
+  -- Online orders can be overpaid (e.g. customer sent slightly more via
+  -- bank transfer). Tracked separately so it can be offered back as
+  -- store credit on a future purchase rather than silently absorbed.
+  overpaid_amount REAL NOT NULL DEFAULT 0,
   -- A voided sale is never deleted — it stays visible in Sale History for
   -- audit, but its stock is returned to inventory, its cash book entry is
   -- reversed, and its loyalty points are clawed back. is_voided is the
@@ -219,10 +281,43 @@ CREATE TABLE IF NOT EXISTS sale_items (
 CREATE INDEX IF NOT EXISTS idx_sale_items_sale ON sale_items(sale_id);
 CREATE INDEX IF NOT EXISTS idx_sale_items_inventory ON sale_items(inventory_id);
 
--- 6b. returns ----------------------------------------------------------
+-- 6b. return_requests --------------------------------------------------------
+-- A return is ALWAYS a request first. Staff submit one against a specific
+-- sale item; an admin approves or declines it. Only on approval does a
+-- row get written to `returns` below and the actual stock/cash-book/
+-- loyalty effects happen — a pending or declined request changes nothing
+-- about inventory or money. is_admin_override marks the rare case where
+-- an admin forces a return through on a product marked Final Sale
+-- (allow_returns = 0), with the reason required and logged.
+CREATE TABLE IF NOT EXISTS return_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sale_item_id INTEGER NOT NULL REFERENCES sale_items(id),
+  quantity INTEGER NOT NULL DEFAULT 1,
+  condition TEXT NOT NULL CHECK (condition IN ('clean','damaged')),
+  resolution TEXT NOT NULL CHECK (resolution IN ('refund','exchange')),
+  exchange_inventory_id INTEGER REFERENCES inventory(id),
+  reason TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','declined')),
+  requested_by INTEGER REFERENCES users(id),
+  requested_at TEXT NOT NULL DEFAULT (datetime('now')),
+  decided_by INTEGER REFERENCES users(id),
+  decided_at TEXT,
+  decision_reason TEXT,
+  is_admin_override INTEGER NOT NULL DEFAULT 0 CHECK (is_admin_override IN (0,1)),
+  -- Set once the request is approved and a returns row is actually
+  -- created for it, so the two stay linked for audit.
+  return_id INTEGER REFERENCES returns(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_return_requests_status ON return_requests(status);
+CREATE INDEX IF NOT EXISTS idx_return_requests_sale_item ON return_requests(sale_item_id);
+
+-- 6c. returns ----------------------------------------------------------
 -- A return against one specific sale_item. condition determines whether
 -- the physical unit becomes sellable again or is written off; resolution
 -- determines whether cash goes back out or the item is swapped for another.
+-- A row here only ever exists because a return_requests row was approved
+-- — this table is never written to directly from a staff-facing action.
 CREATE TABLE IF NOT EXISTS returns (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   sale_item_id INTEGER NOT NULL REFERENCES sale_items(id),
@@ -341,6 +436,10 @@ CREATE TABLE IF NOT EXISTS cash_book (
   entry_date TEXT NOT NULL DEFAULT (datetime('now')),
   type TEXT NOT NULL CHECK (type IN ('income','expense')),
   category TEXT NOT NULL,
+  -- How this entry was actually settled (cash/card/bank_transfer/credit)
+  -- — needed to answer "how much cash is physically on hand" vs "how
+  -- much is in the bank account", not just a lump total.
+  payment_method TEXT,
   reference_id INTEGER,
   amount REAL NOT NULL,
   notes TEXT

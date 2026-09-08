@@ -29,6 +29,7 @@ const productInput = z.object({
   supplier_id: z.number().int().positive().optional(),
   image_path: z.string().optional(),
   is_public: z.boolean().optional(),
+  allow_returns: z.boolean().optional(),
 });
 
 // qty = live count of this product's available inventory rows
@@ -137,8 +138,8 @@ productsRouter.post(
 
     const result = db
       .prepare(
-        `INSERT INTO products (product_title, brand, category, cost_price, selling_price, supplier_id, image_path, is_public)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO products (product_title, brand, category, cost_price, selling_price, supplier_id, image_path, is_public, allow_returns)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         data.product_title,
@@ -148,7 +149,8 @@ productsRouter.post(
         data.selling_price,
         data.supplier_id ?? null,
         data.image_path ?? null,
-        data.is_public === false ? 0 : 1
+        data.is_public === false ? 0 : 1,
+        data.allow_returns === false ? 0 : 1
       );
 
     const created = db.prepare(`SELECT * FROM products WHERE id = ?`).get(result.lastInsertRowid);
@@ -167,7 +169,7 @@ productsRouter.put(
     const merged = { ...existing, ...data };
     db.prepare(
       `UPDATE products SET product_title = ?, brand = ?, category = ?, cost_price = ?,
-       selling_price = ?, supplier_id = ?, image_path = ?, is_public = ? WHERE id = ?`
+       selling_price = ?, supplier_id = ?, image_path = ?, is_public = ?, allow_returns = ? WHERE id = ?`
     ).run(
       merged.product_title,
       merged.brand,
@@ -177,6 +179,7 @@ productsRouter.put(
       merged.supplier_id,
       merged.image_path,
       merged.is_public === false || merged.is_public === 0 ? 0 : 1,
+      merged.allow_returns === false || merged.allow_returns === 0 ? 0 : 1,
       req.params.id
     );
 

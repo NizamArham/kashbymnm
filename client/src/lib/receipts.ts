@@ -163,9 +163,17 @@ export function generateA4Pdf(sale: Sale): jsPDF {
   y += 6;
 
   if (sale.discount > 0) {
-    doc.text("Discount", totalsX, y);
+    doc.text("Discounts & Coupons", totalsX, y);
     doc.text(`- ${money(sale.discount)}`, pageWidth - marginX - 2, y, { align: "right" });
     y += 6;
+    if (sale.coupon_code) {
+      doc.setFontSize(7.5);
+      doc.setTextColor(150);
+      doc.text(`Coupon: ${sale.coupon_code}`, totalsX, y);
+      doc.setFontSize(9.5);
+      doc.setTextColor(90);
+      y += 5;
+    }
   }
 
   y += 2;
@@ -285,9 +293,15 @@ export function generateThermalPdf(sale: Sale): jsPDF {
   y += 4.5;
 
   if (sale.discount > 0) {
-    doc.text("Discount", marginX, y);
+    doc.text("Discounts & Coupons", marginX, y);
     doc.text(`-${money(sale.discount)}`, widthMm - marginX, y, { align: "right" });
     y += 4.5;
+    if (sale.coupon_code) {
+      doc.setFontSize(6.5);
+      doc.text(`(${sale.coupon_code})`, marginX, y);
+      doc.setFontSize(8);
+      y += 4;
+    }
   }
 
   doc.setFont("courier", "bold");
@@ -343,7 +357,10 @@ export function buildWhatsAppMessage(sale: Sale): string {
   }
   lines.push("");
   lines.push(`Subtotal: ${money(sale.subtotal)}`);
-  if (sale.discount > 0) lines.push(`Discount: -${money(sale.discount)}`);
+  if (sale.discount > 0) {
+    const couponNote = sale.coupon_code ? ` (${sale.coupon_code})` : "";
+    lines.push(`Discounts & Coupons: -${money(sale.discount)}${couponNote}`);
+  }
   lines.push(`*Total: ${money(sale.total)}*`);
   lines.push(`Paid: ${money(sale.amount_paid)} (${formatPaymentMethod(sale.payment_method)})`);
   lines.push("");

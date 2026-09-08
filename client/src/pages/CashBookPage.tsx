@@ -52,12 +52,25 @@ export default function CashBookPage() {
 
   const currentBalance = entries[0]?.running_balance ?? 0;
 
+  // Cash-on-hand vs bank/card totals — the whole point of tracking the
+  // method is being able to answer "how much physical cash do we have"
+  // separately from "how much is in the bank account".
+  const methodTotals = entries.reduce((acc, e) => {
+    const method = e.payment_method ?? "unspecified";
+    const signedAmount = e.type === "income" ? e.amount : -e.amount;
+    acc[method] = (acc[method] ?? 0) + signedAmount;
+    return acc;
+  }, {} as Record<string, number>);
+
   return (
     <div>
       <PageHeader title="Cash book" subtitle="Sales, supplier payments, and courier payments are logged here automatically." />
 
-      <div className="max-w-[240px] mb-5">
+      <div className="flex flex-wrap gap-3 mb-5">
         <StatCard label="Current balance" value={`Rs. ${currentBalance.toLocaleString()}`} />
+        {Object.entries(methodTotals).map(([method, total]) => (
+          <StatCard key={method} label={method.replace("_", " ")} value={`Rs. ${total.toLocaleString()}`} />
+        ))}
       </div>
 
       <Card className="max-w-lg mb-5">
@@ -102,6 +115,7 @@ export default function CashBookPage() {
                 <Th>Date</Th>
                 <Th>Type</Th>
                 <Th>Category</Th>
+                <Th>Method</Th>
                 <Th>Amount</Th>
                 <Th>Running balance</Th>
                 <Th>Notes</Th>
@@ -115,6 +129,7 @@ export default function CashBookPage() {
                     {entry.type === "income" ? "+" : "-"} {entry.type}
                   </Td>
                   <Td className="capitalize">{entry.category}</Td>
+                  <Td className="capitalize">{entry.payment_method?.replace("_", " ") ?? "—"}</Td>
                   <Td>Rs. {entry.amount.toLocaleString()}</Td>
                   <Td>Rs. {entry.running_balance.toLocaleString()}</Td>
                   <Td>{entry.notes ?? "—"}</Td>

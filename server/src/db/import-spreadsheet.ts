@@ -45,6 +45,29 @@ function loadSheet(wb: XLSX.WorkBook, name: string): Record<string, any>[] {
   return rows.filter((r) => Object.values(r).some((v) => v !== null && v !== ""));
 }
 
+// Reads a single sheet as an array-of-arrays (raw: false) purely to get
+// each cell's FORMATTED text, used only for phone-like columns. A phone
+// cell like "0771234567" gets silently turned into the number 771234567
+// (leading zero dropped) under normal raw parsing, since XLSX has no way
+// to know it's a phone number rather than a quantity — the formatted
+// text preserves it as typed, as long as the source column is formatted
+// as Text in Excel. This is intentionally scoped to phone columns only:
+// applying raw:false sheet-wide risks corrupting genuinely numeric data
+// (prices, quantities) if any cell's number format doesn't round-trip
+// cleanly through Excel's text formatting.
+function buildPhoneTextLookup(wb: XLSX.WorkBook, sheetName: string, phoneColumnHeader: string): Map<number, string> {
+  const ws = wb.Sheets[sheetName];
+  const lookup = new Map<number, string>();
+  if (!ws) return lookup;
+
+  const textRows = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: null, raw: false });
+  textRows.forEach((row, i) => {
+    const value = row[phoneColumnHeader];
+    if (value != null && value !== "") lookup.set(i, String(value));
+  });
+  return lookup;
+}
+
 function excelDateToIso(value: any): string | null {
   if (value == null) return null;
   if (value instanceof Date) return value.toISOString();
@@ -85,6 +108,12 @@ function run() {
   const customerRows = loadSheet(wb, "Customers");
   const salesRows = loadSheet(wb, "Sales Register");
 
+  // Phone-like columns read separately as formatted text, so a number
+  // like 0771234567 keeps its leading zero instead of being silently
+  // parsed as the JS number 771234567 by the normal raw row loading above.
+  const supplierPhoneText = buildPhoneTextLookup(wb, "Suppliers", "Contact Number");
+  const customerPhoneText = buildPhoneTextLookup(wb, "Customers", "Tel.");
+
   // Maps from spreadsheet code -> new database id, built as we insert so
   // later sheets (which reference earlier ones) can resolve foreign keys.
   const supplierCodeToId = new Map<string, number>();
@@ -104,19 +133,19 @@ function run() {
     const insertSupplier = db.prepare(
       `INSERT INTO suppliers (supplier_code, name, phone, city, notes) VALUES (?, ?, ?, ?, ?)`
     );
-    for (const row of supplierRows) {
+    supplierRows.forEach((row, i) => {
       const code = String(row["Supplier Code"] ?? "").trim();
-      if (!code) continue;
+      if (!code) return;
       const result = insertSupplier.run(
         code,
         String(row["Supplier Name"] ?? "").trim() || "Unnamed supplier",
-        row["Contact Number"] != null ? String(row["Contact Number"]) : null,
+        supplierPhoneText.get(i) ?? null,
         row["Location"] ? String(row["Location"]).trim() : null,
         null
       );
       supplierCodeToId.set(code, Number(result.lastInsertRowid));
       stats.suppliers++;
-    }
+    });
 
     // ---------- Products ----------
     const insertProduct = db.prepare(
@@ -202,15 +231,15 @@ function run() {
     const insertCustomer = db.prepare(
       `INSERT INTO customers (customer_code, name, phone, created_at) VALUES (?, ?, ?, ?)`
     );
-    for (const row of customerRows) {
+    customerRows.forEach((row, i) => {
       const code = String(row["Customer Code"] ?? "").trim();
-      if (!code) continue;
+      if (!code) return;
 
       const createdAt = excelDateToIso(row["Registration Date"]) ?? new Date().toISOString();
       const result = insertCustomer.run(
         code,
         String(row["Name"] ?? "").trim() || "Unnamed customer",
-        row["Tel."] != null ? String(row["Tel."]) : null,
+        customerPhoneText.get(i) ?? null,
         createdAt
       );
       customerCodeToId.set(code, Number(result.lastInsertRowid));
@@ -220,7 +249,7 @@ function run() {
       // this data set — nothing to insert into customer_addresses. If a
       // future import has real address data, add it here as a
       // customer_addresses insert keyed off Address 1 / Address 2 / City.
-    }
+    });
 
     // ---------- Sales Register -> sales + sale_items (+ deliveries) ----------
     const insertSale = db.prepare(

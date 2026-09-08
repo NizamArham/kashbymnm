@@ -1,9 +1,10 @@
 import { Router } from "express";
 import { z } from "zod";
 import { db } from "../db/connection";
-import { nextSupplierCode } from "../lib/codes";
+import { generateSupplierCode } from "../lib/codes";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth, requireRole } from "../lib/auth";
+import { normalizeSriLankanPhone } from "../lib/phones";
 
 export const suppliersRouter = Router();
 
@@ -53,14 +54,15 @@ suppliersRouter.post(
   "/",
   asyncHandler(async (req, res) => {
     const data = supplierInput.parse(req.body);
-    const supplier_code = nextSupplierCode();
+    const phone = normalizeSriLankanPhone(data.phone);
+    const supplier_code = generateSupplierCode(data.name, phone);
 
     const result = db
       .prepare(
         `INSERT INTO suppliers (supplier_code, name, phone, city, notes)
          VALUES (?, ?, ?, ?, ?)`
       )
-      .run(supplier_code, data.name, data.phone ?? null, data.city ?? null, data.notes ?? null);
+      .run(supplier_code, data.name, phone ?? null, data.city ?? null, data.notes ?? null);
 
     const created = db.prepare(`SELECT * FROM suppliers WHERE id = ?`).get(result.lastInsertRowid);
     res.status(201).json(created);
@@ -75,7 +77,7 @@ suppliersRouter.put(
     const existing = db.prepare(`SELECT * FROM suppliers WHERE id = ?`).get(req.params.id);
     if (!existing) throw new ApiError(404, "Supplier not found");
 
-    const merged = { ...existing, ...data } as any;
+    const merged = { ...existing, ...data, phone: normalizeSriLankanPhone(data.phone ?? (existing as any).phone) } as any;
     db.prepare(
       `UPDATE suppliers SET name = ?, phone = ?, city = ?, notes = ? WHERE id = ?`
     ).run(merged.name, merged.phone, merged.city, merged.notes, req.params.id);

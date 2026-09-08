@@ -141,6 +141,16 @@ export default function AppShell() {
     return location.pathname.startsWith(item.path);
   }
 
+  const breadcrumbLabels: Record<string, string> = {
+    "/products/add": "Inventory / Add Product",
+    "/customers/add": "Customers / Add Customer",
+    "/purchases": "Finance / Purchases",
+    "/deliveries": "Shipping / Deliveries",
+    "/cash-book": "Finance / Cash Book",
+    "/attendance": "Profile / Attendance",
+  };
+  const breadcrumb = breadcrumbLabels[location.pathname];
+
   const initials = (user?.name || user?.username || "?")
     .split(" ")
     .map((w) => w[0])
@@ -261,22 +271,16 @@ export default function AppShell() {
       </div>
 
       <div className="flex-1 lg:ml-64 min-h-screen bg-gray-50">
-        <div className="sticky top-0 z-30 bg-white border-b border-gray-200 px-4 py-3 lg:px-6 lg:py-4 flex items-center gap-3">
-          <button
-            onClick={() => setSidebarOpen(true)}
-            className="lg:hidden p-1.5 hover:bg-gray-100 rounded-lg transition"
-            aria-label="Open sidebar"
-          >
-            <Menu size={24} className="text-gray-700" />
-          </button>
-          <h2 className="text-sm lg:text-base font-medium text-gray-700">
-            {visibleMenu.find(
-              (item) => location.pathname === item.path || item.subItems?.some((s) => location.pathname === s.path)
-            )?.label || "Dashboard"}
-          </h2>
-        </div>
+        <button
+          onClick={() => setSidebarOpen(true)}
+          className="fixed left-3 top-3 z-40 rounded-lg bg-black p-2 text-white shadow-lg lg:hidden"
+          aria-label="Open sidebar"
+        >
+          <Menu size={20} />
+        </button>
 
-        <div className="p-4 lg:p-6">
+        <div className="p-4 pt-14 lg:p-6">
+          {breadcrumb && <div className="px-1 py-2 text-xs text-gray-400">{breadcrumb}</div>}
           <div className="bg-white border border-gray-200 rounded-2xl p-4 lg:p-6 shadow-sm">
             <Outlet />
           </div>

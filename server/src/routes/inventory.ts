@@ -38,9 +38,13 @@ inventoryRouter.get(
     const rows = db
       .prepare(
         `SELECT inventory.*, products.product_title, products.brand, products.category,
-                products.selling_price AS product_selling_price
+                products.selling_price AS product_selling_price,
+                suppliers.id AS batch_supplier_id, suppliers.name AS batch_supplier_name
          FROM inventory
          JOIN products ON products.id = inventory.product_id
+         LEFT JOIN purchase_items ON purchase_items.id = inventory.purchase_item_id
+         LEFT JOIN purchases ON purchases.id = purchase_items.purchase_id
+         LEFT JOIN suppliers ON suppliers.id = purchases.supplier_id
          ${where}
          ORDER BY inventory.id DESC`
       )

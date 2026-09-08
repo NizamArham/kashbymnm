@@ -17,7 +17,7 @@ import {
   Edit2,
 } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
-import { InventoryUnit, Customer, SaleType, CustomerAddress } from "../lib/types";
+import { InventoryUnit, Customer, SaleType, CustomerAddress, Coupon } from "../lib/types";
 import { Input, Label, FormGroup, ErrorText, SuccessText, Button, Dropdown } from "../components/ui";
 import { CityPicker } from "../components/CityPicker";
 import { useAuth } from "../context/AuthContext";
@@ -50,6 +50,11 @@ export default function PosPage() {
   // clear, deliberate UI for it rather than looking like a mistake.
   const [isCreditSale, setIsCreditSale] = useState(false);
   const [creditAmountPaid, setCreditAmountPaid] = useState("0");
+  // How the partial amount (if any) on an in-store credit sale was
+  // actually collected — same reasoning as advancePaymentMethod for
+  // online orders: without this, a Rs. 2000 cash payment on a Rs. 5000
+  // credit sale would have nowhere to record which channel it came in on.
+  const [creditPaymentMethod, setCreditPaymentMethod] = useState<"cash" | "card" | "bank_transfer">("cash");
 
   // Delivery details for online orders — partner, weight, and whether
   // delivery itself is free (the order total still needs settling
@@ -109,7 +114,17 @@ export default function PosPage() {
   const [showBrowser, setShowBrowser] = useState(false);
   const [browserCategory, setBrowserCategory] = useState("all");
 
-  const [discount, setDiscount] = useState("0");
+  // Manual discount — either a percentage of the subtotal or a flat Rs.
+  // amount, picked via a type toggle rather than one ambiguous field.
+  const [discountType, setDiscountType] = useState<"percent" | "fixed">("fixed");
+  const [discountValue, setDiscountValue] = useState("0");
+
+  // Coupon — separate from the manual discount, validated against the
+  // server's real coupon list before it's allowed to apply.
+  const [couponCode, setCouponCode] = useState("");
+  const [appliedCoupon, setAppliedCoupon] = useState<Coupon | null>(null);
+  const [couponError, setCouponError] = useState<string | null>(null);
+  const [couponChecking, setCouponChecking] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("cash");
   // Cash tendered by the customer, so change due can be shown before the
   // sale is finalized — only meaningful when paymentMethod is "cash".
@@ -121,7 +136,17 @@ export default function PosPage() {
 
   const subtotal = cart.reduce((sum, line) => sum + line.unit_price * line.units.length, 0);
   const totalCartUnits = cart.reduce((sum, line) => sum + line.units.length, 0);
-  const total = Math.max(0, subtotal - (parseFloat(discount) || 0));
+
+  const manualDiscountAmount =
+    discountType === "percent" ? Math.round((subtotal * (parseFloat(discountValue) || 0)) / 100) : parseFloat(discountValue) || 0;
+  const couponDiscountAmount = appliedCoupon
+    ? appliedCoupon.discount_type === "percent"
+      ? Math.round((subtotal * appliedCoupon.discount_value) / 100)
+      : appliedCoupon.discount_value
+    : 0;
+  const combinedDiscount = manualDiscountAmount + couponDiscountAmount;
+
+  const total = Math.max(0, subtotal - combinedDiscount);
   const paidAmount = parseFloat(amountPaid) || 0;
   const changeDue = paymentMethod === "cash" && paidAmount > total ? paidAmount - total : 0;
   const cashPresets = [500, 1000, 2000, 5000, 10000, 20000];
@@ -255,6 +280,12 @@ export default function PosPage() {
   }
 
   function removeFromCart(lineKey: string) {
+    const line = cart.find((l) => cartLineKey(l.units[0]) === lineKey);
+    if (line && line.units.length === 1) {
+      // Removing the last unit deletes the whole line — worth a quick
+      // confirmation, unlike reducing 3 units down to 2.
+      if (!confirm(`Remove ${line.units[0].product_title} from the cart?`)) return;
+    }
     setCart((c) =>
       c.map((l) => (cartLineKey(l.units[0]) === lineKey ? { ...l, units: l.units.slice(0, -1) } : l)).filter((l) => l.units.length > 0)
     );
@@ -296,6 +327,7 @@ export default function PosPage() {
 
   function removeCustomer() {
     setSelectedCustomer(null);
+    setIsCreditSale(false);
   }
 
   function openAddCustomer() {
@@ -359,9 +391,37 @@ export default function PosPage() {
   function clearCart() {
     if (cart.length > 0 && confirm("Clear entire cart?")) {
       setCart([]);
-      setDiscount("0");
+      setDiscountValue("0");
+      setCouponCode("");
+      setAppliedCoupon(null);
+      setCouponError(null);
       setAmountPaid("");
     }
+  }
+
+  async function applyCoupon() {
+    const code = couponCode.trim();
+    if (!code) return;
+    setCouponError(null);
+    setCouponChecking(true);
+    try {
+      const coupon = await api.get<Coupon>(`/coupons/validate/${encodeURIComponent(code)}`);
+      setAppliedCoupon(coupon);
+      setCheckoutSuccess(
+        `Coupon applied: ${coupon.code} – ${coupon.discount_type === "percent" ? `${coupon.discount_value}% off` : `Rs. ${coupon.discount_value.toLocaleString()} off`}`
+      );
+    } catch (err) {
+      setAppliedCoupon(null);
+      setCouponError(err instanceof ApiRequestError ? err.message : "Failed to check that coupon");
+    } finally {
+      setCouponChecking(false);
+    }
+  }
+
+  function removeCoupon() {
+    setAppliedCoupon(null);
+    setCouponCode("");
+    setCouponError(null);
   }
 
   async function beginCheckout() {
@@ -474,21 +534,37 @@ export default function PosPage() {
 
     setSubmitting(true);
     try {
-      const effectivePaymentMethod = isCreditSale ? "credit" : saleType === "online" ? advancePaymentMethod : paymentMethod;
+      // "credit" as the stored payment_method only makes sense when
+      // NOTHING was paid today — if a partial amount came in, the real
+      // channel it arrived through (cash/card/bank) is what should be
+      // recorded, since that's what actually needs reconciling in the
+      // cash book. The credit/balance-due nature of the sale is still
+      // fully captured by amount_paid < total, independent of this field.
+      const effectivePaymentMethod =
+        isCreditSale && saleType === "in_store" && (parseFloat(creditAmountPaid) || 0) > 0
+          ? creditPaymentMethod
+          : isCreditSale
+          ? "credit"
+          : saleType === "online"
+          ? advancePaymentMethod
+          : paymentMethod;
 
       const sale = await api.post<{ invoice: string }>("/sales", {
         customer_id: selectedCustomer?.id,
         items: cart.flatMap((line) => line.units.map((u) => ({ inventory_id: u.id, unit_price: line.unit_price }))),
-        discount: parseFloat(discount) || 0,
+        manual_discount_type: discountType,
+        manual_discount_value: parseFloat(discountValue) || 0,
+        coupon_code: appliedCoupon?.code,
         amount_paid: finalAmountPaid,
         payment_method: effectivePaymentMethod,
+        amount_received: paymentMethod === "cash" && saleType === "in_store" && !isCreditSale ? paidAmount : undefined,
         sale_type: saleType,
+        is_credit_order: isCreditSale,
         ...(saleType === "online"
           ? {
               delivery_partner: deliveryPartner,
               package_weight_kg: parseFloat(packageWeight) || undefined,
               is_free_delivery: isFreeDelivery,
-              is_credit_order: isCreditSale,
             }
           : {}),
       });
@@ -497,12 +573,17 @@ export default function PosPage() {
       setCart([]);
       setSelectedCustomer(null);
       setCustomerQuery("");
-      setDiscount("0");
+      setDiscountType("fixed");
+      setDiscountValue("0");
+      setCouponCode("");
+      setAppliedCoupon(null);
+      setCouponError(null);
       setAmountPaid("");
       setAllAvailableUnits(null);
       setShowCheckoutModal(false);
       setIsCreditSale(false);
       setCreditAmountPaid("0");
+      setCreditPaymentMethod("cash");
       setDeliveryPartner("");
       setPackageWeight("");
       setIsFreeDelivery(false);
@@ -706,8 +787,77 @@ export default function PosPage() {
             <div className="grid grid-cols-2 gap-6 items-start">
               <div className="space-y-3">
                 <FormGroup>
-                  <Label>Discount (Rs.)</Label>
-                  <Input type="number" min="0" value={discount} onChange={(e) => setDiscount(e.target.value)} />
+                  <Label>Discount</Label>
+                  <div className="flex gap-2">
+                    <div className="flex rounded-lg border border-gray-300 overflow-hidden flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setDiscountType("fixed")}
+                        className={`px-2.5 py-1.5 text-xs font-medium transition ${
+                          discountType === "fixed" ? "bg-black text-white" : "bg-white text-gray-600 hover:bg-gray-50"
+                        }`}
+                      >
+                        LKR
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDiscountType("percent")}
+                        className={`px-2.5 py-1.5 text-xs font-medium transition border-l border-gray-300 ${
+                          discountType === "percent" ? "bg-black text-white" : "bg-white text-gray-600 hover:bg-gray-50"
+                        }`}
+                      >
+                        %
+                      </button>
+                    </div>
+                    <Input
+                      type="number"
+                      min="0"
+                      max={discountType === "percent" ? 100 : undefined}
+                      value={discountValue}
+                      onChange={(e) => setDiscountValue(e.target.value)}
+                      placeholder={discountType === "percent" ? "e.g. 10" : "e.g. 500"}
+                    />
+                  </div>
+                  {manualDiscountAmount > 0 && (
+                    <p className="text-xs text-gray-400 mt-1">
+                      Discount applied: Rs. {manualDiscountAmount.toLocaleString()} off
+                    </p>
+                  )}
+                </FormGroup>
+
+                <FormGroup>
+                  <Label>Coupon code</Label>
+                  {appliedCoupon ? (
+                    <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                      <span className="text-sm text-green-800 font-medium">
+                        {appliedCoupon.code} —{" "}
+                        {appliedCoupon.discount_type === "percent"
+                          ? `${appliedCoupon.discount_value}% off`
+                          : `Rs. ${appliedCoupon.discount_value.toLocaleString()} off`}
+                      </span>
+                      <button onClick={removeCoupon} className="text-xs text-red-500 hover:text-red-700">
+                        Remove
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2">
+                      <Input
+                        value={couponCode}
+                        onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
+                        placeholder="e.g. WELCOME10"
+                        onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), applyCoupon())}
+                      />
+                      <button
+                        type="button"
+                        onClick={applyCoupon}
+                        disabled={!couponCode.trim() || couponChecking}
+                        className="px-4 py-2 bg-black text-white rounded-xl text-sm font-medium hover:bg-gray-800 transition disabled:opacity-50 flex-shrink-0"
+                      >
+                        {couponChecking ? "Checking..." : "Apply"}
+                      </button>
+                    </div>
+                  )}
+                  {couponError && <ErrorText>{couponError}</ErrorText>}
                 </FormGroup>
 
                 <div>
@@ -809,29 +959,31 @@ export default function PosPage() {
                 </div>
 
                 {saleType === "online" && (
-                  <div className="border-t border-gray-100 pt-3 space-y-3">
-                    <FormGroup>
-                      <Label>Delivery partner</Label>
-                      <Dropdown
-                        value={deliveryPartner}
-                        onChange={(v) => setDeliveryPartner(v as DeliveryPartner)}
-                        placeholder="— Select partner —"
-                        options={DELIVERY_PARTNERS.map((p) => ({ value: p.value, label: p.label }))}
-                      />
-                    </FormGroup>
+                  <div className="border-t border-gray-100 pt-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <FormGroup>
+                        <Label>Delivery partner</Label>
+                        <Dropdown
+                          value={deliveryPartner}
+                          onChange={(v) => setDeliveryPartner(v as DeliveryPartner)}
+                          placeholder="— Select —"
+                          options={DELIVERY_PARTNERS.map((p) => ({ value: p.value, label: p.label }))}
+                        />
+                      </FormGroup>
 
-                    <FormGroup>
-                      <Label>Package weight (kg)</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        step="0.1"
-                        value={packageWeight}
-                        onChange={(e) => setPackageWeight(e.target.value)}
-                        disabled={isFreeDelivery}
-                        placeholder="e.g. 1.5"
-                      />
-                    </FormGroup>
+                      <FormGroup>
+                        <Label>Package weight (kg)</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.1"
+                          value={packageWeight}
+                          onChange={(e) => setPackageWeight(e.target.value)}
+                          disabled={isFreeDelivery}
+                          placeholder="e.g. 1.5"
+                        />
+                      </FormGroup>
+                    </div>
                   </div>
                 )}
               </div>
@@ -844,10 +996,10 @@ export default function PosPage() {
                       <span className="text-gray-600">Subtotal</span>
                       <span className="font-medium">Rs. {subtotal.toLocaleString()}</span>
                     </div>
-                    {parseFloat(discount) > 0 && (
+                    {combinedDiscount > 0 && (
                       <div className="flex justify-between text-sm text-green-600">
-                        <span>Discount</span>
-                        <span>- Rs. {parseFloat(discount).toLocaleString()}</span>
+                        <span>Discounts & Coupons</span>
+                        <span>- Rs. {combinedDiscount.toLocaleString()}</span>
                       </div>
                     )}
                     <div className="flex justify-between text-lg font-bold pt-1.5 border-t border-gray-200">
@@ -964,26 +1116,72 @@ export default function PosPage() {
                 ) : (
                   <>
                     {isAdmin && (
-                      <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                      <label
+                        className={`flex items-center gap-2 text-sm cursor-pointer ${selectedCustomer ? "text-gray-700" : "text-gray-400"}`}
+                      >
                         <input
                           type="checkbox"
                           checked={isCreditSale}
+                          disabled={!selectedCustomer}
                           onChange={(e) => setIsCreditSale(e.target.checked)}
                           className="rounded"
                         />
                         Credit sale (settle later — tracked as balance due)
                       </label>
                     )}
+                    {isAdmin && !selectedCustomer && (
+                      <p className="text-xs text-gray-400 -mt-2">Select a customer first — credit isn't offered to walk-ins.</p>
+                    )}
 
                     {isCreditSale ? (
-                      <FormGroup>
-                        <Label>Amount paid now (Rs.) — 0 if fully on credit</Label>
-                        <Input type="number" min="0" max={total} value={creditAmountPaid} onChange={(e) => setCreditAmountPaid(e.target.value)} />
-                        <p className="text-xs text-gray-400 mt-1">
-                          Remaining balance of Rs. {Math.max(0, total - (parseFloat(creditAmountPaid) || 0)).toLocaleString()} will show as owed on{" "}
-                          {selectedCustomer ? selectedCustomer.name : "this customer's"} record.
-                        </p>
-                      </FormGroup>
+                      <>
+                        <FormGroup>
+                          <Label>Amount paid now (Rs.) — 0 if fully on credit</Label>
+                          <Input type="number" min="0" max={total} value={creditAmountPaid} onChange={(e) => setCreditAmountPaid(e.target.value)} />
+                          <p className="text-xs text-gray-400 mt-1">
+                            Remaining balance of Rs. {Math.max(0, total - (parseFloat(creditAmountPaid) || 0)).toLocaleString()} will show as owed
+                            on {selectedCustomer ? selectedCustomer.name : "this customer's"} record.
+                          </p>
+                        </FormGroup>
+
+                        {(parseFloat(creditAmountPaid) || 0) > 0 && (
+                          <FormGroup>
+                            <Label>How was that partial amount paid?</Label>
+                            <div className="grid grid-cols-3 gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setCreditPaymentMethod("cash")}
+                                className={`flex flex-col items-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-medium transition ${
+                                  creditPaymentMethod === "cash" ? "border-black bg-black text-white" : "border-gray-300 hover:border-gray-400"
+                                }`}
+                              >
+                                <Wallet size={16} />
+                                <span>Cash</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setCreditPaymentMethod("card")}
+                                className={`flex flex-col items-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-medium transition ${
+                                  creditPaymentMethod === "card" ? "border-black bg-black text-white" : "border-gray-300 hover:border-gray-400"
+                                }`}
+                              >
+                                <CreditCard size={16} />
+                                <span>Card</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setCreditPaymentMethod("bank_transfer")}
+                                className={`flex flex-col items-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-medium transition ${
+                                  creditPaymentMethod === "bank_transfer" ? "border-black bg-black text-white" : "border-gray-300 hover:border-gray-400"
+                                }`}
+                              >
+                                <Smartphone size={16} />
+                                <span>Bank</span>
+                              </button>
+                            </div>
+                          </FormGroup>
+                        )}
+                      </>
                     ) : (
                       <>
                         <div className="grid grid-cols-3 gap-2">
@@ -1084,8 +1282,12 @@ export default function PosPage() {
           </div>
         </div>
 
-        {showBrowser && (
-          <div className="w-80 bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col overflow-hidden animate-slide-in-right flex-shrink-0">
+        <div
+          className={`bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col overflow-hidden flex-shrink-0 transition-all duration-200 ${
+            showBrowser ? "w-80 opacity-100" : "w-0 opacity-0 border-0"
+          }`}
+        >
+          <div className="w-80 h-full flex flex-col">
             <div className="p-3.5 border-b border-gray-200 bg-gray-50 rounded-t-2xl flex-shrink-0">
               <div className="flex items-center justify-between">
                 <h3 className="font-semibold text-gray-900 text-sm">Product catalog</h3>
@@ -1142,7 +1344,7 @@ export default function PosPage() {
               )}
             </div>
           </div>
-        )}
+        </div>
       </div>
 
       {/* NEW CUSTOMER MODAL — full intake form: name, phone (required) +
@@ -1335,10 +1537,10 @@ export default function PosPage() {
                     </span>
                   </div>
                 )}
-                {parseFloat(discount) > 0 && (
+                {combinedDiscount > 0 && (
                   <div className="flex justify-between text-sm text-green-600">
-                    <span>Discount</span>
-                    <span>- Rs. {parseFloat(discount).toLocaleString()}</span>
+                    <span>Discounts & Coupons{appliedCoupon ? ` (${appliedCoupon.code})` : ""}</span>
+                    <span>- Rs. {combinedDiscount.toLocaleString()}</span>
                   </div>
                 )}
               </div>
@@ -1407,14 +1609,6 @@ export default function PosPage() {
           </div>
         </div>
       )}
-
-      <style>{`
-        @keyframes slideInRight {
-          from { transform: translateX(100%); opacity: 0; }
-          to { transform: translateX(0); opacity: 1; }
-        }
-        .animate-slide-in-right { animation: slideInRight 0.25s ease-out; }
-      `}</style>
     </div>
   );
 }
