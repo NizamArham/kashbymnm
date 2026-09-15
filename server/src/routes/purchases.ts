@@ -110,6 +110,17 @@ const pendingPurchaseInput = z.object({
   amount_paid: z.number().nonnegative().default(0),
   payment_method: z.string().optional(),
   description: z.string().optional(),
+  // Only meaningful when payment_method is 'cheque'. 'in_hand' pays
+  // using a cheque already received from a customer (found by number);
+  // 'own' writes a brand new cheque from the business's own account.
+  // Either way, amount_paid does NOT become an immediate cash_book
+  // entry — a cheque isn't real cash until it clears, same rule as
+  // everywhere else cheques are handled.
+  cheque_kind: z.enum(["in_hand", "own"]).optional(),
+  cheque_receipt_id: z.number().int().positive().optional(), // for in_hand
+  cheque_number: z.string().optional(), // for own
+  bank_name: z.string().optional(), // for own
+  cheque_date: z.string().optional(), // for own
   // Transport, commission, loading, or any other cost that ISN'T owed to
   // the supplier — each its own named line, all recorded straight to the
   // cash book as separate expenses, never added to the supplier's
@@ -185,21 +196,82 @@ purchasesRouter.post(
       // The supplier payment — goods only, never inflated by
       // transport/commission, since that money isn't owed to them.
       if (data.amount_paid > 0) {
-        db.prepare(
-          `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
-           VALUES ('expense', 'purchase', ?, ?, ?, ?)`
-        ).run(data.payment_method ?? null, purchaseId, data.amount_paid, `Payment for pending purchase ${purchase_code}`);
+        if (data.payment_method === "cheque") {
+          if (data.cheque_kind === "in_hand") {
+            if (!data.cheque_receipt_id) {
+              throw new ApiError(400, "Select which in-hand cheque is being used");
+            }
+            const receipt = db.prepare(`SELECT * FROM cheque_receipts WHERE id = ?`).get(data.cheque_receipt_id) as any;
+            if (!receipt) throw new ApiError(404, "Cheque not found");
+            if (receipt.status !== "in_hand") {
+              throw new ApiError(409, `This cheque is ${receipt.status.replace("_", " ")} and can't be used for a new payment.`);
+            }
 
-        db.prepare(
-          `INSERT INTO supplier_payments (supplier_id, purchase_id, amount, is_partial, notes)
-           VALUES (?, ?, ?, ?, ?)`
-        ).run(
-          data.supplier_id,
-          purchaseId,
-          data.amount_paid,
-          payment_status === "partial" ? 1 : 0,
-          `Payment recorded at time of pending purchase ${purchase_code}`
-        );
+            const paymentResult = db
+              .prepare(
+                `INSERT INTO supplier_payments (supplier_id, purchase_id, amount, method, is_partial, notes)
+                 VALUES (?, ?, ?, 'cheque', ?, ?)`
+              )
+              .run(
+                data.supplier_id,
+                purchaseId,
+                data.amount_paid,
+                payment_status === "partial" ? 1 : 0,
+                `Cheque #${receipt.cheque_number} (${receipt.bank_name}) — pending purchase ${purchase_code}`
+              );
+            db.prepare(
+              `INSERT INTO cheque_transfers (cheque_receipt_id, supplier_id, supplier_payment_id)
+               VALUES (?, ?, ?)`
+            ).run(data.cheque_receipt_id, data.supplier_id, paymentResult.lastInsertRowid);
+            db.prepare(`UPDATE cheque_receipts SET status = 'given_to_supplier' WHERE id = ?`).run(data.cheque_receipt_id);
+          } else {
+            if (!data.cheque_number?.trim() || !data.bank_name?.trim() || !data.cheque_date) {
+              throw new ApiError(400, "Cheque number, bank name, and date are required for your own cheque");
+            }
+            const paymentResult = db
+              .prepare(
+                `INSERT INTO supplier_payments (supplier_id, purchase_id, amount, method, is_partial, notes)
+                 VALUES (?, ?, ?, 'cheque', ?, ?)`
+              )
+              .run(
+                data.supplier_id,
+                purchaseId,
+                data.amount_paid,
+                payment_status === "partial" ? 1 : 0,
+                `Cheque #${data.cheque_number} (${data.bank_name}) — pending purchase ${purchase_code}`
+              );
+            db.prepare(
+              `INSERT INTO cheques_issued (cheque_number, bank_name, amount, cheque_date, supplier_id, supplier_payment_id, notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?)`
+            ).run(
+              data.cheque_number.trim(),
+              data.bank_name.trim(),
+              data.amount_paid,
+              data.cheque_date,
+              data.supplier_id,
+              paymentResult.lastInsertRowid,
+              `For pending purchase ${purchase_code}`
+            );
+          }
+          // No cash_book entry here — a cheque isn't real cash yet,
+          // regardless of which kind. That only happens once it clears.
+        } else {
+          db.prepare(
+            `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
+             VALUES ('expense', 'purchase', ?, ?, ?, ?)`
+          ).run(data.payment_method ?? null, purchaseId, data.amount_paid, `Payment for pending purchase ${purchase_code}`);
+
+          db.prepare(
+            `INSERT INTO supplier_payments (supplier_id, purchase_id, amount, is_partial, notes)
+             VALUES (?, ?, ?, ?, ?)`
+          ).run(
+            data.supplier_id,
+            purchaseId,
+            data.amount_paid,
+            payment_status === "partial" ? 1 : 0,
+            `Payment recorded at time of pending purchase ${purchase_code}`
+          );
+        }
       }
 
       // Transport/commission/other costs — each its own named line, a

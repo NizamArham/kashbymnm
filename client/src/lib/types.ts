@@ -78,6 +78,7 @@ export interface Supplier {
   notes: string | null;
   balance_owed: number;
   credit_balance: number;
+  bank_accounts?: BankAccount[];
 }
 
 export interface Product {
@@ -140,6 +141,15 @@ export interface CustomerAddress {
   is_default: number;
 }
 
+export interface BankAccount {
+  id: number;
+  bank_name: string;
+  account_name: string;
+  account_number: string;
+  branch: string | null;
+  is_default: number;
+}
+
 export interface Customer {
   id: number;
   customer_code: string;
@@ -157,6 +167,7 @@ export interface Customer {
   reactivated_at: string | null;
   created_at: string;
   addresses?: CustomerAddress[];
+  bank_accounts?: BankAccount[];
 }
 
 export type SaleType = "in_store" | "online";

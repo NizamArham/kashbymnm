@@ -323,6 +323,17 @@ function AllReturnsTab({ isAdmin }: { isAdmin: boolean }) {
   });
   const [endDate, setEndDate] = useState<string | null>(() => toISODate(new Date()));
 
+  // A refund needs a real choice of method (and account, if bank
+  // transfer) before approving — a plain prompt() can't ask that, so
+  // this opens a proper popup only for refund resolutions.
+  const [approvingRequest, setApprovingRequest] = useState<ReturnRequest | null>(null);
+  const [approveReason, setApproveReason] = useState("");
+  const [refundMethod, setRefundMethod] = useState<"cash" | "bank_transfer">("cash");
+  const [customerBankAccounts, setCustomerBankAccounts] = useState<any[]>([]);
+  const [selectedRefundAccountId, setSelectedRefundAccountId] = useState("");
+  const [approveError, setApproveError] = useState<string | null>(null);
+  const [approveSubmitting, setApproveSubmitting] = useState(false);
+
   async function load() {
     setLoading(true);
     try {
@@ -353,6 +364,25 @@ function AllReturnsTab({ isAdmin }: { isAdmin: boolean }) {
 
   async function approve(r: ReturnRequest) {
     setError(null);
+
+    if (r.resolution === "refund") {
+      setApprovingRequest(r);
+      setApproveReason("");
+      setRefundMethod("cash");
+      setSelectedRefundAccountId("");
+      setApproveError(null);
+      setCustomerBankAccounts([]);
+      if (r.customer_id) {
+        try {
+          const full = await api.get<{ bank_accounts?: any[] }>(`/customers/${r.customer_id}`);
+          setCustomerBankAccounts(full.bank_accounts ?? []);
+        } catch {
+          // popup still opens fine; bank transfer just shows an empty list
+        }
+      }
+      return;
+    }
+
     const promptMsg = r.is_admin_override
       ? "This product is Final Sale — No Returns. Enter a reason to override and approve anyway:"
       : "Approve this return? Add an optional note:";
@@ -371,6 +401,34 @@ function AllReturnsTab({ isAdmin }: { isAdmin: boolean }) {
       setError(err instanceof ApiRequestError ? err.message : "Failed to approve request");
     } finally {
       setDecidingId(null);
+    }
+  }
+
+  async function confirmApproveRefund() {
+    if (!approvingRequest) return;
+    setApproveError(null);
+    if (approvingRequest.is_admin_override && !approveReason.trim()) {
+      setApproveError("An override reason is required for a Final Sale item.");
+      return;
+    }
+    if (refundMethod === "bank_transfer" && !selectedRefundAccountId) {
+      setApproveError("Select which of the customer's bank accounts to refund into");
+      return;
+    }
+
+    setApproveSubmitting(true);
+    try {
+      await api.put(`/returns/requests/${approvingRequest.id}/approve`, {
+        decision_reason: approveReason.trim() || undefined,
+        payment_method: refundMethod,
+        bank_account_id: refundMethod === "bank_transfer" ? parseInt(selectedRefundAccountId, 10) : undefined,
+      });
+      setApprovingRequest(null);
+      load();
+    } catch (err) {
+      setApproveError(err instanceof ApiRequestError ? err.message : "Failed to approve request");
+    } finally {
+      setApproveSubmitting(false);
     }
   }
 
@@ -494,6 +552,98 @@ function AllReturnsTab({ isAdmin }: { isAdmin: boolean }) {
             </tbody>
           </Table>
         </Card>
+      )}
+
+      {approvingRequest && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl">
+            <div className="p-5 border-b border-gray-100">
+              <h2 className="text-base font-semibold text-gray-900">Approve refund</h2>
+            </div>
+            <div className="p-5">
+              {approvingRequest.is_admin_override && (
+                <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+                  <AlertTriangle size={14} className="text-amber-600 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-amber-800">This product is Final Sale — a reason is required to override and approve anyway.</p>
+                </div>
+              )}
+              <FormGroup>
+                <Label>How is the refund being given?</Label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRefundMethod("cash")}
+                    className={`flex-1 border rounded-xl py-2 text-sm font-medium transition ${
+                      refundMethod === "cash" ? "border-black bg-black text-white" : "border-gray-200 text-gray-600 hover:border-gray-400"
+                    }`}
+                  >
+                    Cash
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRefundMethod("bank_transfer")}
+                    className={`flex-1 border rounded-xl py-2 text-sm font-medium transition ${
+                      refundMethod === "bank_transfer" ? "border-black bg-black text-white" : "border-gray-200 text-gray-600 hover:border-gray-400"
+                    }`}
+                  >
+                    Bank transfer
+                  </button>
+                </div>
+              </FormGroup>
+
+              {refundMethod === "bank_transfer" && (
+                <div className="border border-gray-200 rounded-xl p-3 mb-3">
+                  {customerBankAccounts.length === 0 ? (
+                    <p className="text-xs text-amber-600">
+                      No bank account on file for this customer — add one from the Customers page before refunding by bank transfer.
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      {customerBankAccounts.map((a) => (
+                        <label
+                          key={a.id}
+                          className={`flex items-start gap-2 border rounded-lg px-3 py-2 text-sm cursor-pointer transition ${
+                            String(a.id) === selectedRefundAccountId ? "border-black bg-gray-50" : "border-gray-200 hover:border-gray-300"
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="refund-bank-account"
+                            checked={String(a.id) === selectedRefundAccountId}
+                            onChange={() => setSelectedRefundAccountId(String(a.id))}
+                            className="mt-0.5"
+                          />
+                          <div>
+                            <p className="font-medium text-gray-900">
+                              {a.bank_name} {a.is_default === 1 && <span className="text-xs text-green-600 font-normal">(default)</span>}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {a.account_name} — {a.account_number}
+                              {a.branch ? ` — ${a.branch}` : ""}
+                            </p>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <FormGroup>
+                <Label>Note (optional{approvingRequest.is_admin_override ? " — required for Final Sale" : ""})</Label>
+                <Input value={approveReason} onChange={(e) => setApproveReason(e.target.value)} />
+              </FormGroup>
+
+              {approveError && <ErrorText>{approveError}</ErrorText>}
+              <div className="flex gap-2 mt-2">
+                <Button variant="primary" onClick={confirmApproveRefund} disabled={approveSubmitting}>
+                  {approveSubmitting ? "Approving..." : "Approve refund"}
+                </Button>
+                <Button onClick={() => setApprovingRequest(null)}>Cancel</Button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

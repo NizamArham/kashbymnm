@@ -150,6 +150,99 @@ CREATE TABLE IF NOT EXISTS store_credit_transactions (
 
 CREATE INDEX IF NOT EXISTS idx_store_credit_transactions_customer ON store_credit_transactions(customer_id);
 
+-- 2a-ii. cheque_receipts -----------------------------------------------------
+-- A cheque is a single physical instrument, not a payment method like cash
+-- or bank transfer — it has a real lifecycle (received, possibly handed on
+-- to a supplier, eventually cleared or bounced) and doesn't touch real cash
+-- until clearance. This table is the receipt side: the moment a cheque
+-- comes IN from a customer. If it's later handed to a supplier instead of
+-- being deposited directly, that's a separate, linked cheque_transfers row
+-- — deliberately two records, not one that mutates, so the full history
+-- ("received from X, given to Y") is always visible without reconstructing
+-- it from a change log.
+--
+-- Status meanings:
+--   in_hand         — received, still physically with the business
+--   given_to_supplier — handed on as payment (see cheque_transfers)
+--   deposited       — sent to the bank directly, awaiting clearance
+--   cleared         — the cheque was honored; the real cash_book entry
+--                     (income, since this is money coming in) is created
+--                     at this point, not before
+--   bounced         — dishonored; whatever it had settled is reversed —
+--                     the originating customer's sales go back to unpaid,
+--                     AND if it had already been passed to a supplier,
+--                     that supplier's balance is reinstated too (one
+--                     bounce, both sides affected)
+CREATE TABLE IF NOT EXISTS cheque_receipts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  cheque_number TEXT NOT NULL,
+  bank_name TEXT NOT NULL,
+  amount REAL NOT NULL,
+  cheque_date TEXT NOT NULL, -- the date written on the cheque itself
+  date_received TEXT NOT NULL DEFAULT (datetime('now')),
+  customer_id INTEGER NOT NULL REFERENCES customers(id),
+  -- The exact FIFO sale allocations this cheque settled, as JSON
+  -- (same shape computeFifoAllocation returns) — needed so a bounce can
+  -- reverse precisely those sales back to their prior state, not just
+  -- "the customer's balance in general."
+  sale_allocations TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'in_hand' CHECK (status IN ('in_hand','given_to_supplier','deposited','cleared','bounced')),
+  cleared_at TEXT,
+  bounced_at TEXT,
+  bounced_reason TEXT,
+  notes TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_cheque_receipts_customer ON cheque_receipts(customer_id);
+CREATE INDEX IF NOT EXISTS idx_cheque_receipts_status ON cheque_receipts(status);
+CREATE INDEX IF NOT EXISTS idx_cheque_receipts_number ON cheque_receipts(cheque_number);
+
+-- 2a-iii. cheque_transfers ----------------------------------------------------
+-- Only exists once a received cheque is handed on to a supplier as
+-- payment, instead of being deposited directly. Links back to the
+-- original cheque_receipts row, so "search this cheque number" always
+-- shows the full chain: received from customer X, given to supplier Y.
+CREATE TABLE IF NOT EXISTS cheque_transfers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  cheque_receipt_id INTEGER NOT NULL REFERENCES cheque_receipts(id),
+  supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
+  -- Links to the specific supplier_payments row this transfer created,
+  -- so reversing on a bounce knows exactly which payment to undo.
+  supplier_payment_id INTEGER REFERENCES supplier_payments(id),
+  date_given TEXT NOT NULL DEFAULT (datetime('now')),
+  notes TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_cheque_transfers_receipt ON cheque_transfers(cheque_receipt_id);
+CREATE INDEX IF NOT EXISTS idx_cheque_transfers_supplier ON cheque_transfers(supplier_id);
+
+-- 2a-iv. cheques_issued -------------------------------------------------------
+-- A cheque written from the business's OWN bank account, straight to a
+-- supplier — genuinely separate from cheque_receipts/cheque_transfers,
+-- since there's no customer involved and it can never be passed on
+-- further (it's already at its final destination the moment it's
+-- written). Same core lifecycle as a received cheque: issuing it
+-- reduces the supplier's balance immediately, clearing it creates the
+-- real cash_book expense, bouncing it reverses the supplier payment.
+CREATE TABLE IF NOT EXISTS cheques_issued (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  cheque_number TEXT NOT NULL,
+  bank_name TEXT NOT NULL,
+  amount REAL NOT NULL,
+  cheque_date TEXT NOT NULL, -- the date written on the cheque — drives the "due soon" dashboard reminder
+  date_issued TEXT NOT NULL DEFAULT (datetime('now')),
+  supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
+  supplier_payment_id INTEGER REFERENCES supplier_payments(id),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','cleared','bounced')),
+  cleared_at TEXT,
+  bounced_at TEXT,
+  bounced_reason TEXT,
+  notes TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_cheques_issued_supplier ON cheques_issued(supplier_id);
+CREATE INDEX IF NOT EXISTS idx_cheques_issued_status ON cheques_issued(status);
+
 -- 2b. customer_addresses --------------------------------------------------
 CREATE TABLE IF NOT EXISTS customer_addresses (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -163,6 +256,23 @@ CREATE TABLE IF NOT EXISTS customer_addresses (
 CREATE INDEX IF NOT EXISTS idx_customer_addresses_customer
   ON customer_addresses(customer_id);
 
+-- 2c. customer_bank_accounts -------------------------------------------------
+-- A customer may have several accounts on file (e.g. a refund needs to
+-- go to whichever one they specify) — same multi-record + one-default
+-- pattern as customer_addresses above.
+CREATE TABLE IF NOT EXISTS customer_bank_accounts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  bank_name TEXT NOT NULL,
+  account_name TEXT NOT NULL,
+  account_number TEXT NOT NULL,
+  branch TEXT,
+  is_default INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0,1))
+);
+
+CREATE INDEX IF NOT EXISTS idx_customer_bank_accounts_customer
+  ON customer_bank_accounts(customer_id);
+
 -- 3. suppliers -------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS suppliers (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -172,6 +282,23 @@ CREATE TABLE IF NOT EXISTS suppliers (
   city TEXT,
   notes TEXT
 );
+
+-- 3a. supplier_bank_accounts --------------------------------------------------
+-- Same multi-record + one-default pattern as customer_bank_accounts —
+-- needed since you're the one sending money TO a supplier by bank
+-- transfer, and they may give you more than one account over time.
+CREATE TABLE IF NOT EXISTS supplier_bank_accounts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  supplier_id INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+  bank_name TEXT NOT NULL,
+  account_name TEXT NOT NULL,
+  account_number TEXT NOT NULL,
+  branch TEXT,
+  is_default INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0,1))
+);
+
+CREATE INDEX IF NOT EXISTS idx_supplier_bank_accounts_supplier
+  ON supplier_bank_accounts(supplier_id);
 
 -- 4. products (catalog-level) ----------------------------------------------
 CREATE TABLE IF NOT EXISTS products (

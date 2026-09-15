@@ -17,6 +17,14 @@ const supplierInput = z.object({
   notes: z.string().optional(),
 });
 
+const bankAccountInput = z.object({
+  bank_name: z.string().min(1, "Bank name is required"),
+  account_name: z.string().min(1, "Account holder name is required"),
+  account_number: z.string().min(1, "Account number is required"),
+  branch: z.string().optional(),
+  is_default: z.boolean().optional(),
+});
+
 // balance_owed = total purchases from this supplier - total payments made
 // - any available credit (from damaged-goods returns the supplier agreed
 // to cover as a future discount rather than an immediate cash refund).
@@ -50,9 +58,85 @@ suppliersRouter.get(
   asyncHandler(async (req, res) => {
     const row = db
       .prepare(`SELECT suppliers.*, ${BALANCE_SUBQUERY} FROM suppliers WHERE id = ?`)
-      .get(req.params.id);
+      .get(req.params.id) as any;
     if (!row) throw new ApiError(404, "Supplier not found");
-    res.json(row);
+
+    const bankAccounts = db
+      .prepare(`SELECT * FROM supplier_bank_accounts WHERE supplier_id = ? ORDER BY is_default DESC, id ASC`)
+      .all(req.params.id);
+
+    res.json({ ...row, bank_accounts: bankAccounts });
+  })
+);
+
+// ---- Nested bank accounts ----
+
+// POST /api/suppliers/:id/bank-accounts
+suppliersRouter.post(
+  "/:id/bank-accounts",
+  asyncHandler(async (req, res) => {
+    const supplier = db.prepare(`SELECT * FROM suppliers WHERE id = ?`).get(req.params.id);
+    if (!supplier) throw new ApiError(404, "Supplier not found");
+
+    const data = bankAccountInput.parse(req.body);
+    const isDefault = data.is_default ? 1 : 0;
+
+    if (isDefault) {
+      db.prepare(`UPDATE supplier_bank_accounts SET is_default = 0 WHERE supplier_id = ?`).run(req.params.id);
+    }
+
+    const result = db
+      .prepare(
+        `INSERT INTO supplier_bank_accounts (supplier_id, bank_name, account_name, account_number, branch, is_default)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .run(req.params.id, data.bank_name, data.account_name, data.account_number, data.branch ?? null, isDefault);
+
+    const created = db.prepare(`SELECT * FROM supplier_bank_accounts WHERE id = ?`).get(result.lastInsertRowid);
+    res.status(201).json(created);
+  })
+);
+
+// PUT /api/suppliers/:id/bank-accounts/:accountId
+suppliersRouter.put(
+  "/:id/bank-accounts/:accountId",
+  asyncHandler(async (req, res) => {
+    const existing = db
+      .prepare(`SELECT * FROM supplier_bank_accounts WHERE id = ? AND supplier_id = ?`)
+      .get(req.params.accountId, req.params.id) as any;
+    if (!existing) throw new ApiError(404, "Bank account not found for this supplier");
+
+    const data = bankAccountInput.partial().parse(req.body);
+    const merged = { ...existing, ...data };
+    const isDefault = merged.is_default ? 1 : 0;
+
+    if (isDefault) {
+      db.prepare(`UPDATE supplier_bank_accounts SET is_default = 0 WHERE supplier_id = ? AND id != ?`).run(
+        req.params.id,
+        req.params.accountId
+      );
+    }
+
+    db.prepare(
+      `UPDATE supplier_bank_accounts SET bank_name = ?, account_name = ?, account_number = ?, branch = ?, is_default = ? WHERE id = ?`
+    ).run(merged.bank_name, merged.account_name, merged.account_number, merged.branch, isDefault, req.params.accountId);
+
+    const updated = db.prepare(`SELECT * FROM supplier_bank_accounts WHERE id = ?`).get(req.params.accountId);
+    res.json(updated);
+  })
+);
+
+// DELETE /api/suppliers/:id/bank-accounts/:accountId
+suppliersRouter.delete(
+  "/:id/bank-accounts/:accountId",
+  asyncHandler(async (req, res) => {
+    const existing = db
+      .prepare(`SELECT * FROM supplier_bank_accounts WHERE id = ? AND supplier_id = ?`)
+      .get(req.params.accountId, req.params.id);
+    if (!existing) throw new ApiError(404, "Bank account not found for this supplier");
+
+    db.prepare(`DELETE FROM supplier_bank_accounts WHERE id = ?`).run(req.params.accountId);
+    res.status(204).send();
   })
 );
 

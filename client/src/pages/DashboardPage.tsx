@@ -1,8 +1,19 @@
 import { useEffect, useState } from "react";
+import { AlertCircle } from "lucide-react";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { Sale, InventoryUnit } from "../lib/types";
 import { PageHeader, Card, StatCard, Table, Th, Td, EmptyState } from "../components/ui";
+
+interface ChequeReminder {
+  id: number;
+  cheque_number: string;
+  bank_name: string;
+  amount: number;
+  cheque_date: string;
+  customer_name?: string;
+  supplier_name?: string;
+}
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -10,6 +21,7 @@ export default function DashboardPage() {
   const [stockCount, setStockCount] = useState<number | null>(null);
   const [balance, setBalance] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [chequeReminders, setChequeReminders] = useState<{ to_deposit: ChequeReminder[]; to_pay: ChequeReminder[] } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -31,14 +43,32 @@ export default function DashboardPage() {
       }
     }
     load();
+
+    // Cheque reminders are admin-only server-side and a separate,
+    // optional widget — loaded independently so a failure here (e.g. a
+    // non-admin account) never blocks the rest of the dashboard.
+    if (user?.role === "admin") {
+      api
+        .get<{ to_deposit: ChequeReminder[]; to_pay: ChequeReminder[] }>("/cheques/dashboard-reminders")
+        .then((result) => {
+          if (!cancelled) setChequeReminders(result);
+        })
+        .catch(() => {
+          // quietly skip the reminder card if this fails
+        });
+    }
+
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [user]);
 
   const todayTotal = recentSales
     .filter((s) => s.date.startsWith(new Date().toISOString().slice(0, 10)))
     .reduce((sum, s) => sum + s.total, 0);
+
+  const hasChequeReminders =
+    chequeReminders && (chequeReminders.to_deposit.length > 0 || chequeReminders.to_pay.length > 0);
 
   return (
     <div>
@@ -49,6 +79,29 @@ export default function DashboardPage() {
         <StatCard label="Units in stock" value={stockCount !== null ? String(stockCount) : "—"} />
         <StatCard label="Cash book balance" value={balance !== null ? `Rs. ${balance.toLocaleString()}` : "—"} />
       </div>
+
+      {hasChequeReminders && (
+        <Card className="mb-6 border-amber-200 bg-amber-50/40">
+          <div className="flex items-start gap-2 mb-3">
+            <AlertCircle size={16} className="text-amber-500 flex-shrink-0 mt-0.5" />
+            <h2 className="text-base font-semibold text-gray-900">Cheques due today or tomorrow</h2>
+          </div>
+          <div className="space-y-1.5 text-sm">
+            {chequeReminders!.to_deposit.map((c) => (
+              <p key={`d-${c.id}`}>
+                <span className="text-gray-500">Deposit</span> #{c.cheque_number} ({c.bank_name}) — Rs. {c.amount.toLocaleString()} from{" "}
+                {c.customer_name} — {c.cheque_date.slice(0, 10)}
+              </p>
+            ))}
+            {chequeReminders!.to_pay.map((c) => (
+              <p key={`p-${c.id}`}>
+                <span className="text-gray-500">Pay</span> #{c.cheque_number} ({c.bank_name}) — Rs. {c.amount.toLocaleString()} to{" "}
+                {c.supplier_name} — {c.cheque_date.slice(0, 10)}
+              </p>
+            ))}
+          </div>
+        </Card>
+      )}
 
       <Card>
         <h2 className="text-base font-semibold text-gray-900 mb-3">Recent activity</h2>

@@ -25,6 +25,14 @@ const addressInput = z.object({
   is_default: z.boolean().optional(),
 });
 
+const bankAccountInput = z.object({
+  bank_name: z.string().min(1, "Bank name is required"),
+  account_name: z.string().min(1, "Account holder name is required"),
+  account_number: z.string().min(1, "Account number is required"),
+  branch: z.string().optional(),
+  is_default: z.boolean().optional(),
+});
+
 // loyalty_points = bonus_points (manually granted, kept for backward
 // compatibility with the legacy-customer import) + sum of every real
 // loyalty_transactions entry (earned, granted, redeemed, or reversed).
@@ -134,7 +142,11 @@ customersRouter.get(
       .prepare(`SELECT * FROM customer_addresses WHERE customer_id = ? ORDER BY is_default DESC, id ASC`)
       .all(req.params.id);
 
-    res.json({ ...customer, addresses });
+    const bankAccounts = db
+      .prepare(`SELECT * FROM customer_bank_accounts WHERE customer_id = ? ORDER BY is_default DESC, id ASC`)
+      .all(req.params.id);
+
+    res.json({ ...customer, addresses, bank_accounts: bankAccounts });
   })
 );
 
@@ -345,6 +357,77 @@ customersRouter.delete(
   })
 );
 
+// ---- Nested bank accounts ----
+
+// POST /api/customers/:id/bank-accounts — add a new saved bank account
+customersRouter.post(
+  "/:id/bank-accounts",
+  asyncHandler(async (req, res) => {
+    const customer = db.prepare(`SELECT * FROM customers WHERE id = ?`).get(req.params.id);
+    if (!customer) throw new ApiError(404, "Customer not found");
+
+    const data = bankAccountInput.parse(req.body);
+    const isDefault = data.is_default ? 1 : 0;
+
+    if (isDefault) {
+      db.prepare(`UPDATE customer_bank_accounts SET is_default = 0 WHERE customer_id = ?`).run(req.params.id);
+    }
+
+    const result = db
+      .prepare(
+        `INSERT INTO customer_bank_accounts (customer_id, bank_name, account_name, account_number, branch, is_default)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .run(req.params.id, data.bank_name, data.account_name, data.account_number, data.branch ?? null, isDefault);
+
+    const created = db.prepare(`SELECT * FROM customer_bank_accounts WHERE id = ?`).get(result.lastInsertRowid);
+    res.status(201).json(created);
+  })
+);
+
+// PUT /api/customers/:id/bank-accounts/:accountId
+customersRouter.put(
+  "/:id/bank-accounts/:accountId",
+  asyncHandler(async (req, res) => {
+    const existing = db
+      .prepare(`SELECT * FROM customer_bank_accounts WHERE id = ? AND customer_id = ?`)
+      .get(req.params.accountId, req.params.id) as any;
+    if (!existing) throw new ApiError(404, "Bank account not found for this customer");
+
+    const data = bankAccountInput.partial().parse(req.body);
+    const merged = { ...existing, ...data };
+    const isDefault = merged.is_default ? 1 : 0;
+
+    if (isDefault) {
+      db.prepare(`UPDATE customer_bank_accounts SET is_default = 0 WHERE customer_id = ? AND id != ?`).run(
+        req.params.id,
+        req.params.accountId
+      );
+    }
+
+    db.prepare(
+      `UPDATE customer_bank_accounts SET bank_name = ?, account_name = ?, account_number = ?, branch = ?, is_default = ? WHERE id = ?`
+    ).run(merged.bank_name, merged.account_name, merged.account_number, merged.branch, isDefault, req.params.accountId);
+
+    const updated = db.prepare(`SELECT * FROM customer_bank_accounts WHERE id = ?`).get(req.params.accountId);
+    res.json(updated);
+  })
+);
+
+// DELETE /api/customers/:id/bank-accounts/:accountId
+customersRouter.delete(
+  "/:id/bank-accounts/:accountId",
+  asyncHandler(async (req, res) => {
+    const existing = db
+      .prepare(`SELECT * FROM customer_bank_accounts WHERE id = ? AND customer_id = ?`)
+      .get(req.params.accountId, req.params.id);
+    if (!existing) throw new ApiError(404, "Bank account not found for this customer");
+
+    db.prepare(`DELETE FROM customer_bank_accounts WHERE id = ?`).run(req.params.accountId);
+    res.status(204).send();
+  })
+);
+
 // GET /api/customers/:id/loyalty-history — the real transaction ledger
 // behind a customer's point balance: every sale that earned points,
 // every manual grant, every reversal — not just the computed total.
@@ -386,7 +469,7 @@ customersRouter.get(
 // from the sum across all their sales, not from this one action.
 // Shared by both the preview (dry-run) and the real commit, so the two
 // can never drift out of sync with each other.
-function computeFifoAllocation(customerId: number, amount: number) {
+export function computeFifoAllocation(customerId: number, amount: number) {
   const outstandingSales = db
     .prepare(
       `SELECT id, invoice, date, total, amount_paid
@@ -449,16 +532,37 @@ customersRouter.post(
   })
 );
 
-const recordPaymentInput = z.object({
+const chequeItemInput = z.object({
+  cheque_number: z.string().min(1, "Cheque number is required"),
+  bank_name: z.string().min(1, "Bank name is required"),
   amount: z.number().positive(),
+  cheque_date: z.string(),
+});
+
+const recordPaymentInput = z.object({
+  amount: z.number().positive().optional(),
   method: z.enum(["cash", "bank_transfer", "cheque", "other"]),
   notes: z.string().optional(),
+  // Only used when method is 'cheque' — one or more cheques handed over
+  // together. Each becomes its own trackable cheque_receipts row (so it
+  // can individually clear or bounce later), but all of their amounts
+  // are summed into ONE combined FIFO allocation across the customer's
+  // outstanding sales, applied as a single action — not one allocation
+  // per cheque. `amount` above is ignored when this is set; the real
+  // total is the sum of these.
+  cheques: z.array(chequeItemInput).optional(),
 });
 
 // POST /api/customers/:id/payment — record a real credit-customer
 // payment, applied FIFO across their outstanding sales, oldest first.
-// ONE cash book entry for the total amount received, linked to the
-// customer rather than any single sale (since it may cover several).
+// For cash/bank_transfer/other: ONE cash book entry immediately, exactly
+// as before. For cheque (one or several handed over together): the
+// sales still flip to paid right away (the business's own choice — see
+// the cheque design notes), but NO cash book entry is created yet,
+// since the money isn't real until each cheque clears. Each cheque gets
+// its own cheque_receipts row, individually trackable/clearable, but
+// they all share ONE combined FIFO allocation (see computeFifoAllocation
+// call below) rather than each doing its own separate allocation.
 customersRouter.post(
   "/:id/payment",
   asyncHandler(async (req, res) => {
@@ -466,11 +570,23 @@ customersRouter.post(
     if (!customer) throw new ApiError(404, "Customer not found");
 
     const data = recordPaymentInput.parse(req.body);
-    const { allocations, unapplied } = computeFifoAllocation(Number(req.params.id), data.amount);
+
+    const cheques = data.method === "cheque" ? data.cheques ?? [] : [];
+    if (data.method === "cheque" && cheques.length === 0) {
+      throw new ApiError(400, "Add at least one cheque");
+    }
+    const totalAmount = data.method === "cheque" ? cheques.reduce((sum, c) => sum + c.amount, 0) : data.amount;
+    if (!totalAmount || totalAmount <= 0) {
+      throw new ApiError(400, "Enter a valid amount");
+    }
+
+    const { allocations, unapplied } = computeFifoAllocation(Number(req.params.id), totalAmount);
 
     if (allocations.length === 0) {
       throw new ApiError(409, "This customer has no outstanding sales to apply a payment against");
     }
+
+    const chequeReceiptIds: number[] = [];
 
     const runPayment = db.transaction(() => {
       for (const a of allocations) {
@@ -482,17 +598,46 @@ customersRouter.post(
       }
 
       const invoiceList = allocations.map((a) => a.invoice).join(", ");
-      db.prepare(
-        `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
-         VALUES ('income', 'customer_payment', ?, ?, ?, ?)`
-      ).run(
-        data.method,
-        req.params.id,
-        data.amount,
-        `Payment from ${customer.name} (${customer.customer_code}) — applied to ${invoiceList}${
-          data.notes?.trim() ? ` — ${data.notes.trim()}` : ""
-        }`
-      );
+
+      if (data.method === "cheque") {
+        // Every cheque in this batch stores the SAME combined
+        // allocation — a bounce on any one of them walks that shared
+        // list backward (most-recently-settled sale first) up to that
+        // specific cheque's own amount, leaving the other cheques and
+        // sales beyond that point untouched.
+        const sharedAllocationJson = JSON.stringify(allocations);
+        for (const c of cheques) {
+          const receiptResult = db
+            .prepare(
+              `INSERT INTO cheque_receipts (cheque_number, bank_name, amount, cheque_date, customer_id, sale_allocations, notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?)`
+            )
+            .run(
+              c.cheque_number.trim(),
+              c.bank_name.trim(),
+              c.amount,
+              c.cheque_date,
+              req.params.id,
+              sharedAllocationJson,
+              `From ${customer.name} (${customer.customer_code}) — part of a combined payment applied to ${invoiceList}${
+                data.notes?.trim() ? ` — ${data.notes.trim()}` : ""
+              }`
+            );
+          chequeReceiptIds.push(Number(receiptResult.lastInsertRowid));
+        }
+      } else {
+        db.prepare(
+          `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
+           VALUES ('income', 'customer_payment', ?, ?, ?, ?)`
+        ).run(
+          data.method,
+          req.params.id,
+          totalAmount,
+          `Payment from ${customer.name} (${customer.customer_code}) — applied to ${invoiceList}${
+            data.notes?.trim() ? ` — ${data.notes.trim()}` : ""
+          }`
+        );
+      }
     });
 
     runPayment();
@@ -501,6 +646,6 @@ customersRouter.post(
       .prepare(`SELECT customers.*, ${CALC_SUBQUERY} FROM customers WHERE customers.id = ?`)
       .get(req.params.id);
 
-    res.status(201).json({ customer: updatedCustomer, allocations, unapplied });
+    res.status(201).json({ customer: updatedCustomer, allocations, unapplied, cheque_receipt_ids: chequeReceiptIds });
   })
 );

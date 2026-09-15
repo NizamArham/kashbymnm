@@ -23,6 +23,12 @@ const requestInput = z.object({
 
 const decisionInput = z.object({
   decision_reason: z.string().optional(),
+  // Only meaningful when approving a 'refund' — how the money actually
+  // goes back. 'bank_transfer' requires an account already on file for
+  // this customer (see the lookup below); there's no fallback to "just
+  // trust an address" the way cash needs nothing at all.
+  payment_method: z.enum(["cash", "bank_transfer"]).optional(),
+  bank_account_id: z.number().int().positive().optional(),
 });
 
 const REQUEST_SELECT = `
@@ -157,6 +163,20 @@ returnsRouter.put(
       }
     }
 
+    const refundMethod = data.payment_method ?? "cash";
+    if (request.resolution === "refund" && refundMethod === "bank_transfer") {
+      if (!saleItem.customer_id) {
+        throw new ApiError(400, "This is a walk-in sale with no customer attached — a bank transfer refund needs a real customer account. Use cash instead.");
+      }
+      if (!data.bank_account_id) {
+        throw new ApiError(400, "Select which of the customer's bank accounts to refund into");
+      }
+      const account = db
+        .prepare(`SELECT * FROM customer_bank_accounts WHERE id = ? AND customer_id = ?`)
+        .get(data.bank_account_id, saleItem.customer_id);
+      if (!account) throw new ApiError(400, "That bank account isn't on file for this customer");
+    }
+
     const refund_amount = request.resolution === "refund" ? saleItem.unit_price : 0;
     const pointsToReverse =
       request.resolution === "refund" && saleItem.total > 0
@@ -185,8 +205,8 @@ returnsRouter.put(
       if (request.resolution === "refund") {
         db.prepare(
           `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
-           VALUES ('expense', 'return_refund', 'cash', ?, ?, ?)`
-        ).run(returnId, refund_amount, `Refund for invoice ${saleItem.invoice}`);
+           VALUES ('expense', 'return_refund', ?, ?, ?, ?)`
+        ).run(refundMethod, returnId, refund_amount, `Refund for invoice ${saleItem.invoice}`);
 
         if (pointsToReverse > 0) {
           db.prepare(`UPDATE sales SET loyalty_points_earned = MAX(0, loyalty_points_earned - ?) WHERE id = ?`).run(

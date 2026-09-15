@@ -1,7 +1,6 @@
 import { ReactNode, useState, useRef, useEffect } from "react";
 import { ChevronDown, Check, Plus, CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
-import { cities } from "../lib/cities";
 
 export function PageHeader({ title, subtitle, action }: { title: string; subtitle?: string; action?: ReactNode }) {
   return (
@@ -105,7 +104,6 @@ export function Dropdown({
   placeholder = "— Select —",
   disabled = false,
   searchable = false,
-  dropUp = false,
   onCreateNew,
   createNewLabel = "+ Add new",
 }: {
@@ -115,7 +113,6 @@ export function Dropdown({
   placeholder?: string;
   disabled?: boolean;
   searchable?: boolean;
-  dropUp?: boolean;
   onCreateNew?: () => void;
   createNewLabel?: string;
 }) {
@@ -151,34 +148,32 @@ export function Dropdown({
 
   return (
     <div className="relative" ref={ref}>
-      {open && searchable ? (
-        <div className="relative w-full rounded-xl border border-gray-400 bg-white ring-2 ring-gray-100">
-          <input
-            ref={searchInputRef}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={placeholder}
-            className="w-full rounded-xl bg-transparent px-3.5 py-2.5 pr-10 text-sm focus:outline-none"
-            onClick={(e) => e.stopPropagation()}
-          />
-          <ChevronDown size={15} className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 rotate-180 text-gray-400" />
-        </div>
-      ) : (
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => setOpen((o) => !o)}
-          className={`w-full flex items-center justify-between px-3.5 py-2.5 bg-white border rounded-xl text-sm text-left transition-all duration-200
-            ${disabled ? "opacity-50 cursor-not-allowed bg-gray-50" : "hover:border-gray-300"}
-            ${open ? "border-gray-400 ring-2 ring-gray-100" : "border-gray-200"}`}
-        >
-          <span className={selected ? "text-gray-900" : "text-gray-400"}>{selected ? selected.label : placeholder}</span>
-          <ChevronDown size={15} className={`text-gray-400 transition-transform ${open ? "rotate-180" : ""}`} />
-        </button>
-      )}
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen((o) => !o)}
+        className={`w-full flex items-center justify-between px-3.5 py-2.5 bg-white border rounded-xl text-sm text-left transition-all duration-200
+          ${disabled ? "opacity-50 cursor-not-allowed bg-gray-50" : "hover:border-gray-300"}
+          ${open ? "border-gray-400 ring-2 ring-gray-100" : "border-gray-200"}`}
+      >
+        <span className={selected ? "text-gray-900" : "text-gray-400"}>{selected ? selected.label : placeholder}</span>
+        <ChevronDown size={15} className={`text-gray-400 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
 
       {open && !disabled && (
-        <div className={`absolute z-20 w-full bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden ${dropUp ? "bottom-full mb-1.5" : "mt-1.5"}`}>
+        <div className="absolute z-20 mt-1.5 w-full bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
+          {searchable && (
+            <div className="p-2 border-b border-gray-100">
+              <input
+                ref={searchInputRef}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Type to search..."
+                className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-gray-400"
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
+          )}
           <div className="max-h-72 overflow-y-auto py-1">
             {onCreateNew && (
               <button
@@ -377,13 +372,7 @@ export function NewSupplierModal({
         </FormGroup>
         <FormGroup>
           <Label>City</Label>
-          <Dropdown
-            value={city}
-            onChange={setCity}
-            options={cities.map((entry) => ({ value: entry.name, label: entry.name, sublabel: entry.code }))}
-            placeholder="— Search for a city —"
-            searchable
-          />
+          <Input value={city} onChange={(e) => setCity(e.target.value)} />
         </FormGroup>
         {error && <ErrorText>{error}</ErrorText>}
         <div className="flex gap-2 mt-2">
@@ -395,57 +384,6 @@ export function NewSupplierModal({
           </Button>
         </div>
       </div>
-    </div>
-  );
-}
-
-export function DatePicker({ value, onChange, placeholder = "Select date" }: { value: string; onChange: (value: string) => void; placeholder?: string }) {
-  const [open, setOpen] = useState(false);
-  const [month, setMonth] = useState(() => {
-    const date = value ? new Date(`${value}T00:00:00`) : new Date();
-    return new Date(date.getFullYear(), date.getMonth(), 1);
-  });
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function close(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, []);
-
-  const firstDay = new Date(month.getFullYear(), month.getMonth(), 1).getDay();
-  const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
-  const selected = value ? new Date(`${value}T00:00:00`) : null;
-  const monthLabel = month.toLocaleDateString(undefined, { month: "long", year: "numeric" });
-  const format = (day: number) => `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-
-  return (
-    <div className="relative" ref={ref}>
-      <button type="button" onClick={() => setOpen((current) => !current)} className="w-full flex items-center justify-between px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-left hover:border-gray-300 transition">
-        <span className={value ? "text-gray-900" : "text-gray-400"}>{value || placeholder}</span>
-        <CalendarDays size={15} className="text-gray-400" />
-      </button>
-      {open && (
-        <div className="absolute z-30 mt-1.5 w-72 rounded-xl border border-gray-200 bg-white p-3 shadow-lg">
-          <div className="flex items-center justify-between mb-2">
-            <button type="button" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} className="p-1 text-gray-400 hover:text-gray-900"><ChevronLeft size={15} /></button>
-            <span className="text-sm font-medium text-gray-900">{monthLabel}</span>
-            <button type="button" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} className="p-1 text-gray-400 hover:text-gray-900"><ChevronRight size={15} /></button>
-          </div>
-          <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-gray-400 mb-1">{["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((day) => <span key={day}>{day}</span>)}</div>
-          <div className="grid grid-cols-7 gap-1">
-            {Array.from({ length: firstDay }, (_, index) => <span key={`empty-${index}`} />)}
-            {Array.from({ length: daysInMonth }, (_, index) => {
-              const day = index + 1;
-              const dateValue = format(day);
-              const isSelected = selected?.getDate() === day && selected.getMonth() === month.getMonth() && selected.getFullYear() === month.getFullYear();
-              return <button key={dateValue} type="button" onClick={() => { onChange(dateValue); setOpen(false); }} className={`h-8 rounded-lg text-xs ${isSelected ? "bg-black text-white" : "text-gray-700 hover:bg-gray-100"}`}>{day}</button>;
-            })}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -611,6 +549,140 @@ export function DateRangePicker({
                       ? "bg-black text-white font-medium"
                       : inRange
                       ? "bg-gray-100 text-gray-900"
+                      : "text-gray-700 hover:bg-gray-50"
+                  }`}
+                >
+                  {day}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function DatePicker({
+  value,
+  onChange,
+  placeholder = "Select date",
+}: {
+  value: string | null; // "YYYY-MM-DD" or null
+  onChange: (date: string) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [openUpward, setOpenUpward] = useState(false);
+  const [viewMonth, setViewMonth] = useState(() => {
+    const base = value ? new Date(value + "T00:00:00") : new Date();
+    return new Date(base.getFullYear(), base.getMonth(), 1);
+  });
+  const ref = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // The panel is roughly 320px tall — if there isn't that much room
+  // below the field (e.g. it's near the bottom of a modal), open
+  // upward instead of getting clipped by the modal's own boundary.
+  function handleToggle() {
+    if (!open && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      setOpenUpward(spaceBelow < 320);
+    }
+    setOpen((o) => !o);
+  }
+
+  function toISO(d: Date): string {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+
+  function formatDisplay(iso: string): string {
+    const d = new Date(iso + "T00:00:00");
+    return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  }
+
+  function handleDayClick(d: Date) {
+    onChange(toISO(d));
+    setOpen(false);
+  }
+
+  const daysInMonth = new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 0).getDate();
+  const firstWeekday = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), 1).getDay();
+  const monthLabel = viewMonth.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  const todayIso = toISO(new Date());
+
+  return (
+    <div className="relative inline-block w-full" ref={ref}>
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={handleToggle}
+        className="w-full flex items-center gap-2 px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-sm hover:border-gray-300 transition-all"
+      >
+        <CalendarDays size={15} className="text-gray-400 flex-shrink-0" />
+        <span className={value ? "text-gray-900" : "text-gray-400"}>{value ? formatDisplay(value) : placeholder}</span>
+      </button>
+
+      {open && (
+        <div
+          className={`absolute z-20 left-0 bg-white border border-gray-200 rounded-xl shadow-lg p-3 w-[280px] ${
+            openUpward ? "bottom-full mb-1.5" : "top-full mt-1.5"
+          }`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <button
+              type="button"
+              onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() - 1, 1))}
+              className="p-1 hover:bg-gray-100 rounded-lg transition"
+            >
+              <ChevronLeft size={15} />
+            </button>
+            <span className="text-sm font-medium text-gray-900">{monthLabel}</span>
+            <button
+              type="button"
+              onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 1))}
+              className="p-1 hover:bg-gray-100 rounded-lg transition"
+            >
+              <ChevronRight size={15} />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-7 gap-1 mb-1">
+            {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
+              <div key={i} className="text-center text-[10px] font-medium text-gray-400 py-1">
+                {d}
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-7 gap-1">
+            {Array.from({ length: firstWeekday }).map((_, i) => (
+              <div key={`blank-${i}`} />
+            ))}
+            {Array.from({ length: daysInMonth }).map((_, i) => {
+              const day = i + 1;
+              const date = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), day);
+              const iso = toISO(date);
+              const isSelected = value === iso;
+              const isToday = todayIso === iso;
+              return (
+                <button
+                  type="button"
+                  key={day}
+                  onClick={() => handleDayClick(date)}
+                  className={`aspect-square rounded-lg text-xs transition ${
+                    isSelected
+                      ? "bg-black text-white font-medium"
+                      : isToday
+                      ? "bg-gray-100 text-gray-900 font-medium"
                       : "text-gray-700 hover:bg-gray-50"
                   }`}
                 >

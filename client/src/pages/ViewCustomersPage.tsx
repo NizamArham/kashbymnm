@@ -1,10 +1,10 @@
 import { useEffect, useState, useMemo, Fragment } from "react";
 import { Users, Search, MessageCircle, Pencil, Plus, Star, X, ChevronDown, ChevronRight, Wallet, UserX, UserCheck, Trash2, AlertTriangle } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
-import { Customer, CustomerAddress } from "../lib/types";
+import { Customer, CustomerAddress, BankAccount } from "../lib/types";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { PageHeader, Card, Table, Th, Td, Input, Button, EmptyState, ErrorText, SuccessText, Label, FormGroup, Dropdown } from "../components/ui";
+import { PageHeader, Card, Table, Th, Td, Input, Button, EmptyState, ErrorText, SuccessText, Label, FormGroup, Dropdown, DatePicker } from "../components/ui";
 import { CityPicker } from "../components/CityPicker";
 
 function whatsappLink(phone: string): string {
@@ -48,12 +48,30 @@ export default function ViewCustomersPage() {
   const [newAddr, setNewAddr] = useState({ address_line1: "", address_line2: "", city: "" });
   const [addrError, setAddrError] = useState<string | null>(null);
 
+  const [showAddBankAccount, setShowAddBankAccount] = useState(false);
+  const [newBankAccount, setNewBankAccount] = useState({ bank_name: "", account_name: "", account_number: "", branch: "" });
+  const [bankAccountError, setBankAccountError] = useState<string | null>(null);
+  const [editingBankAccountId, setEditingBankAccountId] = useState<number | null>(null);
+  const [editBankAccount, setEditBankAccount] = useState({ bank_name: "", account_name: "", account_number: "", branch: "" });
+  const [editBankAccountError, setEditBankAccountError] = useState<string | null>(null);
+
   // Record Payment — one amount, applied FIFO across the customer's
   // outstanding sales. Live preview updates as the amount changes, so
   // the person sees exactly what it'll cover before confirming.
   const [payingCustomer, setPayingCustomer] = useState<Customer | null>(null);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "bank_transfer" | "cheque" | "other">("cash");
+  // Cheques received are a real LIST — a customer often hands over
+  // several at once, each with its own real amount, not identical
+  // ones. All amounts are summed and FIFO-allocated together as one
+  // combined payment once submitted.
+  const [chequeNumber, setChequeNumber] = useState("");
+  const [chequeBankName, setChequeBankName] = useState("");
+  const [chequeAmount, setChequeAmount] = useState("");
+  const [chequeDate, setChequeDate] = useState("");
+  const [chequeListError, setChequeListError] = useState<string | null>(null);
+  const [chequeList, setChequeList] = useState<{ cheque_number: string; bank_name: string; amount: number; cheque_date: string }[]>([]);
+  const chequeListTotal = chequeList.reduce((sum, c) => sum + c.amount, 0);
   const [paymentNotes, setPaymentNotes] = useState("");
   const [paymentPreview, setPaymentPreview] = useState<{
     allocations: { sale_id: number; invoice: string; date: string; owed_before: number; applied: number; new_status: string }[];
@@ -106,26 +124,29 @@ export default function ViewCustomersPage() {
   }, []);
 
   // Live preview — refetches the FIFO breakdown a moment after the
-  // amount stops changing, so it doesn't fire on every keystroke.
+  // relevant amount stops changing, so it doesn't fire on every
+  // keystroke. For cheque, that's the sum of the whole list (several
+  // cheques settle together as one combined payment); otherwise it's
+  // just the plain amount field.
   useEffect(() => {
-    if (!payingCustomer || !paymentAmount || parseFloat(paymentAmount) <= 0) {
+    const previewAmount = paymentMethod === "cheque" ? chequeListTotal : parseFloat(paymentAmount) || 0;
+    if (!payingCustomer || previewAmount <= 0) {
       setPaymentPreview(null);
       return;
     }
-    const amount = parseFloat(paymentAmount);
     setPreviewLoading(true);
     const timeout = setTimeout(() => {
       api
         .post<{
           allocations: { sale_id: number; invoice: string; date: string; owed_before: number; applied: number; new_status: string }[];
           unapplied: number;
-        }>(`/customers/${payingCustomer.id}/payment-preview`, { amount })
+        }>(`/customers/${payingCustomer.id}/payment-preview`, { amount: previewAmount })
         .then((result) => setPaymentPreview(result))
         .catch(() => setPaymentPreview(null))
         .finally(() => setPreviewLoading(false));
     }, 400);
     return () => clearTimeout(timeout);
-  }, [paymentAmount, payingCustomer]);
+  }, [paymentAmount, paymentMethod, chequeListTotal, payingCustomer]);
 
   async function toggleExpand(c: Customer) {
     if (expandedId === c.id) {
@@ -174,21 +195,52 @@ export default function ViewCustomersPage() {
     setPaymentNotes("");
     setPaymentPreview(null);
     setPaymentError(null);
+    setChequeNumber("");
+    setChequeBankName("");
+    setChequeAmount("");
+    setChequeDate("");
+    setChequeListError(null);
+    setChequeList([]);
+  }
+
+  function addCheque() {
+    setChequeListError(null);
+    const amt = parseFloat(chequeAmount);
+    if (!chequeNumber.trim() || !chequeBankName.trim() || !amt || amt <= 0 || !chequeDate) {
+      setChequeListError("Cheque number, bank name, a valid amount, and date are all required");
+      return;
+    }
+    setChequeList((list) => [...list, { cheque_number: chequeNumber.trim(), bank_name: chequeBankName.trim(), amount: amt, cheque_date: chequeDate }]);
+    setChequeNumber("");
+    setChequeBankName("");
+    setChequeAmount("");
+    setChequeDate("");
+  }
+
+  function removeCheque(index: number) {
+    setChequeList((list) => list.filter((_, i) => i !== index));
   }
 
   async function handleRecordPayment() {
     if (!payingCustomer) return;
     setPaymentError(null);
-    const amount = parseFloat(paymentAmount);
+
+    const amount = paymentMethod === "cheque" ? chequeListTotal : parseFloat(paymentAmount) || 0;
     if (!amount || amount <= 0) {
-      setPaymentError("Enter an amount greater than 0");
+      setPaymentError(paymentMethod === "cheque" ? "Add at least one cheque" : "Enter an amount greater than 0");
       return;
     }
+
     setPaymentSubmitting(true);
     try {
       const result = await api.post<{ customer: Customer; allocations: any[]; unapplied: number }>(
         `/customers/${payingCustomer.id}/payment`,
-        { amount, method: paymentMethod, notes: paymentNotes.trim() || undefined }
+        {
+          amount: paymentMethod === "cheque" ? undefined : amount,
+          method: paymentMethod,
+          notes: paymentNotes.trim() || undefined,
+          cheques: paymentMethod === "cheque" ? chequeList : undefined,
+        }
       );
 
       const remainingBalance = result.customer.balance_due;
@@ -196,6 +248,11 @@ export default function ViewCustomersPage() {
       setReceiptAfterPayment({ name: payingCustomer.name, phone: payingCustomer.phone, message });
 
       setPayingCustomer(null);
+      setChequeNumber("");
+      setChequeBankName("");
+      setChequeAmount("");
+      setChequeDate("");
+      setChequeList([]);
       load();
       if (expandedId === payingCustomer.id) refreshExpanded(payingCustomer.id);
     } catch (err) {
@@ -376,6 +433,78 @@ export default function ViewCustomersPage() {
       refreshExpanded(customerId);
     } catch (err) {
       setEditAddrError(err instanceof ApiRequestError ? err.message : "Failed to delete address — it may be in use on a delivery.");
+    }
+  }
+
+  async function addBankAccount(customerId: number) {
+    setBankAccountError(null);
+    if (!newBankAccount.bank_name.trim() || !newBankAccount.account_name.trim() || !newBankAccount.account_number.trim()) {
+      setBankAccountError("Bank name, account holder name, and account number are all required");
+      return;
+    }
+    try {
+      await api.post(`/customers/${customerId}/bank-accounts`, {
+        bank_name: newBankAccount.bank_name.trim(),
+        account_name: newBankAccount.account_name.trim(),
+        account_number: newBankAccount.account_number.trim(),
+        branch: newBankAccount.branch.trim() || undefined,
+        is_default: false,
+      });
+      setNewBankAccount({ bank_name: "", account_name: "", account_number: "", branch: "" });
+      setShowAddBankAccount(false);
+      refreshExpanded(customerId);
+    } catch (err) {
+      setBankAccountError(err instanceof ApiRequestError ? err.message : "Failed to add bank account");
+    }
+  }
+
+  async function makeBankAccountDefault(customerId: number, account: BankAccount) {
+    try {
+      await api.put(`/customers/${customerId}/bank-accounts/${account.id}`, { is_default: true });
+      refreshExpanded(customerId);
+    } catch {
+      // minor action — no need for a full error banner if it fails
+    }
+  }
+
+  function startEditBankAccount(a: BankAccount) {
+    setEditingBankAccountId(a.id);
+    setEditBankAccount({ bank_name: a.bank_name, account_name: a.account_name, account_number: a.account_number, branch: a.branch ?? "" });
+    setEditBankAccountError(null);
+  }
+
+  function cancelEditBankAccount() {
+    setEditingBankAccountId(null);
+    setEditBankAccountError(null);
+  }
+
+  async function saveEditBankAccount(customerId: number, accountId: number) {
+    setEditBankAccountError(null);
+    if (!editBankAccount.bank_name.trim() || !editBankAccount.account_name.trim() || !editBankAccount.account_number.trim()) {
+      setEditBankAccountError("Bank name, account holder name, and account number are all required");
+      return;
+    }
+    try {
+      await api.put(`/customers/${customerId}/bank-accounts/${accountId}`, {
+        bank_name: editBankAccount.bank_name.trim(),
+        account_name: editBankAccount.account_name.trim(),
+        account_number: editBankAccount.account_number.trim(),
+        branch: editBankAccount.branch.trim() || undefined,
+      });
+      setEditingBankAccountId(null);
+      refreshExpanded(customerId);
+    } catch (err) {
+      setEditBankAccountError(err instanceof ApiRequestError ? err.message : "Failed to update bank account");
+    }
+  }
+
+  async function deleteBankAccount(customerId: number, accountId: number) {
+    if (!confirm("Delete this bank account?")) return;
+    try {
+      await api.delete(`/customers/${customerId}/bank-accounts/${accountId}`);
+      refreshExpanded(customerId);
+    } catch (err) {
+      setEditBankAccountError(err instanceof ApiRequestError ? err.message : "Failed to delete bank account");
     }
   }
 
@@ -763,6 +892,144 @@ export default function ViewCustomersPage() {
                                 </div>
                               )}
                             </div>
+
+                            <div className="border-t border-gray-200 pt-4">
+                              <div className="flex items-center justify-between mb-2">
+                                <h3 className="text-sm font-semibold text-gray-900">Bank accounts</h3>
+                                {!showAddBankAccount && (
+                                  <button
+                                    onClick={() => setShowAddBankAccount(true)}
+                                    className="text-xs text-gray-500 hover:text-gray-800 inline-flex items-center gap-1"
+                                  >
+                                    <Plus size={12} />
+                                    Add account
+                                  </button>
+                                )}
+                              </div>
+
+                              {(!expandedDetail.bank_accounts || expandedDetail.bank_accounts.length === 0) && !showAddBankAccount ? (
+                                <p className="text-xs text-gray-400">No bank accounts on file — needed for a bank-transfer refund or payment.</p>
+                              ) : (
+                                <div className="space-y-2">
+                                  {expandedDetail.bank_accounts?.map((a) =>
+                                    editingBankAccountId === a.id ? (
+                                      <div key={a.id} className="bg-white border border-gray-200 rounded-xl p-3">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                          <FormGroup>
+                                            <Label>Bank name</Label>
+                                            <Input
+                                              value={editBankAccount.bank_name}
+                                              onChange={(e) => setEditBankAccount((f) => ({ ...f, bank_name: e.target.value }))}
+                                            />
+                                          </FormGroup>
+                                          <FormGroup>
+                                            <Label>Branch (optional)</Label>
+                                            <Input
+                                              value={editBankAccount.branch}
+                                              onChange={(e) => setEditBankAccount((f) => ({ ...f, branch: e.target.value }))}
+                                            />
+                                          </FormGroup>
+                                          <FormGroup>
+                                            <Label>Account holder name</Label>
+                                            <Input
+                                              value={editBankAccount.account_name}
+                                              onChange={(e) => setEditBankAccount((f) => ({ ...f, account_name: e.target.value }))}
+                                            />
+                                          </FormGroup>
+                                          <FormGroup>
+                                            <Label>Account number</Label>
+                                            <Input
+                                              value={editBankAccount.account_number}
+                                              onChange={(e) => setEditBankAccount((f) => ({ ...f, account_number: e.target.value }))}
+                                            />
+                                          </FormGroup>
+                                        </div>
+                                        {editBankAccountError && <ErrorText>{editBankAccountError}</ErrorText>}
+                                        <div className="flex gap-2 mt-2">
+                                          <Button size="sm" variant="primary" onClick={() => saveEditBankAccount(expandedDetail.id, a.id)}>
+                                            Save
+                                          </Button>
+                                          <Button size="sm" onClick={cancelEditBankAccount}>
+                                            Cancel
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div key={a.id} className="flex items-center justify-between bg-white border border-gray-100 rounded-lg px-3 py-2 text-sm">
+                                        <div>
+                                          <span className="text-gray-700">
+                                            {a.bank_name} — {a.account_name} — {a.account_number}
+                                          </span>
+                                          {a.branch && <div className="text-xs text-gray-400">{a.branch}</div>}
+                                        </div>
+                                        <div className="flex items-center gap-3 flex-shrink-0">
+                                          {a.is_default ? (
+                                            <span className="text-xs text-green-600 font-medium">Default</span>
+                                          ) : (
+                                            <button
+                                              onClick={() => makeBankAccountDefault(expandedDetail.id, a)}
+                                              className="text-xs text-gray-400 hover:text-gray-700"
+                                            >
+                                              Make default
+                                            </button>
+                                          )}
+                                          <button onClick={() => startEditBankAccount(a)} className="text-xs text-gray-400 hover:text-gray-700">
+                                            Edit
+                                          </button>
+                                          <button onClick={() => deleteBankAccount(expandedDetail.id, a.id)} className="text-xs text-red-400 hover:text-red-600">
+                                            Delete
+                                          </button>
+                                        </div>
+                                      </div>
+                                    )
+                                  )}
+                                </div>
+                              )}
+
+                              {showAddBankAccount && (
+                                <div className="mt-3 bg-white border border-gray-200 rounded-xl p-3">
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    <FormGroup>
+                                      <Label>Bank name</Label>
+                                      <Input
+                                        value={newBankAccount.bank_name}
+                                        onChange={(e) => setNewBankAccount((f) => ({ ...f, bank_name: e.target.value }))}
+                                      />
+                                    </FormGroup>
+                                    <FormGroup>
+                                      <Label>Branch (optional)</Label>
+                                      <Input
+                                        value={newBankAccount.branch}
+                                        onChange={(e) => setNewBankAccount((f) => ({ ...f, branch: e.target.value }))}
+                                      />
+                                    </FormGroup>
+                                    <FormGroup>
+                                      <Label>Account holder name</Label>
+                                      <Input
+                                        value={newBankAccount.account_name}
+                                        onChange={(e) => setNewBankAccount((f) => ({ ...f, account_name: e.target.value }))}
+                                      />
+                                    </FormGroup>
+                                    <FormGroup>
+                                      <Label>Account number</Label>
+                                      <Input
+                                        value={newBankAccount.account_number}
+                                        onChange={(e) => setNewBankAccount((f) => ({ ...f, account_number: e.target.value }))}
+                                      />
+                                    </FormGroup>
+                                  </div>
+                                  {bankAccountError && <ErrorText>{bankAccountError}</ErrorText>}
+                                  <div className="flex gap-2 mt-2">
+                                    <Button size="sm" variant="primary" onClick={() => addBankAccount(expandedDetail.id)}>
+                                      Save account
+                                    </Button>
+                                    <Button size="sm" onClick={() => setShowAddBankAccount(false)}>
+                                      Cancel
+                                    </Button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </Td>
                       </tr>
@@ -777,77 +1044,133 @@ export default function ViewCustomersPage() {
 
       {payingCustomer && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto shadow-2xl">
+          <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
             <div className="p-5 border-b border-gray-100 flex items-center justify-between">
               <h2 className="text-base font-semibold text-gray-900">Record payment — {payingCustomer.name}</h2>
               <button onClick={() => setPayingCustomer(null)} className="text-gray-400 hover:text-gray-600">
                 <X size={18} />
               </button>
             </div>
-            <div className="p-5">
-              <p className="text-xs text-gray-400 mb-3">
-                Currently owes Rs. {payingCustomer.balance_due.toLocaleString()}. A payment is applied to their oldest unpaid sales
-                first.
-              </p>
-              <FormGroup>
-                <Label>Amount received (Rs.)</Label>
-                <Input type="number" min="0" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} />
-              </FormGroup>
-              <FormGroup>
-                <Label>Method</Label>
-                <Dropdown
-                  value={paymentMethod}
-                  onChange={(v) => setPaymentMethod(v as typeof paymentMethod)}
-                  options={[
-                    { value: "cash", label: "Cash" },
-                    { value: "bank_transfer", label: "Bank transfer" },
-                    { value: "cheque", label: "Cheque" },
-                    { value: "other", label: "Other" },
-                  ]}
-                />
-              </FormGroup>
-              <FormGroup>
-                <Label>Notes (optional)</Label>
-                <Input value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} />
-              </FormGroup>
+            <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <p className="text-xs text-gray-400 mb-3">
+                  Currently owes Rs. {payingCustomer.balance_due.toLocaleString()}. A payment is applied to their oldest unpaid sales
+                  first.
+                </p>
+                {paymentMethod !== "cheque" && (
+                  <FormGroup>
+                    <Label>Amount received (Rs.)</Label>
+                    <Input type="number" min="0" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} />
+                  </FormGroup>
+                )}
+                <FormGroup>
+                  <Label>Method</Label>
+                  <Dropdown
+                    value={paymentMethod}
+                    onChange={(v) => setPaymentMethod(v as typeof paymentMethod)}
+                    options={[
+                      { value: "cash", label: "Cash" },
+                      { value: "bank_transfer", label: "Bank transfer" },
+                      { value: "cheque", label: "Cheque" },
+                      { value: "other", label: "Other" },
+                    ]}
+                  />
+                </FormGroup>
 
-              {previewLoading && <p className="text-xs text-gray-400 mb-2">Calculating...</p>}
-              {paymentPreview && paymentPreview.allocations.length > 0 && (
-                <div className="border border-gray-200 rounded-xl overflow-hidden mb-3">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="bg-gray-50">
-                        <th className="text-left px-2.5 py-1.5 font-medium text-gray-400">Invoice</th>
-                        <th className="text-left px-2.5 py-1.5 font-medium text-gray-400">Owed</th>
-                        <th className="text-left px-2.5 py-1.5 font-medium text-gray-400">Applied</th>
-                        <th className="text-left px-2.5 py-1.5 font-medium text-gray-400">New status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {paymentPreview.allocations.map((a) => (
-                        <tr key={a.sale_id} className="border-t border-gray-100">
-                          <td className="px-2.5 py-1.5">{a.invoice}</td>
-                          <td className="px-2.5 py-1.5">Rs. {a.owed_before.toLocaleString()}</td>
-                          <td className="px-2.5 py-1.5">Rs. {a.applied.toLocaleString()}</td>
-                          <td className="px-2.5 py-1.5 capitalize">{a.new_status}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {paymentPreview.unapplied > 0 && (
-                    <p className="text-xs text-gray-400 px-2.5 py-1.5 border-t border-gray-100">
-                      Rs. {paymentPreview.unapplied.toLocaleString()} left over after covering everything outstanding.
+                {paymentMethod === "cheque" && (
+                  <div className="border border-gray-200 rounded-xl p-3 mb-3">
+                    <p className="text-xs text-gray-400 mb-2">
+                      A cheque isn't real cash yet — sales are marked paid now, but nothing hits the Cash Book until it clears (tracked
+                      on the Cheques page). Add one or more cheques below — they're summed and applied together.
                     </p>
-                  )}
-                </div>
-              )}
+                    <div className="grid grid-cols-2 gap-2 mb-2">
+                      <Input placeholder="Cheque number" value={chequeNumber} onChange={(e) => setChequeNumber(e.target.value)} />
+                      <Input placeholder="Bank name" value={chequeBankName} onChange={(e) => setChequeBankName(e.target.value)} />
+                      <Input
+                        type="number"
+                        min="0"
+                        placeholder="Amount"
+                        value={chequeAmount}
+                        onChange={(e) => setChequeAmount(e.target.value)}
+                      />
+                      <DatePicker value={chequeDate || null} onChange={setChequeDate} placeholder="Cheque date" />
+                    </div>
+                    {chequeListError && <ErrorText>{chequeListError}</ErrorText>}
+                    <Button onClick={addCheque}>Add this cheque</Button>
 
-              {paymentError && <ErrorText>{paymentError}</ErrorText>}
-              <div className="flex gap-2 mt-2">
-                <Button variant="primary" onClick={handleRecordPayment} disabled={paymentSubmitting}>
-                  {paymentSubmitting ? "Recording..." : "Confirm payment"}
-                </Button>
-                <Button onClick={() => setPayingCustomer(null)}>Cancel</Button>
+                    {chequeList.length > 0 && (
+                      <div className="mt-3 space-y-1.5">
+                        {chequeList.map((c, i) => (
+                          <div key={i} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2 text-sm">
+                            <div>
+                              <span className="font-medium text-gray-900">
+                                #{c.cheque_number} — {c.bank_name}
+                              </span>
+                              <div className="text-xs text-gray-500">Rs. {c.amount.toLocaleString()}</div>
+                            </div>
+                            <button onClick={() => removeCheque(i)} className="text-gray-400 hover:text-red-500 text-xs">
+                              Remove
+                            </button>
+                          </div>
+                        ))}
+                        <div className="flex justify-between text-sm font-medium px-3 pt-1">
+                          <span>Total</span>
+                          <span>Rs. {chequeListTotal.toLocaleString()}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <FormGroup>
+                  <Label>Notes (optional)</Label>
+                  <Input value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} />
+                </FormGroup>
+
+                {paymentError && <ErrorText>{paymentError}</ErrorText>}
+                <div className="flex gap-2 mt-2">
+                  <Button variant="primary" onClick={handleRecordPayment} disabled={paymentSubmitting}>
+                    {paymentSubmitting ? "Recording..." : "Confirm payment"}
+                  </Button>
+                  <Button onClick={() => setPayingCustomer(null)}>Cancel</Button>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs font-medium text-gray-500 mb-2">How this will apply</p>
+                {previewLoading && <p className="text-xs text-gray-400">Calculating...</p>}
+                {!previewLoading && (!paymentPreview || paymentPreview.allocations.length === 0) && (
+                  <p className="text-xs text-gray-400">Enter an amount to see how it covers their outstanding sales.</p>
+                )}
+                {paymentPreview && paymentPreview.allocations.length > 0 && (
+                  <div className="border border-gray-200 rounded-xl overflow-hidden">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-gray-50">
+                          <th className="text-left px-2.5 py-1.5 font-medium text-gray-400">Invoice</th>
+                          <th className="text-left px-2.5 py-1.5 font-medium text-gray-400">Owed</th>
+                          <th className="text-left px-2.5 py-1.5 font-medium text-gray-400">Applied</th>
+                          <th className="text-left px-2.5 py-1.5 font-medium text-gray-400">New status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {paymentPreview.allocations.map((a) => (
+                          <tr key={a.sale_id} className="border-t border-gray-100">
+                            <td className="px-2.5 py-1.5">{a.invoice}</td>
+                            <td className="px-2.5 py-1.5">Rs. {a.owed_before.toLocaleString()}</td>
+                            <td className="px-2.5 py-1.5">Rs. {a.applied.toLocaleString()}</td>
+                            <td className="px-2.5 py-1.5 capitalize">{a.new_status}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {paymentPreview.unapplied > 0 && (
+                      <p className="text-xs text-gray-400 px-2.5 py-1.5 border-t border-gray-100">
+                        Rs. {paymentPreview.unapplied.toLocaleString()} left over after covering everything outstanding.
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>

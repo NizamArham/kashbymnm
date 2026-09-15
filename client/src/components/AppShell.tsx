@@ -22,6 +22,7 @@ import {
   UserCog,
   SlidersHorizontal,
   Clock,
+  Banknote,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
@@ -99,6 +100,10 @@ export default function AppShell() {
       label: "Returns",
       icon: RotateCcw,
       path: "/returns",
+      subItems: [
+        { id: "returns-pending", label: "Pending Requests", path: "/returns", icon: RotateCcw },
+        { id: "returns-history", label: "History", path: "/returns", icon: History },
+      ],
     },
     {
       id: "finance",
@@ -109,6 +114,7 @@ export default function AppShell() {
       subItems: [
         { id: "purchases", label: "Purchases", path: "/purchases", icon: Package },
         { id: "supplier-payments", label: "Supplier Payments", path: "/supplier-payments", icon: CreditCard },
+        { id: "cheques", label: "Cheques", path: "/cheques", icon: Banknote },
         { id: "cash-book", label: "Cash Book", path: "/cash-book", icon: Landmark },
       ],
     },
@@ -146,9 +152,9 @@ export default function AppShell() {
     const path = location.pathname;
     const isOnPos = path === "/pos" || path === "/sales";
     const isOnInventory = path === "/inventory" || path === "/products" || path === "/products/add";
-    const isOnDirectory = path === "/customers" || path === "/customers/add" || path === "/staff" || path === "/staff/add" || path === "/suppliers";
+    const isOnDirectory = path === "/customers" || path === "/customers/add" || path === "/staff" || path === "/suppliers";
     const isOnReturns = path === "/returns";
-    const isOnFinance = path === "/purchases" || path === "/supplier-payments" || path === "/cash-book";
+    const isOnFinance = path === "/purchases" || path === "/supplier-payments" || path === "/cheques" || path === "/cash-book";
     const isOnDeliveries = path === "/deliveries" || path === "/couriers";
     const isOnSettings = path === "/attendance" || path === "/settings/general";
 

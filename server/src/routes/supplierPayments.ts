@@ -14,6 +14,9 @@ const paymentInput = z.object({
   purchase_id: z.number().int().positive().optional(),
   amount: z.number().positive(),
   method: z.string().optional(),
+  // Only meaningful when method is 'bank_transfer' — which of the
+  // supplier's on-file accounts the money is actually going to.
+  bank_account_id: z.number().int().positive().optional(),
   is_partial: z.boolean().optional(),
   notes: z.string().optional(),
 });
@@ -76,6 +79,18 @@ supplierPaymentsRouter.post(
     const supplier = db.prepare(`SELECT id FROM suppliers WHERE id = ?`).get(data.supplier_id);
     if (!supplier) throw new ApiError(400, "Referenced supplier does not exist");
 
+    let accountNote = "";
+    if (data.method === "bank_transfer") {
+      if (!data.bank_account_id) {
+        throw new ApiError(400, "Select which of the supplier's bank accounts to pay into");
+      }
+      const account = db
+        .prepare(`SELECT * FROM supplier_bank_accounts WHERE id = ? AND supplier_id = ?`)
+        .get(data.bank_account_id, data.supplier_id) as any;
+      if (!account) throw new ApiError(400, "That bank account isn't on file for this supplier");
+      accountNote = ` — ${account.bank_name} ${account.account_number}`;
+    }
+
     const runTransaction = db.transaction(() => {
       const result = db
         .prepare(
@@ -88,13 +103,13 @@ supplierPaymentsRouter.post(
           data.amount,
           data.method ?? null,
           data.is_partial ? 1 : 0,
-          data.notes ?? null
+          `${data.notes ?? ""}${accountNote}`.trim() || null
         );
 
       db.prepare(
         `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
          VALUES ('expense', 'supplier_payment', ?, ?, ?, ?)`
-      ).run(data.method ?? null, result.lastInsertRowid, data.amount, data.notes ?? "Supplier payment");
+      ).run(data.method ?? null, result.lastInsertRowid, data.amount, `${data.notes ?? "Supplier payment"}${accountNote}`);
 
       // If tied to a specific purchase, keep that purchase's payment_status current.
       if (data.purchase_id) {

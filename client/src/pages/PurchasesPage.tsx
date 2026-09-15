@@ -18,6 +18,7 @@ import {
   Dropdown,
   EmptyState,
   DateRangePicker,
+  DatePicker,
 } from "../components/ui";
 
 interface DraftLine {
@@ -65,6 +66,15 @@ export default function PurchasesPage() {
   const [supplierId, setSupplierId] = useState("");
   const [lines, setLines] = useState<DraftLine[]>([{ description: "", quantity: "", unit_cost: "", product_type: "OG" }]);
   const [amountPaid, setAmountPaid] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "bank_transfer" | "card" | "cheque">("cash");
+  // Only relevant when paymentMethod is "cheque" — which kind:
+  const [chequeKind, setChequeKind] = useState<"in_hand" | "own">("in_hand");
+  const [chequeSearchNumber, setChequeSearchNumber] = useState("");
+  const [chequeMatch, setChequeMatch] = useState<any | null>(null);
+  const [chequeSearchError, setChequeSearchError] = useState<string | null>(null);
+  const [ownChequeNumber, setOwnChequeNumber] = useState("");
+  const [ownChequeBankName, setOwnChequeBankName] = useState("");
+  const [ownChequeDate, setOwnChequeDate] = useState("");
   const [expenses, setExpenses] = useState<DraftExpense[]>([]);
   const [notes, setNotes] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
@@ -129,6 +139,23 @@ export default function PurchasesPage() {
   const selectedSupplier = suppliers.find((s) => String(s.id) === supplierId);
   const availableCredit = selectedSupplier?.credit_balance ?? 0;
 
+  async function handleChequeLookup() {
+    setChequeSearchError(null);
+    setChequeMatch(null);
+    const number = chequeSearchNumber.trim();
+    if (!number) return;
+    try {
+      const matches = await api.get<any[]>(`/cheques/search?number=${encodeURIComponent(number)}`);
+      if (matches.length === 0) {
+        setChequeSearchError("No in-hand cheque found with that number");
+        return;
+      }
+      setChequeMatch(matches[0]);
+    } catch (err) {
+      setChequeSearchError(err instanceof ApiRequestError ? err.message : "Lookup failed");
+    }
+  }
+
   async function handleRecordPending() {
     setFormError(null);
     setFormSuccess(null);
@@ -144,6 +171,18 @@ export default function PurchasesPage() {
       return;
     }
 
+    const paidAmountNum = parseFloat(amountPaid) || 0;
+    if (paidAmountNum > 0 && paymentMethod === "cheque") {
+      if (chequeKind === "in_hand" && !chequeMatch) {
+        setFormError("Find and select an in-hand cheque first");
+        return;
+      }
+      if (chequeKind === "own" && (!ownChequeNumber.trim() || !ownChequeBankName.trim() || !ownChequeDate)) {
+        setFormError("Cheque number, bank name, and date are all required for your own cheque");
+        return;
+      }
+    }
+
     setSubmitting(true);
     try {
       const validExpenses = expenses.filter((e) => e.label.trim() && parseFloat(e.amount) > 0);
@@ -155,7 +194,13 @@ export default function PurchasesPage() {
           unit_cost: parseFloat(l.unit_cost),
           product_type: l.product_type,
         })),
-        amount_paid: parseFloat(amountPaid) || 0,
+        amount_paid: paidAmountNum,
+        payment_method: paidAmountNum > 0 ? paymentMethod : undefined,
+        cheque_kind: paidAmountNum > 0 && paymentMethod === "cheque" ? chequeKind : undefined,
+        cheque_receipt_id: paidAmountNum > 0 && paymentMethod === "cheque" && chequeKind === "in_hand" ? chequeMatch?.id : undefined,
+        cheque_number: paidAmountNum > 0 && paymentMethod === "cheque" && chequeKind === "own" ? ownChequeNumber.trim() : undefined,
+        bank_name: paidAmountNum > 0 && paymentMethod === "cheque" && chequeKind === "own" ? ownChequeBankName.trim() : undefined,
+        cheque_date: paidAmountNum > 0 && paymentMethod === "cheque" && chequeKind === "own" ? ownChequeDate : undefined,
         expenses: validExpenses.map((e) => ({ label: e.label.trim(), amount: parseFloat(e.amount) })),
         description: notes.trim() || undefined,
       });
@@ -169,6 +214,13 @@ export default function PurchasesPage() {
       setSupplierId("");
       setLines([{ description: "", quantity: "", unit_cost: "", product_type: "OG" }]);
       setAmountPaid("");
+      setPaymentMethod("cash");
+      setChequeKind("in_hand");
+      setChequeSearchNumber("");
+      setChequeMatch(null);
+      setOwnChequeNumber("");
+      setOwnChequeBankName("");
+      setOwnChequeDate("");
       setExpenses([]);
       setNotes("");
       setShowRecord(false);
@@ -373,6 +425,95 @@ export default function PurchasesPage() {
             <Label>Amount paid to supplier now (Rs.)</Label>
             <Input type="number" min="0" value={amountPaid} onChange={(e) => setAmountPaid(e.target.value)} placeholder="0 if fully on credit" />
           </FormGroup>
+
+          {parseFloat(amountPaid) > 0 && (
+            <>
+              <FormGroup>
+                <Label>Payment method</Label>
+                <Dropdown
+                  value={paymentMethod}
+                  onChange={(v) => {
+                    setPaymentMethod(v as typeof paymentMethod);
+                    setChequeMatch(null);
+                    setChequeSearchError(null);
+                  }}
+                  options={[
+                    { value: "cash", label: "Cash" },
+                    { value: "bank_transfer", label: "Bank transfer" },
+                    { value: "card", label: "Card" },
+                    { value: "cheque", label: "Cheque" },
+                  ]}
+                />
+              </FormGroup>
+
+              {paymentMethod === "cheque" && (
+                <div className="border border-gray-200 rounded-xl p-3 mb-3">
+                  <div className="flex gap-2 mb-3">
+                    <button
+                      type="button"
+                      onClick={() => setChequeKind("in_hand")}
+                      className={`flex-1 border rounded-xl py-2 text-xs font-medium transition ${
+                        chequeKind === "in_hand" ? "border-black bg-black text-white" : "border-gray-200 text-gray-600 hover:border-gray-400"
+                      }`}
+                    >
+                      Cheque in hand
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setChequeKind("own")}
+                      className={`flex-1 border rounded-xl py-2 text-xs font-medium transition ${
+                        chequeKind === "own" ? "border-black bg-black text-white" : "border-gray-200 text-gray-600 hover:border-gray-400"
+                      }`}
+                    >
+                      My own cheque
+                    </button>
+                  </div>
+
+                  {chequeKind === "in_hand" ? (
+                    <>
+                      <p className="text-xs text-gray-400 mb-2">Use a cheque already received from a customer.</p>
+                      <div className="flex gap-2 mb-2">
+                        <Input
+                          placeholder="Cheque number"
+                          value={chequeSearchNumber}
+                          onChange={(e) => setChequeSearchNumber(e.target.value)}
+                          onKeyDown={(e) => e.key === "Enter" && handleChequeLookup()}
+                        />
+                        <Button onClick={handleChequeLookup}>Find</Button>
+                      </div>
+                      {chequeSearchError && <ErrorText>{chequeSearchError}</ErrorText>}
+                      {chequeMatch && (
+                        <div className="bg-gray-50 rounded-lg px-3 py-2 text-sm">
+                          <p className="font-medium text-gray-900">
+                            #{chequeMatch.cheque_number} — {chequeMatch.bank_name}
+                          </p>
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            Rs. {chequeMatch.amount.toLocaleString()} from {chequeMatch.customer_name} ({chequeMatch.customer_code})
+                          </p>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-xs text-gray-400 mb-2">Write a new cheque from your own account.</p>
+                      <FormGroup>
+                        <Label>Cheque number</Label>
+                        <Input value={ownChequeNumber} onChange={(e) => setOwnChequeNumber(e.target.value)} />
+                      </FormGroup>
+                      <FormGroup>
+                        <Label>Bank name</Label>
+                        <Input value={ownChequeBankName} onChange={(e) => setOwnChequeBankName(e.target.value)} />
+                      </FormGroup>
+                      <FormGroup>
+                        <Label>Cheque date</Label>
+                        <DatePicker value={ownChequeDate || null} onChange={setOwnChequeDate} />
+                      </FormGroup>
+                    </>
+                  )}
+                </div>
+              )}
+            </>
+          )}
 
           <div className="border-t border-gray-100 pt-3 mt-1">
             <p className="text-xs text-gray-400 mb-2">

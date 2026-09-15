@@ -21,8 +21,8 @@ import CashBookPage from "./pages/CashBookPage";
 import ProfilePage from "./pages/ProfilePage";
 import AttendancePage from "./pages/AttendancePage";
 import StaffPage from "./pages/StaffPage";
-import AddStaffPage from "./pages/AddStaffPage";
 import SupplierPaymentsPage from "./pages/SupplierPaymentsPage";
+import ChequesPage from "./pages/ChequesPage";
 import CouriersPage from "./pages/CourierReconciliationPage";
 import GeneralSettingsPage from "./pages/GeneralSettingsPage";
 
@@ -77,14 +77,6 @@ export default function App() {
             </ProtectedRoute>
           }
         />
-        <Route
-          path="/staff/add"
-          element={
-            <ProtectedRoute adminOnly>
-              <AddStaffPage />
-            </ProtectedRoute>
-          }
-        />
 
         <Route path="/sales" element={<SaleHistoryPage />} />
         <Route path="/returns" element={<ReturnsPage />} />
@@ -118,6 +110,14 @@ export default function App() {
           element={
             <ProtectedRoute adminOnly>
               <SupplierPaymentsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/cheques"
+          element={
+            <ProtectedRoute adminOnly>
+              <ChequesPage />
             </ProtectedRoute>
           }
         />

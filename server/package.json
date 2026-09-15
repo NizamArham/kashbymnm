@@ -11,6 +11,8 @@
     "db:migrate": "tsx src/db/migrate.ts",
     "db:migrate-store-credit-exchange": "tsx src/db/migrate-store-credit-exchange.ts",
     "db:migrate-customer-suspend-delete": "tsx src/db/migrate-customer-suspend-delete.ts",
+    "db:migrate-cheques": "tsx src/db/migrate-cheques.ts",
+    "db:migrate-bank-accounts": "tsx src/db/migrate-bank-accounts.ts",
     "db:seed": "tsx src/db/seed.ts",
     "db:import-opening-stock": "tsx src/db/import-opening-stock.ts",
     "db:import-legacy-customers": "tsx src/db/import-legacy-customers.ts"
