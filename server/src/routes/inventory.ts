@@ -39,7 +39,8 @@ inventoryRouter.get(
       .prepare(
         `SELECT inventory.*, products.product_title, products.brand, products.category,
                 products.selling_price AS product_selling_price,
-                suppliers.id AS batch_supplier_id, suppliers.name AS batch_supplier_name
+                suppliers.id AS batch_supplier_id, suppliers.name AS batch_supplier_name,
+                suppliers.supplier_code AS batch_supplier_code
          FROM inventory
          JOIN products ON products.id = inventory.product_id
          LEFT JOIN purchase_items ON purchase_items.id = inventory.purchase_item_id

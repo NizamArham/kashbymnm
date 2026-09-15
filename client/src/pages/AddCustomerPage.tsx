@@ -1,10 +1,12 @@
 import { useState, useEffect, FormEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import { AlertTriangle, MapPin, Phone, UserRound } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button } from "../components/ui";
 import { CityPicker } from "../components/CityPicker";
 
 export default function AddCustomerPage() {
+  const navigate = useNavigate();
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [phone2, setPhone2] = useState("");
@@ -48,10 +50,6 @@ export default function AddCustomerPage() {
       setError("Customer name is required");
       return;
     }
-    if (duplicateWarning) {
-      setError(`This phone number already belongs to ${duplicateWarning.name} (${duplicateWarning.customer_code}). Use the existing customer instead.`);
-      return;
-    }
 
     setSubmitting(true);
     try {
@@ -78,6 +76,7 @@ export default function AddCustomerPage() {
       setAddLine2("");
       setCity("");
       setDuplicateWarning(null);
+      setTimeout(() => navigate("/customers"), 900);
     } catch (err) {
       setError(err instanceof ApiRequestError ? err.message : "Failed to add customer");
     } finally {
@@ -125,7 +124,7 @@ export default function AddCustomerPage() {
           </FormGroup>
           <FormGroup>
             <Label>City</Label>
-            <CityPicker value={city} onChange={setCity} dropUp />
+            <CityPicker value={city} onChange={setCity} />
           </FormGroup>
 
           {error && <ErrorText>{error}</ErrorText>}
@@ -139,7 +138,7 @@ export default function AddCustomerPage() {
           <Card className="h-fit lg:sticky lg:top-6">
             <h2 className="text-base font-semibold text-gray-900 mb-4 flex items-center gap-2">
               <UserRound size={18} className="text-gray-600" />
-              Customer preview
+              Customer Preview
             </h2>
             <div className="mb-4 pb-4 border-b border-gray-100">
               <p className="text-lg font-semibold text-gray-900">{name.trim() || "New customer"}</p>

@@ -77,6 +77,7 @@ export interface Supplier {
   city: string | null;
   notes: string | null;
   balance_owed: number;
+  credit_balance: number;
 }
 
 export interface Product {
@@ -92,6 +93,7 @@ export interface Product {
   image_path: string | null;
   is_public: number;
   allow_returns: number;
+  product_type: "FO" | "OG" | "OR" | "OP";
   qty: number;
   created_at: string;
 }
@@ -118,6 +120,7 @@ export interface InventoryUnit {
   purchase_item_id?: number | null;
   batch_supplier_id?: number | null;
   batch_supplier_name?: string | null;
+  batch_supplier_code?: string | null;
   status: InventoryStatus;
   removal_reason?: RemovalReason | null;
   removal_note?: string | null;
@@ -147,6 +150,11 @@ export interface Customer {
   balance_due: number;
   store_credit_balance: number;
   last_order_date: string | null;
+  is_suspended: number;
+  suspended_reason: string | null;
+  suspended_at: string | null;
+  reactivated_reason: string | null;
+  reactivated_at: string | null;
   created_at: string;
   addresses?: CustomerAddress[];
 }
@@ -178,6 +186,7 @@ export interface Sale {
   customer_name?: string;
   customer_code?: string;
   customer_phone?: string | null;
+  deleted_customer_snapshot?: string | null;
   salesperson: string | null;
   date: string;
   subtotal: number;
@@ -199,6 +208,7 @@ export interface Sale {
   void_reason: string | null;
   items?: SaleItem[];
   delivery_address?: { address_line1: string | null; address_line2: string | null; city: string | null } | null;
+  delivery_partner?: "CPAK" | "D2D" | "DEX" | null;
 }
 
 export interface Coupon {
@@ -232,8 +242,9 @@ export interface ReturnRequest {
   sale_item_id: number;
   quantity: number;
   condition: "clean" | "damaged";
-  resolution: "refund" | "exchange";
+  resolution: "refund" | "exchange" | "store_credit_exchange";
   exchange_inventory_id: number | null;
+  credit_expiry_days: number | null;
   reason: string;
   status: "pending" | "approved" | "declined";
   requested_by: number | null;
@@ -248,6 +259,7 @@ export interface ReturnRequest {
   // Joined fields for display
   sale_id: number;
   unit_price: number;
+  deleted_customer_snapshot?: string | null;
   item_quantity: number;
   invoice: string;
   customer_id: number | null;
@@ -311,4 +323,118 @@ export interface CashBookEntry {
   amount: number;
   running_balance: number;
   notes: string | null;
+}
+
+export interface SupplierPayment {
+  id: number;
+  supplier_id: number;
+  supplier_name: string;
+  purchase_id: number | null;
+  amount: number;
+  method: string | null;
+  is_partial: number;
+  notes: string | null;
+  payment_date: string;
+}
+
+export interface SupplierBalance {
+  id: number;
+  supplier_code: string;
+  name: string;
+  total_purchased: number;
+  total_paid: number;
+  balance_owed: number;
+}
+
+export interface BusinessInfo {
+  id: number;
+  business_name: string | null;
+  address_line1: string | null;
+  address_line2: string | null;
+  city: string | null;
+  phone: string | null;
+  email: string | null;
+  bank_name: string | null;
+  bank_account_no: string | null;
+  bank_account_name: string | null;
+  notes: string | null;
+}
+
+export interface PendingPurchaseLine {
+  id: number;
+  purchase_id: number;
+  description: string;
+  quantity: number;
+  unit_cost: number;
+  is_fulfilled: number;
+  fulfilled_purchase_item_id: number | null;
+}
+
+export interface PendingPurchaseLine {
+  id: number;
+  purchase_id: number;
+  description: string;
+  quantity: number;
+  unit_cost: number;
+  fulfilled_quantity: number;
+  is_fulfilled: number;
+  fulfilled_purchase_item_id: number | null;
+  product_type: "FO" | "OG" | "OR" | "OP";
+}
+
+export interface PurchaseExpense {
+  id: number;
+  purchase_id: number;
+  label: string;
+  amount: number;
+  created_at: string;
+}
+
+export interface PurchaseReturnItem {
+  id: number;
+  purchase_return_id: number;
+  pending_line_id: number | null;
+  inventory_id: number | null;
+  quantity: number;
+  unit_cost: number;
+}
+
+export interface PurchaseReturn {
+  id: number;
+  purchase_id: number;
+  supplier_id: number;
+  supplier_name: string;
+  purchase_code: string;
+  total_amount: number;
+  reason: string;
+  resolution: "cash_refund" | "supplier_credit";
+  notes: string | null;
+  created_at: string;
+  items: PurchaseReturnItem[];
+}
+
+export interface AvailableUnit {
+  id: number;
+  sku: string;
+  barcode: string | null;
+  size: string | null;
+  color: string | null;
+  cost_price: number | null;
+  product_id: number;
+  product_title: string;
+}
+
+export interface Purchase {
+  id: number;
+  purchase_code: string;
+  supplier_id: number;
+  supplier_name: string;
+  purchase_date: string;
+  total_cost: number;
+  amount_paid: number;
+  payment_status: "paid" | "partial" | "unpaid";
+  fulfillment_status: "pending" | "fulfilled";
+  description: string | null;
+  lines?: PendingPurchaseLine[];
+  expenses?: PurchaseExpense[];
 }

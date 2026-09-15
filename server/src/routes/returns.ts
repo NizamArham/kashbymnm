@@ -12,9 +12,13 @@ returnsRouter.use(requireAuth);
 const requestInput = z.object({
   sale_item_id: z.number().int().positive(),
   condition: z.enum(["clean", "damaged"]),
-  resolution: z.enum(["refund", "exchange"]),
+  resolution: z.enum(["refund", "exchange", "store_credit_exchange"]),
   reason: z.string().min(1, "A reason is required to submit a return request"),
   exchange_inventory_id: z.number().int().positive().optional(),
+  // Only meaningful for store_credit_exchange. 45 is the real default —
+  // anything else is a deliberate exception, chosen at request time, not
+  // an equally-weighted option.
+  credit_expiry_days: z.number().int().positive().default(45),
 });
 
 const decisionInput = z.object({
@@ -23,7 +27,7 @@ const decisionInput = z.object({
 
 const REQUEST_SELECT = `
   SELECT return_requests.*, sale_items.sale_id, sale_items.unit_price, sale_items.quantity as item_quantity,
-         sales.invoice, sales.customer_id, customers.name as customer_name,
+         sales.invoice, sales.customer_id, sales.deleted_customer_snapshot, customers.name as customer_name,
          inventory.sku, products.product_title, products.allow_returns,
          requester.name as requested_by_name, decider.name as decided_by_name
   FROM return_requests
@@ -66,10 +70,11 @@ returnsRouter.post(
 
     const saleItem = db
       .prepare(
-        `SELECT sale_items.*, products.allow_returns, products.product_title
+        `SELECT sale_items.*, products.allow_returns, products.product_title, sales.customer_id
          FROM sale_items
          JOIN inventory ON inventory.id = sale_items.inventory_id
          JOIN products ON products.id = inventory.product_id
+         JOIN sales ON sales.id = sale_items.sale_id
          WHERE sale_items.id = ?`
       )
       .get(data.sale_item_id) as any;
@@ -93,16 +98,24 @@ returnsRouter.post(
       throw new ApiError(400, "exchange_inventory_id is required when resolution is 'exchange'");
     }
 
+    if (data.resolution === "store_credit_exchange" && !saleItem.customer_id) {
+      throw new ApiError(
+        400,
+        "This sale has no customer attached — store credit needs a real customer account to be granted to. A walk-in sale can only use refund or a direct 1:1 exchange."
+      );
+    }
+
     const result = db
       .prepare(
-        `INSERT INTO return_requests (sale_item_id, condition, resolution, exchange_inventory_id, reason, requested_by, is_admin_override)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO return_requests (sale_item_id, condition, resolution, exchange_inventory_id, credit_expiry_days, reason, requested_by, is_admin_override)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         data.sale_item_id,
         data.condition,
         data.resolution,
         data.exchange_inventory_id ?? null,
+        data.resolution === "store_credit_exchange" ? data.credit_expiry_days : null,
         data.reason,
         req.user!.id,
         isFinalSale ? 1 : 0
@@ -171,8 +184,8 @@ returnsRouter.put(
 
       if (request.resolution === "refund") {
         db.prepare(
-          `INSERT INTO cash_book (type, category, reference_id, amount, notes)
-           VALUES ('expense', 'return_refund', ?, ?, ?)`
+          `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
+           VALUES ('expense', 'return_refund', 'cash', ?, ?, ?)`
         ).run(returnId, refund_amount, `Refund for invoice ${saleItem.invoice}`);
 
         if (pointsToReverse > 0) {
@@ -191,6 +204,25 @@ returnsRouter.put(
 
       if (request.resolution === "exchange") {
         db.prepare(`UPDATE inventory SET status = 'sold' WHERE id = ?`).run(request.exchange_inventory_id);
+      }
+
+      if (request.resolution === "store_credit_exchange") {
+        // The returned item's value becomes real, expiring store
+        // credit — the customer picks their actual replacement later,
+        // as a genuinely new sale, applying this credit as a payment
+        // source there (see customers.ts / the sale checkout flow).
+        const expiryDays = request.credit_expiry_days ?? 45;
+        const expiresAt = new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000).toISOString();
+        db.prepare(
+          `INSERT INTO store_credit_transactions (customer_id, amount, reason, reference_id, notes, expires_at)
+           VALUES (?, ?, 'return_exchange', ?, ?, ?)`
+        ).run(
+          saleItem.customer_id,
+          saleItem.unit_price,
+          returnId,
+          `Credit from return on invoice ${saleItem.invoice} — expires in ${expiryDays} days`,
+          expiresAt
+        );
       }
 
       db.prepare(

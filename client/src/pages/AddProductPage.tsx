@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, FormEvent } from "react";
 import { X, Plus, Wand2, AlertTriangle } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
-import { Supplier, Product } from "../lib/types";
+import { Supplier, Product, Purchase } from "../lib/types";
 import { mainCategories, categoryStructure, genderOptions } from "../lib/categories";
 import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Dropdown, TabToggle, NewSupplierModal } from "../components/ui";
 
@@ -20,6 +20,12 @@ export default function AddProductPage() {
   // already exists, instead of accidentally creating a duplicate.
   const [mode, setMode] = useState<"new" | "existing">("new");
   const [existingProductId, setExistingProductId] = useState("");
+  // If this product/restock is part of goods already recorded as a
+  // pending purchase (arrived and paid for, not yet sorted), this links
+  // it to that specific line — see Purchases page for where those get
+  // created.
+  const [fulfillsLineId, setFulfillsLineId] = useState("");
+  const [pendingPurchases, setPendingPurchases] = useState<Purchase[]>([]);
 
   // Warns if a NEW product's title matches one that already exists,
   // checked against the backend so casing/whitespace differences are
@@ -39,6 +45,10 @@ export default function AddProductPage() {
     supplier_id: "",
   });
   const [allowReturns, setAllowReturns] = useState(true);
+  // FO/OG/OR/OP classification — set once at creation, never changed
+  // afterward. A different type of "the same shirt" is entered as a
+  // completely separate product, not edited later.
+  const [productType, setProductType] = useState<"FO" | "OG" | "OR" | "OP">("OG");
 
 
   const [colors, setColors] = useState<string[]>([]);
@@ -72,6 +82,7 @@ export default function AddProductPage() {
   useEffect(() => {
     api.get<Supplier[]>("/suppliers").then(setSuppliers).catch(() => {});
     api.get<Product[]>("/products").then(setProducts).catch(() => {});
+    api.get<Purchase[]>("/purchases/pending").then(setPendingPurchases).catch(() => {});
   }, []);
 
   // Check for a duplicate title shortly after typing stops, so Add Product
@@ -252,6 +263,7 @@ export default function AddProductPage() {
           selling_price: parseFloat(form.selling_price),
           supplier_id: parseInt(form.supplier_id, 10),
           allow_returns: allowReturns,
+          product_type: productType,
         });
         productId = product.id;
       }
@@ -259,23 +271,29 @@ export default function AddProductPage() {
       // Barcodes are generated server-side now (continuing from the
       // highest existing barcode in the system), so only quantity/size/
       // color/cost/price are sent — no client-generated codes.
-      const result = await api.post<{ purchase_code: string; new_inventory_ids: number[] }>("/purchases", {
-        supplier_id: parseInt(form.supplier_id, 10),
-        items: rowsWithQty.map((row) => ({
-          product_id: productId,
-          quantity: parseInt(row.quantity, 10),
-          unit_cost: parseFloat(form.cost_price),
-          unit_selling_price: parseFloat(form.selling_price),
-          size: row.size || undefined,
-          color: row.color || undefined,
-        })),
-        amount_paid: 0,
-      });
+      const result = await api.post<{ purchase_code: string; new_inventory_ids: number[]; quantity_warning: string | null }>(
+        "/purchases",
+        {
+          supplier_id: parseInt(form.supplier_id, 10),
+          items: rowsWithQty.map((row) => ({
+            product_id: productId,
+            quantity: parseInt(row.quantity, 10),
+            unit_cost: parseFloat(form.cost_price),
+            unit_selling_price: parseFloat(form.selling_price),
+            size: row.size || undefined,
+            color: row.color || undefined,
+          })),
+          amount_paid: 0,
+          fulfills_line_id: fulfillsLineId ? parseInt(fulfillsLineId, 10) : undefined,
+        }
+      );
 
       setSuccess(
-        `${mode === "existing" ? "Restocked" : "Product added"} with ${result.new_inventory_ids.length} unit(s) across ${rowsWithQty.length} variant(s) (${result.purchase_code}).`
+        `${mode === "existing" ? "Restocked" : "Product added"} with ${result.new_inventory_ids.length} unit(s) across ${rowsWithQty.length} variant(s) (${result.purchase_code}).` +
+          (result.quantity_warning ? ` Note: ${result.quantity_warning}` : "")
       );
       setForm({ product_title: "", brand: "", category: "", subCategory: "", gender: "", cost_price: "", selling_price: "", supplier_id: "" });
+      setFulfillsLineId("");
       setColors([]);
       setSizes([]);
       setVariantRows([]);
@@ -432,8 +450,69 @@ export default function AddProductPage() {
                 />
               </FormGroup>
 
+              {(() => {
+                const matchingPending = pendingPurchases.filter(
+                  (pp) => !form.supplier_id || String(pp.supplier_id) === form.supplier_id
+                );
+                const openLines = matchingPending.flatMap((pp) =>
+                  (pp.lines ?? []).filter((line) => !line.is_fulfilled).map((line) => ({ purchase: pp, line }))
+                );
+                if (openLines.length === 0) return null;
+                return (
+                  <div className="mb-4 border border-gray-300 rounded-xl p-3">
+                    <Label>Fulfilling a line from an existing pending purchase?</Label>
+                    <Dropdown
+                      value={fulfillsLineId}
+                      onChange={(v) => {
+                        setFulfillsLineId(v);
+                        const match = openLines.find((ol) => String(ol.line.id) === v);
+                        if (match) {
+                          update("supplier_id", String(match.purchase.supplier_id));
+                          update("cost_price", String(match.line.unit_cost));
+                          // Auto-fill the product title from the pending
+                          // line's own description — only when creating a
+                          // NEW product, since "existing" mode is picking
+                          // an already-named product, not naming one.
+                          if (mode === "new" && !form.product_title.trim()) {
+                            update("product_title", match.line.description);
+                            setProductType(match.line.product_type);
+                          }
+                        }
+                      }}
+                      placeholder="— Not linked to a pending purchase —"
+                      options={openLines.map(({ purchase, line }) => ({
+                        value: String(line.id),
+                        label: `${purchase.purchase_code} — ${line.description} (${line.quantity} pcs @ Rs. ${line.unit_cost.toLocaleString()})`,
+                      }))}
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Linking this to a pending purchase line means the supplier cost/payment for that line are already recorded — this
+                      step just adds the actual product/variant details. Other lines on the same purchase can still be fulfilled
+                      separately later, from here or from Manage Products.
+                    </p>
+                  </div>
+                );
+              })()}
+
               {mode === "new" && (
                 <>
+                  <FormGroup>
+                    <Label>Product type</Label>
+                    <Dropdown
+                      value={productType}
+                      onChange={(v) => setProductType(v as "FO" | "OG" | "OR" | "OP")}
+                      options={[
+                        { value: "FO", label: "FO — Factory Outlet" },
+                        { value: "OG", label: "OG — Original (with labels)" },
+                        { value: "OR", label: "OR — Overrun" },
+                        { value: "OP", label: "OP — Own Production" },
+                      ]}
+                    />
+                    <p className="text-xs text-gray-400 mt-1">
+                      This is set once and can't be changed later — a different type of the same style is added as its own separate
+                      product.
+                    </p>
+                  </FormGroup>
                   <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
                     <input type="checkbox" checked={allowReturns} onChange={(e) => setAllowReturns(e.target.checked)} className="rounded" />
                     Allow returns on this product

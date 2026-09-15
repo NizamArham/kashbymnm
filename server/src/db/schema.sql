@@ -93,6 +93,15 @@ CREATE TABLE IF NOT EXISTS customers (
   -- customer's total displayed loyalty_points is this PLUS the live sum
   -- of loyalty_points_earned across their sales.
   bonus_points INTEGER NOT NULL DEFAULT 0,
+  -- A suspended customer stays fully in the system — every real record
+  -- (sales, loyalty, credit) is untouched — they just can't be selected
+  -- for a new sale until reactivated. Admin-only action either way, and
+  -- always requires a reason, so there's a genuine record of why.
+  is_suspended INTEGER NOT NULL DEFAULT 0 CHECK (is_suspended IN (0,1)),
+  suspended_reason TEXT,
+  suspended_at TEXT,
+  reactivated_reason TEXT,
+  reactivated_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -105,7 +114,7 @@ CREATE TABLE IF NOT EXISTS customers (
 -- lets you answer "when did they earn these" or "why was this granted."
 CREATE TABLE IF NOT EXISTS loyalty_transactions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  customer_id INTEGER NOT NULL REFERENCES customers(id),
+  customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
   points INTEGER NOT NULL, -- positive = earned/granted, negative = redeemed/adjusted down
   reason TEXT NOT NULL CHECK (reason IN ('sale','bonus_grant','manual_adjustment','redemption')),
   reference_id INTEGER, -- e.g. the sale id, when reason = 'sale'
@@ -124,11 +133,18 @@ CREATE INDEX IF NOT EXISTS idx_loyalty_transactions_customer ON loyalty_transact
 -- came from and where it went.
 CREATE TABLE IF NOT EXISTS store_credit_transactions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  customer_id INTEGER NOT NULL REFERENCES customers(id),
-  amount REAL NOT NULL, -- positive = granted (overpayment), negative = redeemed against a sale
-  reason TEXT NOT NULL CHECK (reason IN ('overpayment','redemption','manual_adjustment')),
-  reference_id INTEGER, -- the sale id that generated or redeemed this entry
+  customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  amount REAL NOT NULL, -- positive = granted (overpayment/return), negative = redeemed against a sale
+  reason TEXT NOT NULL CHECK (reason IN ('overpayment','redemption','manual_adjustment','return_exchange')),
+  reference_id INTEGER, -- the sale id (or return id, for return_exchange grants) that generated or redeemed this entry
   notes TEXT,
+  -- NULL = never expires (overpayment, manual_adjustment — the existing,
+  -- unchanged behavior). Set only on 'return_exchange' grants, chosen at
+  -- the moment the return is processed (default 45 days; a longer
+  -- window is a deliberate exception, not an equal alternative). A
+  -- redemption row consuming this credit has no expiry of its own — it's
+  -- just a negative entry, the expiry only matters on the grant.
+  expires_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -173,6 +189,13 @@ CREATE TABLE IF NOT EXISTS products (
   -- customer-facing sale history — an admin can still force one through
   -- with a logged reason, but it's not offered as a normal action.
   allow_returns INTEGER NOT NULL DEFAULT 1 CHECK (allow_returns IN (0,1)),
+  -- Product classification, set once at creation and never changed
+  -- afterward — different types of "the same shirt" (e.g. factory
+  -- outlet vs. original) are entered as entirely separate product rows
+  -- with their own cost/price/supplier, not variants of one product.
+  -- FO = Factory Outlet, OG = Original (with labels), OR = Overrun,
+  -- OP = Own Production.
+  product_type TEXT NOT NULL DEFAULT 'OG' CHECK (product_type IN ('FO','OG','OR','OP')),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -228,7 +251,20 @@ CREATE TABLE IF NOT EXISTS coupons (
 CREATE TABLE IF NOT EXISTS sales (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   invoice TEXT UNIQUE NOT NULL,
-  customer_id INTEGER REFERENCES customers(id),
+  -- ON DELETE SET NULL: if a customer with real sales history is
+  -- deliberately hard-deleted (a genuine choice, not automatic — see
+  -- the customers DELETE route), their sales survive intact with this
+  -- set to NULL rather than being blocked or orphaned. Customer IDs
+  -- never get reused, so a future different customer can never
+  -- accidentally "inherit" this history.
+  customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+  -- Set ONLY when customer_id above is nulled out by a deliberate
+  -- customer deletion (see the customers DELETE route) — never set for
+  -- a genuine walk-in sale, which simply has customer_id = NULL and
+  -- this left NULL too. Purely a display snapshot ("[Deleted: John
+  -- Silva]" instead of indistinguishable from "Walk-in"), taken right
+  -- before the real customer row is removed.
+  deleted_customer_snapshot TEXT,
   salesperson TEXT,
   date TEXT NOT NULL DEFAULT (datetime('now')),
   subtotal REAL NOT NULL DEFAULT 0,
@@ -294,8 +330,13 @@ CREATE TABLE IF NOT EXISTS return_requests (
   sale_item_id INTEGER NOT NULL REFERENCES sale_items(id),
   quantity INTEGER NOT NULL DEFAULT 1,
   condition TEXT NOT NULL CHECK (condition IN ('clean','damaged')),
-  resolution TEXT NOT NULL CHECK (resolution IN ('refund','exchange')),
+  resolution TEXT NOT NULL CHECK (resolution IN ('refund','exchange','store_credit_exchange')),
   exchange_inventory_id INTEGER REFERENCES inventory(id),
+  -- Only meaningful for store_credit_exchange — how many days the
+  -- resulting credit is valid for, chosen at request time (45 is the
+  -- real default; anything else is a deliberate exception, not an
+  -- equally-weighted option).
+  credit_expiry_days INTEGER,
   reason TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','declined')),
   requested_by INTEGER REFERENCES users(id),
@@ -315,14 +356,15 @@ CREATE INDEX IF NOT EXISTS idx_return_requests_sale_item ON return_requests(sale
 -- 6c. returns ----------------------------------------------------------
 -- A return against one specific sale_item. condition determines whether
 -- the physical unit becomes sellable again or is written off; resolution
--- determines whether cash goes back out or the item is swapped for another.
+-- determines whether cash goes back out, the item is swapped 1:1, or the
+-- value becomes expiring store credit toward a genuinely new sale later.
 -- A row here only ever exists because a return_requests row was approved
 -- — this table is never written to directly from a staff-facing action.
 CREATE TABLE IF NOT EXISTS returns (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   sale_item_id INTEGER NOT NULL REFERENCES sale_items(id),
   condition TEXT NOT NULL CHECK (condition IN ('clean','damaged')),
-  resolution TEXT NOT NULL CHECK (resolution IN ('refund','exchange')),
+  resolution TEXT NOT NULL CHECK (resolution IN ('refund','exchange','store_credit_exchange')),
   refund_amount REAL NOT NULL DEFAULT 0,
   exchange_inventory_id INTEGER REFERENCES inventory(id),
   reason TEXT,
@@ -337,12 +379,145 @@ CREATE TABLE IF NOT EXISTS purchases (
   purchase_code TEXT UNIQUE NOT NULL,
   supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
   purchase_date TEXT NOT NULL DEFAULT (datetime('now')),
+  -- For a FULFILLED (regular, non-pending) purchase, total_cost is the
+  -- sum of its purchase_items as before. For a PENDING purchase,
+  -- total_cost is the sum of its pending_purchase_lines' (qty * cost) —
+  -- the real amount owed to the SUPPLIER for goods only. Transport,
+  -- commission, and other costs are never part of this number; they're
+  -- recorded straight to the cash book as their own expense, since
+  -- they're not owed to this supplier.
   total_cost REAL NOT NULL DEFAULT 0,
   amount_paid REAL NOT NULL DEFAULT 0,
-  payment_status TEXT NOT NULL DEFAULT 'unpaid' CHECK (payment_status IN ('paid','partial','unpaid'))
+  payment_status TEXT NOT NULL DEFAULT 'unpaid' CHECK (payment_status IN ('paid','partial','unpaid')),
+  -- A real-world purchase often arrives (and gets partially or fully
+  -- paid) days before it's actually sorted and entered as specific
+  -- products/variants — 'pending' captures that gap. A pending purchase
+  -- can have several rough lines (see pending_purchase_lines below),
+  -- each fulfilled independently across separate Add Product / restock
+  -- actions over time. It only becomes 'fulfilled' when the person
+  -- decides they've entered everything from it and marks it done —
+  -- never inferred automatically from totals, since only a human
+  -- reviewing the physical goods actually knows when it's complete.
+  fulfillment_status TEXT NOT NULL DEFAULT 'fulfilled' CHECK (fulfillment_status IN ('pending','fulfilled')),
+  -- A rough overall note for the delivery, e.g. "Mixed order from Mr.
+  -- Nazeer, Sept batch" — the real per-item detail lives in
+  -- pending_purchase_lines.
+  description TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_purchases_supplier ON purchases(supplier_id);
+
+-- 7a0. pending_purchase_lines --------------------------------------------
+-- The rough per-item breakdown of a pending purchase — a description,
+-- quantity, and per-piece cost, entered before anyone knows the exact
+-- product/variant this will become. Each line is fulfilled independently:
+-- when someone adds a product or restocks and links it to this line, the
+-- line is marked fulfilled and remembers which purchase_item resolved it
+-- (for tracing "this line became these real units" later). A pending
+-- purchase can be marked fully done (fulfillment_status='fulfilled' on
+-- the parent purchases row) even with some lines still technically open,
+-- since that decision is always a deliberate human call, not automatic.
+CREATE TABLE IF NOT EXISTS pending_purchase_lines (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  purchase_id INTEGER NOT NULL REFERENCES purchases(id) ON DELETE CASCADE,
+  description TEXT NOT NULL,
+  quantity INTEGER NOT NULL,
+  unit_cost REAL NOT NULL,
+  -- How many of this line's expected quantity have actually been entered
+  -- so far, across however many separate restock/add-product actions.
+  -- Checked as a SOFT warning only against `quantity` — going over is
+  -- allowed (an honest miscount or supplier bonus shouldn't be blocked),
+  -- but the person sees "70 expected, entering X more" either way.
+  fulfilled_quantity INTEGER NOT NULL DEFAULT 0,
+  is_fulfilled INTEGER NOT NULL DEFAULT 0 CHECK (is_fulfilled IN (0,1)),
+  -- Set once this line is linked to a real restock/add-product action —
+  -- points at the purchase_items row that was actually created for it.
+  -- If fulfilled across multiple actions, this is the MOST RECENT one.
+  fulfilled_purchase_item_id INTEGER REFERENCES purchase_items(id),
+  -- The type this line is expected to become (FO/OG/OR/OP) — carried
+  -- over as a default when this line is eventually fulfilled into a
+  -- real product on Add Product, since the type is normally decided at
+  -- the moment the goods are ordered/received.
+  product_type TEXT NOT NULL DEFAULT 'OG' CHECK (product_type IN ('FO','OG','OR','OP'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_pending_purchase_lines_purchase ON pending_purchase_lines(purchase_id);
+
+-- 7a0b. purchase_expenses --------------------------------------------------
+-- Multiple named, non-supplier costs tied to a purchase — transport,
+-- commission, loading, whatever else — each its own line so a delivery
+-- can have several different cost types recorded separately, all mirrored
+-- into the cash book as individual expense entries. None of this is ever
+-- owed to the supplier or added to their balance.
+CREATE TABLE IF NOT EXISTS purchase_expenses (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  purchase_id INTEGER NOT NULL REFERENCES purchases(id) ON DELETE CASCADE,
+  label TEXT NOT NULL,
+  amount REAL NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_purchase_expenses_purchase ON purchase_expenses(purchase_id);
+
+-- 7a0c. supplier_credit_transactions ----------------------------------------
+-- A running credit ledger per supplier — same shape as the customer
+-- store-credit ledger. A damaged-goods return that the supplier agrees to
+-- cover (rather than refund in cash immediately) grants a positive entry
+-- here; the credit is then automatically applied against what's owed on
+-- a FUTURE purchase from that supplier, reducing the amount you need to
+-- pay them. A fully-cash-refunded return never touches this table at
+-- all — that money changes hands immediately, nothing to carry forward.
+CREATE TABLE IF NOT EXISTS supplier_credit_transactions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
+  amount REAL NOT NULL, -- positive = granted (damaged-goods credit), negative = applied against a purchase
+  reason TEXT NOT NULL CHECK (reason IN ('damaged_goods_credit','applied_to_purchase','manual_adjustment')),
+  reference_id INTEGER, -- the purchase id that generated or consumed this entry
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_supplier_credit_transactions_supplier ON supplier_credit_transactions(supplier_id);
+
+-- 7a1. purchase_damage_returns -----------------------------------------------
+-- A damaged-goods return against a specific purchase_item — how many
+-- units, and how it was resolved: either refunded in cash immediately,
+-- or credited to the supplier's running balance for a future purchase.
+-- A single "Record Returns" action, covering either scenario:
+-- - not yet in inventory: one or more pending_purchase_lines rows are
+--   reduced (return_items.pending_line_id set, inventory_id null)
+-- - already in inventory: one or more specific inventory units (always
+--   'available', never 'sold') are removed and become return_items rows
+--   with inventory_id set, pending_line_id null.
+-- Either way it's ONE header record with a single reason/resolution —
+-- the resolution (cash refund now, or supplier credit for a future
+-- purchase) is always the person's own choice, never inferred.
+CREATE TABLE IF NOT EXISTS purchase_returns (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  purchase_id INTEGER NOT NULL REFERENCES purchases(id),
+  supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
+  total_amount REAL NOT NULL,
+  reason TEXT NOT NULL,
+  resolution TEXT NOT NULL CHECK (resolution IN ('cash_refund','supplier_credit')),
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_purchase_returns_purchase ON purchase_returns(purchase_id);
+
+-- One row per specific thing being returned within that action — either
+-- a quantity off a still-pending line, or one specific inventory unit
+-- that physically gets pulled from stock.
+CREATE TABLE IF NOT EXISTS purchase_return_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  purchase_return_id INTEGER NOT NULL REFERENCES purchase_returns(id) ON DELETE CASCADE,
+  pending_line_id INTEGER REFERENCES pending_purchase_lines(id),
+  inventory_id INTEGER REFERENCES inventory(id),
+  quantity INTEGER NOT NULL DEFAULT 1,
+  unit_cost REAL NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_purchase_return_items_return ON purchase_return_items(purchase_return_id);
 
 -- 7a. purchase_items -------------------------------------------------------
 CREATE TABLE IF NOT EXISTS purchase_items (

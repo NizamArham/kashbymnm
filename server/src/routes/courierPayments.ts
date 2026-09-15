@@ -13,6 +13,7 @@ const paymentInput = z.object({
   courier_name: z.string().optional(),
   delivery_id: z.number().int().positive().optional(),
   amount: z.number().positive(),
+  payment_method: z.string().optional(),
   notes: z.string().optional(),
 });
 
@@ -55,9 +56,9 @@ courierPaymentsRouter.post(
         .run(data.courier_name ?? null, data.delivery_id ?? null, data.amount, data.notes ?? null);
 
       db.prepare(
-        `INSERT INTO cash_book (type, category, reference_id, amount, notes)
-         VALUES ('expense', 'courier_payment', ?, ?, ?)`
-      ).run(result.lastInsertRowid, data.amount, data.notes ?? "Courier payment");
+        `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
+         VALUES ('expense', 'courier_payment', ?, ?, ?, ?)`
+      ).run(data.payment_method ?? null, result.lastInsertRowid, data.amount, data.notes ?? "Courier payment");
 
       return result.lastInsertRowid;
     });

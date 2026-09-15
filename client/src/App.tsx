@@ -15,10 +15,16 @@ import SaleHistoryPage from "./pages/SaleHistoryPage";
 import ReturnsPage from "./pages/ReturnsPage";
 import SuppliersPage from "./pages/SuppliersPage";
 import PurchasesPage from "./pages/PurchasesPage";
+import PurchaseReturnsPage from "./pages/PurchaseReturnsPage";
 import DeliveriesPage from "./pages/DeliveriesPage";
 import CashBookPage from "./pages/CashBookPage";
 import ProfilePage from "./pages/ProfilePage";
 import AttendancePage from "./pages/AttendancePage";
+import StaffPage from "./pages/StaffPage";
+import AddStaffPage from "./pages/AddStaffPage";
+import SupplierPaymentsPage from "./pages/SupplierPaymentsPage";
+import CouriersPage from "./pages/CourierReconciliationPage";
+import GeneralSettingsPage from "./pages/GeneralSettingsPage";
 
 // Root path behaves differently per role: admin sees the Dashboard,
 // staff is redirected straight to POS, matching the access model.
@@ -63,6 +69,22 @@ export default function App() {
 
         <Route path="/customers/add" element={<AddCustomerPage />} />
         <Route path="/customers" element={<ViewCustomersPage />} />
+        <Route
+          path="/staff"
+          element={
+            <ProtectedRoute adminOnly>
+              <StaffPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/staff/add"
+          element={
+            <ProtectedRoute adminOnly>
+              <AddStaffPage />
+            </ProtectedRoute>
+          }
+        />
 
         <Route path="/sales" element={<SaleHistoryPage />} />
         <Route path="/returns" element={<ReturnsPage />} />
@@ -84,10 +106,27 @@ export default function App() {
           }
         />
         <Route
-          path="/deliveries"
+          path="/purchases/returns"
           element={
             <ProtectedRoute adminOnly>
-              <DeliveriesPage />
+              <PurchaseReturnsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/supplier-payments"
+          element={
+            <ProtectedRoute adminOnly>
+              <SupplierPaymentsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route path="/deliveries" element={<DeliveriesPage />} />
+        <Route
+          path="/couriers"
+          element={
+            <ProtectedRoute adminOnly>
+              <CouriersPage />
             </ProtectedRoute>
           }
         />
@@ -101,7 +140,22 @@ export default function App() {
         />
 
         <Route path="/profile" element={<ProfilePage />} />
-        <Route path="/attendance" element={<AttendancePage />} />
+        <Route
+          path="/attendance"
+          element={
+            <ProtectedRoute adminOnly>
+              <AttendancePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/settings/general"
+          element={
+            <ProtectedRoute adminOnly>
+              <GeneralSettingsPage />
+            </ProtectedRoute>
+          }
+        />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

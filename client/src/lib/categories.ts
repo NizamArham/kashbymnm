@@ -18,7 +18,7 @@ export const categoryStructure: Record<string, string[]> = {
   ],
   "Jeans": ["Regular Denim", "Wide Leg", "Men's Denim Mix", "Women's Denim Mix", "Kids' Denim", "Skinny", "Bootcut"],
   "Joggers & Activewear": ["Jogger", "Leggings", "Training Pant & Short Mix", "Track Pants", "Sweatpants"],
-  "Shorts": ["Casual Shorts", "Denim Shorts", "Training Shorts", "Cargo Shorts", "Swim Shorts"],
+  "Shorts": ["Casual Shorts","Quickdry Shorts", "Denim Shorts", "Training Shorts", "Cargo Shorts", "Swim Shorts"],
   "Hoodies": ["Fleece Hoodie", "Padded Hoodie", "Kids' Hoodie", "Pullover", "Zip-Up"],
   "Jackets & Coats": ["Puffer Jacket", "Biker Jacket", "Pea Coat", "Bomber", "Blazer", "Windbreaker"],
   "Underwear": ["Boxers", "Boxer Briefs", "Sleepwear", "Sports Bra", "Briefs"],

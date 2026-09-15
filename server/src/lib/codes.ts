@@ -112,8 +112,26 @@ export function nextInvoiceCode(category: InvoiceCategory): string {
   return `${category}${yymm}${String(nextNum).padStart(4, "0")}`;
 }
 
+// Format: P{YY}{MM}{sequence}, e.g. P26090001 — same style as invoice
+// codes (STR26090001 etc.), just with the "P" prefix for Purchases and
+// its own independent sequence. No separators, matching the established
+// pattern rather than the old "PO-0001" format.
 export function nextPurchaseCode(): string {
-  return nextSequentialCode("purchases", "purchase_code", "PO");
+  const now = new Date();
+  const yymm = `${String(now.getFullYear()).slice(-2)}${String(now.getMonth() + 1).padStart(2, "0")}`;
+
+  const row = db
+    .prepare(`SELECT purchase_code FROM purchases WHERE purchase_code LIKE 'P%' ORDER BY id DESC LIMIT 1`)
+    .get() as { purchase_code: string } | undefined;
+
+  let nextNum = 1;
+  if (row?.purchase_code) {
+    const digits = row.purchase_code.slice(1); // drop the "P"
+    const existingSeq = parseInt(digits.slice(4), 10); // drop YYMM
+    if (!isNaN(existingSeq)) nextNum = existingSeq + 1;
+  }
+
+  return `P${yymm}${String(nextNum).padStart(4, "0")}`;
 }
 
 export function nextSku(productId: number): string {

@@ -95,6 +95,14 @@ export default function InventoryPage() {
     skuSample: string;
     barcodeRange: string;
     status: string;
+    // The supplier that actually delivered this batch, shown ONLY when
+    // every unit in this variant/status group traces back to the same
+    // known supplier — never a guess from the product's general
+    // supplier_id, since that can be wrong once a product's been
+    // restocked from more than one source. Displayed as the supplier's
+    // CODE (e.g. "RFK91"), not the full name, matching how suppliers are
+    // referenced everywhere else in the system.
+    batchSupplierCode: string | null;
   }
 
   function summarizeVariants(productUnits: InventoryUnit[]): VariantSummary[] {
@@ -121,6 +129,9 @@ export default function InventoryPage() {
         barcodeRange = `${barcodes[0]} – ${barcodes[barcodes.length - 1]}`;
       }
 
+      const supplierCodes = new Set(sorted.map((u) => u.batch_supplier_code ?? null));
+      const batchSupplierCode = supplierCodes.size === 1 ? [...supplierCodes][0] : null;
+
       summaries.push({
         color: sorted[0].color ?? "—",
         size: sorted[0].size ?? "—",
@@ -128,13 +139,14 @@ export default function InventoryPage() {
         skuSample: sorted[0].sku,
         barcodeRange,
         status: sorted[0].status,
+        batchSupplierCode,
       });
     }
 
     return summaries.sort((a, b) => {
-      const colorCompare = a.color.localeCompare(b.color);
-      if (colorCompare !== 0) return colorCompare;
-      return compareSizes(a.size, b.size);
+      const sizeCompare = compareSizes(a.size, b.size);
+      if (sizeCompare !== 0) return sizeCompare;
+      return a.color.localeCompare(b.color);
     });
   }
 
@@ -222,7 +234,7 @@ export default function InventoryPage() {
         }
       />
 
-      <Card className="mb-5 border-0 shadow-none">
+      <Card className="mb-6">
         <div className="relative" ref={searchBoxRef}>
           <div className="relative">
             <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
@@ -293,7 +305,7 @@ export default function InventoryPage() {
         )}
       </Card>
 
-      <Card className="mb-5 border-0 shadow-none">
+      <Card className="mb-5">
         <p className="text-xs font-medium text-gray-500 mb-2">Filter by category</p>
         <div className="flex gap-3 flex-wrap">
           <div className="w-48">
@@ -378,6 +390,7 @@ export default function InventoryPage() {
                                   <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Qty</th>
                                   <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">SKU</th>
                                   <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Barcode</th>
+                                  <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Supplier</th>
                                   <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Status</th>
                                 </tr>
                               </thead>
@@ -392,6 +405,7 @@ export default function InventoryPage() {
                                       <td className="px-3 py-1.5">{row.count}</td>
                                       <td className="px-3 py-1.5">{row.count > 1 ? `${row.skuSample} (+${row.count - 1} more)` : row.skuSample}</td>
                                       <td className="px-3 py-1.5 font-mono text-xs">{row.barcodeRange}</td>
+                                      <td className="px-3 py-1.5 text-gray-500">{row.batchSupplierCode ?? "—"}</td>
                                       <td className="px-3 py-1.5">
                                         <Badge label={row.status} tone={inventoryStatusTone(row.status)} />
                                       </td>

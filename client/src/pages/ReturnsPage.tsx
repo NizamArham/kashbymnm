@@ -22,7 +22,7 @@ import {
   EmptyState,
 } from "../components/ui";
 
-type ReturnsTab = "request" | "pending" | "history";
+type ReturnsTab = "request" | "all";
 
 function toISODate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -51,16 +51,14 @@ export default function ReturnsPage() {
             onChange={setActiveTab}
             options={[
               { value: "request", label: "Request a Return" },
-              ...(isAdmin ? [{ value: "pending" as ReturnsTab, label: "Pending Approvals" }] : []),
-              { value: "history", label: "History" },
+              { value: "all", label: "Returns" },
             ]}
           />
         }
       />
 
       {activeTab === "request" && <RequestReturnTab />}
-      {activeTab === "pending" && isAdmin && <PendingApprovalsTab />}
-      {activeTab === "history" && <HistoryTab />}
+      {activeTab === "all" && <AllReturnsTab isAdmin={isAdmin} />}
     </div>
   );
 }
@@ -72,9 +70,13 @@ function RequestReturnTab() {
 
   const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
   const [condition, setCondition] = useState<"clean" | "damaged">("clean");
-  const [resolution, setResolution] = useState<"refund" | "exchange">("refund");
+  const [resolution, setResolution] = useState<"refund" | "store_credit_exchange">("refund");
   const [reason, setReason] = useState("");
-  const [exchangeSku, setExchangeSku] = useState("");
+  const [exchangeNote, setExchangeNote] = useState("");
+  // 45 is the real default — anything else is a deliberate exception,
+  // not an equally-weighted option.
+  const [creditExpiryChoice, setCreditExpiryChoice] = useState<"45" | "60" | "90" | "custom">("45");
+  const [customExpiryDays, setCustomExpiryDays] = useState("");
 
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
@@ -116,23 +118,23 @@ function RequestReturnTab() {
       return;
     }
 
-    let exchange_inventory_id: number | undefined;
-    if (resolution === "exchange") {
-      if (!exchangeSku.trim()) {
-        setSubmitError("Enter the SKU of the replacement item for an exchange");
+    let credit_expiry_days: number | undefined;
+    if (resolution === "store_credit_exchange") {
+      if (!sale?.customer_id) {
+        setSubmitError(
+          "Store credit needs a real customer account — this is a walk-in sale. Use a cash refund instead."
+        );
         return;
       }
-      try {
-        const all = await api.get<InventoryUnit[]>("/inventory?status=available");
-        const match = all.find((u) => u.sku.toLowerCase() === exchangeSku.trim().toLowerCase());
-        if (!match) {
-          setSubmitError("No available item found with that SKU for the exchange");
+      if (creditExpiryChoice === "custom") {
+        const parsed = parseInt(customExpiryDays, 10);
+        if (!parsed || parsed <= 0) {
+          setSubmitError("Enter a valid number of days for the custom expiry");
           return;
         }
-        exchange_inventory_id = match.id;
-      } catch (err) {
-        setSubmitError(err instanceof ApiRequestError ? err.message : "Failed to look up exchange item");
-        return;
+        credit_expiry_days = parsed;
+      } else {
+        credit_expiry_days = parseInt(creditExpiryChoice, 10);
       }
     }
 
@@ -142,8 +144,11 @@ function RequestReturnTab() {
         sale_item_id: selectedItemId,
         condition,
         resolution,
-        reason: reason.trim(),
-        exchange_inventory_id,
+        reason:
+          resolution === "store_credit_exchange" && exchangeNote.trim()
+            ? `${reason.trim()} — ${exchangeNote.trim()}`
+            : reason.trim(),
+        credit_expiry_days,
       });
       setSubmitSuccess(
         result.is_final_sale
@@ -154,7 +159,9 @@ function RequestReturnTab() {
       setInvoiceQuery("");
       setSelectedItemId(null);
       setReason("");
-      setExchangeSku("");
+      setExchangeNote("");
+      setCreditExpiryChoice("45");
+      setCustomExpiryDays("");
     } catch (err) {
       setSubmitError(err instanceof ApiRequestError ? err.message : "Failed to submit return request");
     } finally {
@@ -173,7 +180,7 @@ function RequestReturnTab() {
             onKeyDown={(e) => e.key === "Enter" && handleLookup()}
           />
           <Button variant="primary" onClick={handleLookup}>
-            Find sale
+            Find
           </Button>
         </div>
         {lookupError && <ErrorText>{lookupError}</ErrorText>}
@@ -182,7 +189,7 @@ function RequestReturnTab() {
       {sale && (
         <Card>
           <h2 className="text-base font-semibold text-gray-900 mb-3">
-            {sale.invoice} — {sale.customer_name ?? "Walk-in"}
+            {sale.invoice} — {sale.customer_name ?? (sale.deleted_customer_snapshot ? `[Deleted: ${sale.deleted_customer_snapshot}]` : "Walk-in")}
           </h2>
 
           <FormGroup>
@@ -217,18 +224,73 @@ function RequestReturnTab() {
             </FormGroup>
             <FormGroup>
               <Label>Resolution</Label>
-              <Select value={resolution} onChange={(e) => setResolution(e.target.value as "refund" | "exchange")}>
+              <Select value={resolution} onChange={(e) => setResolution(e.target.value as typeof resolution)}>
                 <option value="refund">Cash refund</option>
-                <option value="exchange">Exchange for another item</option>
+                <option value="store_credit_exchange">Exchange</option>
               </Select>
             </FormGroup>
           </div>
 
-          {resolution === "exchange" && (
-            <FormGroup>
-              <Label>Replacement item SKU</Label>
-              <Input placeholder="SKU of the item going out instead" value={exchangeSku} onChange={(e) => setExchangeSku(e.target.value)} />
-            </FormGroup>
+          {resolution === "store_credit_exchange" && (
+            <>
+              <FormGroup>
+                <Label>What are they exchanging it for? (optional note)</Label>
+                <Input
+                  placeholder='e.g. "Wants a different size, will pick one up later"'
+                  value={exchangeNote}
+                  onChange={(e) => setExchangeNote(e.target.value)}
+                />
+              </FormGroup>
+              {!sale.customer_id ? (
+                <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+                  <AlertTriangle size={13} className="text-amber-600 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-amber-800">
+                    This is a walk-in sale with no customer attached — store credit needs a real customer account. Use a cash refund or
+                    a direct exchange instead.
+                  </p>
+                </div>
+              ) : (
+                <FormGroup>
+                  <Label>Credit expires in</Label>
+                  <p className="text-xs text-gray-400 mb-1.5">
+                    45 days is the standard — only pick something longer for a genuine exception.
+                  </p>
+                  <div className="flex gap-2">
+                    {(["45", "60", "90"] as const).map((d) => (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => setCreditExpiryChoice(d)}
+                        className={`flex-1 border rounded-xl py-2 text-sm font-medium transition ${
+                          creditExpiryChoice === d ? "border-black bg-black text-white" : "border-gray-200 text-gray-600 hover:border-gray-400"
+                        }`}
+                      >
+                        {d} days
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setCreditExpiryChoice("custom")}
+                      className={`flex-1 border rounded-xl py-2 text-sm font-medium transition ${
+                        creditExpiryChoice === "custom" ? "border-black bg-black text-white" : "border-gray-200 text-gray-600 hover:border-gray-400"
+                      }`}
+                    >
+                      Custom
+                    </button>
+                  </div>
+                  {creditExpiryChoice === "custom" && (
+                    <Input
+                      type="number"
+                      min="1"
+                      className="mt-2"
+                      placeholder="Number of days"
+                      value={customExpiryDays}
+                      onChange={(e) => setCustomExpiryDays(e.target.value)}
+                    />
+                  )}
+                </FormGroup>
+              )}
+            </>
           )}
 
           <FormGroup>
@@ -248,18 +310,25 @@ function RequestReturnTab() {
   );
 }
 
-function PendingApprovalsTab() {
+function AllReturnsTab({ isAdmin }: { isAdmin: boolean }) {
   const [requests, setRequests] = useState<ReturnRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [decidingId, setDecidingId] = useState<number | null>(null);
 
+  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "approved" | "declined">("all");
+  const [startDate, setStartDate] = useState<string | null>(() => {
+    const d = new Date();
+    return toISODate(new Date(d.getFullYear(), d.getMonth(), 1));
+  });
+  const [endDate, setEndDate] = useState<string | null>(() => toISODate(new Date()));
+
   async function load() {
     setLoading(true);
     try {
-      setRequests(await api.get<ReturnRequest[]>("/returns/requests/pending"));
+      setRequests(await api.get<ReturnRequest[]>("/returns/requests"));
     } catch (err) {
-      setError(err instanceof ApiRequestError ? err.message : "Failed to load pending requests");
+      setError(err instanceof ApiRequestError ? err.message : "Failed to load returns");
     } finally {
       setLoading(false);
     }
@@ -268,6 +337,19 @@ function PendingApprovalsTab() {
   useEffect(() => {
     load();
   }, []);
+
+  function applyQuickFilter(range: "today" | "week" | "month" | "3months") {
+    const today = new Date();
+    let start: Date;
+    if (range === "today") start = today;
+    else if (range === "week") {
+      start = new Date(today);
+      start.setDate(start.getDate() - 6);
+    } else if (range === "month") start = new Date(today.getFullYear(), today.getMonth(), 1);
+    else start = new Date(today.getFullYear(), today.getMonth() - 3, today.getDate());
+    setStartDate(toISODate(start));
+    setEndDate(toISODate(today));
+  }
 
   async function approve(r: ReturnRequest) {
     setError(null);
@@ -312,103 +394,8 @@ function PendingApprovalsTab() {
     }
   }
 
-  return (
-    <>
-      {error && <ErrorText>{error}</ErrorText>}
-      {loading ? (
-        <p className="text-sm text-gray-400">Loading...</p>
-      ) : requests.length === 0 ? (
-        <EmptyState icon={RotateCcw} title="No pending return requests" />
-      ) : (
-        <Card className="p-0 overflow-hidden">
-          <Table>
-            <thead>
-              <tr>
-                <Th>Requested</Th>
-                <Th>Invoice</Th>
-                <Th>Customer</Th>
-                <Th>Product</Th>
-                <Th>Condition</Th>
-                <Th>Resolution</Th>
-                <Th>Reason</Th>
-                <Th>Requested by</Th>
-                <Th></Th>
-              </tr>
-            </thead>
-            <tbody>
-              {requests.map((r) => (
-                <tr key={r.id} className={r.is_admin_override ? "bg-amber-50" : ""}>
-                  <Td>{r.requested_at.slice(0, 16).replace("T", " ")}</Td>
-                  <Td>{r.invoice}</Td>
-                  <Td>{r.customer_name ?? "Walk-in"}</Td>
-                  <Td>
-                    {r.product_title} ({r.sku})
-                    {r.is_admin_override ? <span className="ml-1 text-xs text-amber-600 font-medium">Final Sale</span> : ""}
-                  </Td>
-                  <Td className="capitalize">{r.condition}</Td>
-                  <Td className="capitalize">{r.resolution}</Td>
-                  <Td>{r.reason}</Td>
-                  <Td>{r.requested_by_name ?? "—"}</Td>
-                  <Td>
-                    <div className="flex gap-2">
-                      <Button size="sm" variant="primary" disabled={decidingId === r.id} onClick={() => approve(r)}>
-                        Approve
-                      </Button>
-                      <Button size="sm" variant="danger" disabled={decidingId === r.id} onClick={() => decline(r)}>
-                        Decline
-                      </Button>
-                    </div>
-                  </Td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        </Card>
-      )}
-    </>
-  );
-}
-
-function HistoryTab() {
-  const [requests, setRequests] = useState<ReturnRequest[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const [startDate, setStartDate] = useState<string | null>(() => {
-    const d = new Date();
-    return toISODate(new Date(d.getFullYear(), d.getMonth(), 1));
-  });
-  const [endDate, setEndDate] = useState<string | null>(() => toISODate(new Date()));
-
-  async function load() {
-    setLoading(true);
-    try {
-      setRequests(await api.get<ReturnRequest[]>("/returns/requests"));
-    } catch (err) {
-      setError(err instanceof ApiRequestError ? err.message : "Failed to load return history");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    load();
-  }, []);
-
-  function applyQuickFilter(range: "today" | "week" | "month" | "3months") {
-    const today = new Date();
-    let start: Date;
-    if (range === "today") start = today;
-    else if (range === "week") {
-      start = new Date(today);
-      start.setDate(start.getDate() - 6);
-    } else if (range === "month") start = new Date(today.getFullYear(), today.getMonth(), 1);
-    else start = new Date(today.getFullYear(), today.getMonth() - 3, today.getDate());
-    setStartDate(toISODate(start));
-    setEndDate(toISODate(today));
-  }
-
   const filtered = requests.filter((r) => {
+    if (statusFilter !== "all" && r.status !== statusFilter) return false;
     if (!startDate || !endDate) return true;
     const d = r.requested_at.slice(0, 10);
     return d >= startDate && d <= endDate;
@@ -417,7 +404,13 @@ function HistoryTab() {
   return (
     <>
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-2 flex-wrap items-center">
+          <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)} className="w-36">
+            <option value="all">All statuses</option>
+            <option value="pending">Pending</option>
+            <option value="approved">Approved</option>
+            <option value="declined">Declined</option>
+          </Select>
           <button onClick={() => applyQuickFilter("today")} className="px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 rounded-lg transition">
             Today
           </button>
@@ -442,12 +435,12 @@ function HistoryTab() {
       </div>
 
       {error && <ErrorText>{error}</ErrorText>}
-      {!loading && <p className="text-xs text-gray-400 mb-3">{filtered.length} request(s) in this range</p>}
+      {!loading && <p className="text-xs text-gray-400 mb-3">{filtered.length} request(s)</p>}
 
       {loading ? (
         <p className="text-sm text-gray-400">Loading...</p>
       ) : filtered.length === 0 ? (
-        <EmptyState icon={RotateCcw} title="No return requests in this range" />
+        <EmptyState icon={RotateCcw} title="No returns match this view" />
       ) : (
         <Card className="p-0 overflow-hidden">
           <Table>
@@ -457,29 +450,45 @@ function HistoryTab() {
                 <Th>Date</Th>
                 <Th>Customer</Th>
                 <Th>Product</Th>
-                <Th>Qty</Th>
                 <Th>Reason</Th>
                 <Th>Status</Th>
                 <Th>Decided by</Th>
-                <Th>Timestamp</Th>
+                {isAdmin && <Th></Th>}
               </tr>
             </thead>
             <tbody>
               {filtered.map((r) => (
-                <tr key={r.id}>
+                <tr key={r.id} className={r.is_admin_override && r.status === "pending" ? "bg-amber-50" : ""}>
                   <Td>#{r.id}</Td>
                   <Td>{r.requested_at.slice(0, 10)}</Td>
-                  <Td>{r.customer_name ?? "Walk-in"}</Td>
+                  <Td>{r.customer_name ?? (r.deleted_customer_snapshot ? `[Deleted: ${r.deleted_customer_snapshot}]` : "Walk-in")}</Td>
                   <Td>
                     {r.product_title} ({r.sku})
+                    {r.is_admin_override && r.status === "pending" ? (
+                      <span className="ml-1 text-xs text-amber-600 font-medium">Final Sale</span>
+                    ) : (
+                      ""
+                    )}
                   </Td>
-                  <Td>1</Td>
                   <Td>{r.reason}</Td>
                   <Td>
                     <Badge label={r.status} tone={statusTone(r.status)} />
                   </Td>
                   <Td>{r.decided_by_name ?? "—"}</Td>
-                  <Td>{r.decided_at ? r.decided_at.slice(0, 16).replace("T", " ") : "—"}</Td>
+                  {isAdmin && (
+                    <Td>
+                      {r.status === "pending" && (
+                        <div className="flex gap-2">
+                          <Button size="sm" variant="primary" disabled={decidingId === r.id} onClick={() => approve(r)}>
+                            Approve
+                          </Button>
+                          <Button size="sm" variant="danger" disabled={decidingId === r.id} onClick={() => decline(r)}>
+                            Decline
+                          </Button>
+                        </div>
+                      )}
+                    </Td>
+                  )}
                 </tr>
               ))}
             </tbody>

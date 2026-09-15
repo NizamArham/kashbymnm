@@ -399,6 +399,57 @@ export function NewSupplierModal({
   );
 }
 
+export function DatePicker({ value, onChange, placeholder = "Select date" }: { value: string; onChange: (value: string) => void; placeholder?: string }) {
+  const [open, setOpen] = useState(false);
+  const [month, setMonth] = useState(() => {
+    const date = value ? new Date(`${value}T00:00:00`) : new Date();
+    return new Date(date.getFullYear(), date.getMonth(), 1);
+  });
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function close(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, []);
+
+  const firstDay = new Date(month.getFullYear(), month.getMonth(), 1).getDay();
+  const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+  const selected = value ? new Date(`${value}T00:00:00`) : null;
+  const monthLabel = month.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  const format = (day: number) => `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+
+  return (
+    <div className="relative" ref={ref}>
+      <button type="button" onClick={() => setOpen((current) => !current)} className="w-full flex items-center justify-between px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-left hover:border-gray-300 transition">
+        <span className={value ? "text-gray-900" : "text-gray-400"}>{value || placeholder}</span>
+        <CalendarDays size={15} className="text-gray-400" />
+      </button>
+      {open && (
+        <div className="absolute z-30 mt-1.5 w-72 rounded-xl border border-gray-200 bg-white p-3 shadow-lg">
+          <div className="flex items-center justify-between mb-2">
+            <button type="button" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} className="p-1 text-gray-400 hover:text-gray-900"><ChevronLeft size={15} /></button>
+            <span className="text-sm font-medium text-gray-900">{monthLabel}</span>
+            <button type="button" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} className="p-1 text-gray-400 hover:text-gray-900"><ChevronRight size={15} /></button>
+          </div>
+          <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-gray-400 mb-1">{["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((day) => <span key={day}>{day}</span>)}</div>
+          <div className="grid grid-cols-7 gap-1">
+            {Array.from({ length: firstDay }, (_, index) => <span key={`empty-${index}`} />)}
+            {Array.from({ length: daysInMonth }, (_, index) => {
+              const day = index + 1;
+              const dateValue = format(day);
+              const isSelected = selected?.getDate() === day && selected.getMonth() === month.getMonth() && selected.getFullYear() === month.getFullYear();
+              return <button key={dateValue} type="button" onClick={() => { onChange(dateValue); setOpen(false); }} className={`h-8 rounded-lg text-xs ${isSelected ? "bg-black text-white" : "text-gray-700 hover:bg-gray-100"}`}>{day}</button>;
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Custom date-range picker — replaces the native <input type="date"> pair
 // with a proper calendar dropdown, since native pickers vary wildly
 // across browsers and look inconsistent with the rest of the app.

@@ -30,6 +30,7 @@ const productInput = z.object({
   image_path: z.string().optional(),
   is_public: z.boolean().optional(),
   allow_returns: z.boolean().optional(),
+  product_type: z.enum(["FO", "OG", "OR", "OP"]).default("OG"),
 });
 
 // qty = live count of this product's available inventory rows
@@ -138,8 +139,8 @@ productsRouter.post(
 
     const result = db
       .prepare(
-        `INSERT INTO products (product_title, brand, category, cost_price, selling_price, supplier_id, image_path, is_public, allow_returns)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO products (product_title, brand, category, cost_price, selling_price, supplier_id, image_path, is_public, allow_returns, product_type)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         data.product_title,
@@ -150,7 +151,8 @@ productsRouter.post(
         data.supplier_id ?? null,
         data.image_path ?? null,
         data.is_public === false ? 0 : 1,
-        data.allow_returns === false ? 0 : 1
+        data.allow_returns === false ? 0 : 1,
+        data.product_type
       );
 
     const created = db.prepare(`SELECT * FROM products WHERE id = ?`).get(result.lastInsertRowid);
@@ -203,6 +205,21 @@ productsRouter.delete(
       throw new ApiError(
         409,
         "Cannot delete a product that has inventory units. Remove or reassign inventory first."
+      );
+    }
+
+    // Also require zero purchase history — a product could have no
+    // CURRENT inventory (units all sold/removed) but still have real
+    // purchase_items rows, which is genuine business history, not a
+    // clean mistake safe to erase.
+    const hasPurchaseHistory = db
+      .prepare(`SELECT COUNT(*) as cnt FROM purchase_items WHERE product_id = ?`)
+      .get(req.params.id) as { cnt: number };
+
+    if (hasPurchaseHistory.cnt > 0) {
+      throw new ApiError(
+        409,
+        "Cannot delete a product with purchase history. Only a product that was never restocked or sold can be deleted."
       );
     }
 

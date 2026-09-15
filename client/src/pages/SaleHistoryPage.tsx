@@ -1,5 +1,5 @@
 import { useEffect, useState, Fragment, useMemo, MouseEvent, useRef } from "react";
-import { Receipt, Printer, MoreVertical } from "lucide-react";
+import { Receipt, Printer, MoreVertical, Wallet } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Sale } from "../lib/types";
 import { PageHeader, Card, Table, Th, Td, Badge, paymentStatusTone, EmptyState, ErrorText, DateRangePicker } from "../components/ui";
@@ -33,6 +33,14 @@ export default function SaleHistoryPage() {
   const [voidingId, setVoidingId] = useState<number | null>(null);
   const [openMenuId, setOpenMenuId] = useState<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // "Mark as paid / COD collected" — self-delivered orders only, since
+  // courier-collected COD is settled separately in bulk elsewhere.
+  const [codConfirmSale, setCodConfirmSale] = useState<Sale | null>(null);
+  const [codConfirming, setCodConfirming] = useState(false);
+  const [codError, setCodError] = useState<string | null>(null);
+  const [codPaymentMethod, setCodPaymentMethod] = useState<"cash" | "bank_transfer" | "card">("cash");
+  const [undoingId, setUndoingId] = useState<number | null>(null);
 
   const [activeTab, setActiveTab] = useState<HistoryTab>("month");
 
@@ -131,6 +139,39 @@ export default function SaleHistoryPage() {
     }
   }
 
+  async function handleConfirmCod() {
+    if (!codConfirmSale) return;
+    setCodError(null);
+    setCodConfirming(true);
+    try {
+      await api.put(`/sales/${codConfirmSale.id}/confirm-cod`, { payment_method: codPaymentMethod });
+      const refreshed = await api.get<Sale[]>("/sales");
+      setSales(refreshed);
+      setCodConfirmSale(null);
+    } catch (err) {
+      setCodError(err instanceof ApiRequestError ? err.message : "Failed to confirm this payment");
+    } finally {
+      setCodConfirming(false);
+    }
+  }
+
+  async function handleUndoCod(sale: Sale) {
+    setOpenMenuId(null);
+    setError(null);
+    if (!confirm(`Undo the COD confirmation for invoice ${sale.invoice}? This reverts it to unpaid and removes the matching cash book entry. Only possible within 24 hours of confirming.`)) return;
+
+    setUndoingId(sale.id);
+    try {
+      await api.put(`/sales/${sale.id}/undo-cod`, {});
+      const refreshed = await api.get<Sale[]>("/sales");
+      setSales(refreshed);
+    } catch (err) {
+      setError(err instanceof ApiRequestError ? err.message : "Failed to undo this confirmation");
+    } finally {
+      setUndoingId(null);
+    }
+  }
+
   return (
     <div>
       <PageHeader
@@ -210,7 +251,9 @@ export default function SaleHistoryPage() {
                       {sale.is_voided ? " (Voided)" : ""}
                     </Td>
                     <Td>{sale.date.slice(0, 16).replace("T", " ")}</Td>
-                    <Td>{sale.customer_name ?? "Walk-in"}</Td>
+                    <Td>
+                      {sale.customer_name ?? (sale.deleted_customer_snapshot ? `[Deleted: ${sale.deleted_customer_snapshot}]` : "Walk-in")}
+                    </Td>
                     <Td>{sale.sale_type === "online" ? "Online" : "In-Store"}</Td>
                     <Td>Rs. {sale.total.toLocaleString()}</Td>
                     <Td>Rs. {sale.amount_paid.toLocaleString()}</Td>
@@ -258,6 +301,36 @@ export default function SaleHistoryPage() {
                               <Receipt size={14} />
                               View details
                             </button>
+                            {sale.invoice.startsWith("OCD") &&
+                              !sale.is_voided &&
+                              sale.payment_status !== "paid" &&
+                              (!sale.delivery_partner || sale.delivery_partner === "D2D") && (
+                                <button
+                                  onClick={() => {
+                                    setOpenMenuId(null);
+                                    setCodError(null);
+                                    setCodPaymentMethod("cash");
+                                    setCodConfirmSale(sale);
+                                  }}
+                                  className="w-full flex items-center gap-2 px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition"
+                                >
+                                  <Wallet size={14} />
+                                  Mark as paid / COD collected
+                                </button>
+                              )}
+                            {sale.invoice.startsWith("OCD") &&
+                              !sale.is_voided &&
+                              sale.payment_status === "paid" &&
+                              (!sale.delivery_partner || sale.delivery_partner === "D2D") && (
+                                <button
+                                  onClick={() => handleUndoCod(sale)}
+                                  disabled={undoingId === sale.id}
+                                  className="w-full flex items-center gap-2 px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition disabled:opacity-50"
+                                >
+                                  <Wallet size={14} />
+                                  {undoingId === sale.id ? "Undoing..." : "Undo COD confirmation"}
+                                </button>
+                              )}
                             {isAdmin && !sale.is_voided && (
                               <button
                                 onClick={() => handleVoid(sale)}
@@ -336,6 +409,57 @@ export default function SaleHistoryPage() {
       )}
 
       {receiptSale && <ReceiptOptionsModal sale={receiptSale} onClose={() => setReceiptSale(null)} />}
+
+      {codConfirmSale && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl">
+            <div className="p-5 border-b border-gray-100">
+              <h2 className="text-base font-semibold text-gray-900">Confirm COD collected</h2>
+            </div>
+            <div className="p-5">
+              <p className="text-sm text-gray-600 mb-1">Invoice {codConfirmSale.invoice}</p>
+              <p className="text-2xl font-semibold text-gray-900 mb-3">
+                Rs. {(codConfirmSale.total - codConfirmSale.amount_paid).toLocaleString()}
+              </p>
+              <p className="text-xs text-gray-400 mb-4">
+                This marks the order as fully paid and records the amount in the cash book, together, in one step.
+              </p>
+              <div className="mb-4">
+                <p className="text-xs font-medium text-gray-500 mb-1.5">How was it collected?</p>
+                <div className="flex gap-2">
+                  {(["cash", "bank_transfer", "card"] as const).map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => setCodPaymentMethod(m)}
+                      className={`flex-1 border rounded-xl py-2 text-xs font-medium capitalize transition ${
+                        codPaymentMethod === m ? "border-black bg-black text-white" : "border-gray-200 text-gray-600 hover:border-gray-400"
+                      }`}
+                    >
+                      {m.replace("_", " ")}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {codError && <ErrorText>{codError}</ErrorText>}
+              <div className="flex gap-2">
+                <button
+                  onClick={handleConfirmCod}
+                  disabled={codConfirming}
+                  className="flex-1 bg-black text-white rounded-xl py-2.5 text-sm font-medium hover:bg-gray-800 transition disabled:opacity-50"
+                >
+                  {codConfirming ? "Confirming..." : "Confirm, collected"}
+                </button>
+                <button
+                  onClick={() => setCodConfirmSale(null)}
+                  className="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-medium hover:bg-gray-50 transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

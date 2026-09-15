@@ -1,7 +1,7 @@
 import { useEffect, useState, Fragment } from "react";
-import { Package, ChevronDown, ChevronRight, Plus, X, Pencil, AlertTriangle, MinusCircle, CheckCircle } from "lucide-react";
+import { Package, ChevronDown, ChevronRight, Plus, X, Pencil, AlertTriangle, MinusCircle, CheckCircle, Search } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
-import { Product, InventoryUnit, Supplier, RemovalReason } from "../lib/types";
+import { Product, InventoryUnit, Supplier, RemovalReason, Purchase } from "../lib/types";
 import { compareSizes } from "../lib/sizeSort";
 import { mainCategories } from "../lib/categories";
 import {
@@ -95,6 +95,7 @@ function summarizeVariants(units: InventoryUnit[]): VariantSummary[] {
 
 export default function ManageProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [inventoryByProduct, setInventoryByProduct] = useState<Record<number, InventoryUnit[]>>({});
   const [loading, setLoading] = useState(true);
@@ -123,6 +124,10 @@ export default function ManageProductsPage() {
   const [restockCost, setRestockCost] = useState("");
   const [restockSellingPrice, setRestockSellingPrice] = useState("");
   const [restockSupplierId, setRestockSupplierId] = useState("");
+  // If set, this restock FULFILLS an existing pending purchase (goods
+  // already arrived and paid for) instead of recording a brand-new one.
+  const [fulfillsLineId, setFulfillsLineId] = useState("");
+  const [pendingPurchases, setPendingPurchases] = useState<Purchase[]>([]);
   const [restockError, setRestockError] = useState<string | null>(null);
   const [restockSuccess, setRestockSuccess] = useState<string | null>(null);
   const [restockSubmitting, setRestockSubmitting] = useState(false);
@@ -154,9 +159,14 @@ export default function ManageProductsPage() {
   async function load() {
     setLoading(true);
     try {
-      const [prods, supps] = await Promise.all([api.get<Product[]>("/products"), api.get<Supplier[]>("/suppliers")]);
+      const [prods, supps, pending] = await Promise.all([
+        api.get<Product[]>("/products"),
+        api.get<Supplier[]>("/suppliers"),
+        api.get<Purchase[]>("/purchases/pending"),
+      ]);
       setProducts(prods);
       setSuppliers(supps);
+      setPendingPurchases(pending);
     } catch (err) {
       setError(err instanceof ApiRequestError ? err.message : "Failed to load products");
     } finally {
@@ -250,7 +260,7 @@ export default function ManageProductsPage() {
   }
 
   async function handleDelete(id: number) {
-    if (!confirm("Delete this product? This only works if it has no inventory units.")) return;
+    if (!confirm("Delete this product permanently? This only works if it has never had any inventory or purchase history — otherwise it will be rejected.")) return;
     try {
       await api.delete(`/products/${id}`);
       setExpandedId(null);
@@ -274,6 +284,7 @@ export default function ManageProductsPage() {
     setRestockAddingNewSize(false);
     setRestockNewColorInput("");
     setRestockNewSizeInput("");
+    setFulfillsLineId("");
   }
 
   function cancelEdit(p: Product) {
@@ -310,18 +321,22 @@ export default function ManageProductsPage() {
 
     setRestockSubmitting(true);
     try {
-      const result = await api.post<{ purchase_code: string; new_inventory_ids: number[] }>("/purchases", {
-        supplier_id: parseInt(restockSupplierId, 10),
-        items: rowsWithQty.map((row) => ({
-          product_id: p.id,
-          quantity: parseInt(row.quantity, 10),
-          unit_cost: parseFloat(restockCost),
-          unit_selling_price: parseFloat(restockSellingPrice),
-          size: row.size || undefined,
-          color: row.color || undefined,
-        })),
-        amount_paid: 0,
-      });
+      const result = await api.post<{ purchase_code: string; new_inventory_ids: number[]; quantity_warning: string | null }>(
+        "/purchases",
+        {
+          supplier_id: parseInt(restockSupplierId, 10),
+          items: rowsWithQty.map((row) => ({
+            product_id: p.id,
+            quantity: parseInt(row.quantity, 10),
+            unit_cost: parseFloat(restockCost),
+            unit_selling_price: parseFloat(restockSellingPrice),
+            size: row.size || undefined,
+            color: row.color || undefined,
+          })),
+          amount_paid: 0,
+          fulfills_line_id: fulfillsLineId ? parseInt(fulfillsLineId, 10) : undefined,
+        }
+      );
 
       // Report each variant separately, distinguishing a genuinely new
       // combination from restocking something already on record — same
@@ -339,10 +354,11 @@ export default function ManageProductsPage() {
           : `${qty} pcs added to ${colorLabel} / ${sizeLabel}`;
       });
 
-      setRestockSuccess(messages.join(" · "));
+      setRestockSuccess(messages.join(" · ") + (result.quantity_warning ? ` Note: ${result.quantity_warning}` : ""));
       setRestockColors([]);
       setRestockSizes([]);
       setRestockVariantRows([]);
+      setFulfillsLineId("");
       refreshInventoryFor(p.id);
       load();
     } catch (err) {
@@ -391,16 +407,43 @@ export default function ManageProductsPage() {
     }
   }
 
+  // Matches product title, brand, or category — the three fields already
+  // visible in the table, so what you can see is what you can search by.
+  const filteredProducts = products.filter((p) => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      p.product_title.toLowerCase().includes(q) ||
+      (p.brand ?? "").toLowerCase().includes(q) ||
+      (p.category ?? "").toLowerCase().includes(q)
+    );
+  });
+
   return (
     <div>
       <PageHeader title="Manage products" subtitle="Click a product to view its stock, edit details, or restock." />
 
       {error && <ErrorText>{error}</ErrorText>}
 
+      {!loading && products.length > 0 && (
+        <div className="relative mb-4 max-w-md">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search by product name, brand, or category..."
+            className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-gray-400"
+          />
+        </div>
+      )}
+
       {loading ? (
         <p className="text-sm text-gray-400">Loading...</p>
       ) : products.length === 0 ? (
         <EmptyState icon={Package} title="No products yet" subtitle="Add one to get started" />
+      ) : filteredProducts.length === 0 ? (
+        <EmptyState icon={Search} title="No products match your search" subtitle={`Nothing found for "${searchQuery}"`} />
       ) : (
         <Card className="p-0 overflow-hidden">
           <Table>
@@ -415,7 +458,7 @@ export default function ManageProductsPage() {
               </tr>
             </thead>
             <tbody>
-              {products.map((p) => {
+              {filteredProducts.map((p) => {
                 const isExpanded = expandedId === p.id;
                 const units = inventoryByProduct[p.id] ?? [];
 
@@ -783,6 +826,44 @@ export default function ManageProductsPage() {
                                     </table>
                                   </div>
                                 )}
+
+                                {(() => {
+                                  const matchingPending = pendingPurchases.filter(
+                                    (pp) => !restockSupplierId || String(pp.supplier_id) === restockSupplierId
+                                  );
+                                  const openLines = matchingPending.flatMap((pp) =>
+                                    (pp.lines ?? [])
+                                      .filter((line) => !line.is_fulfilled)
+                                      .map((line) => ({ purchase: pp, line }))
+                                  );
+                                  if (openLines.length === 0) return null;
+                                  return (
+                                    <div className="mb-3 border border-gray-300 rounded-xl p-3">
+                                      <Label>Fulfilling a line from an existing pending purchase?</Label>
+                                      <Dropdown
+                                        value={fulfillsLineId}
+                                        onChange={(v) => {
+                                          setFulfillsLineId(v);
+                                          const match = openLines.find((ol) => String(ol.line.id) === v);
+                                          if (match) {
+                                            setRestockSupplierId(String(match.purchase.supplier_id));
+                                            setRestockCost(String(match.line.unit_cost));
+                                          }
+                                        }}
+                                        placeholder="— Not linked to a pending purchase —"
+                                        options={openLines.map(({ purchase, line }) => ({
+                                          value: String(line.id),
+                                          label: `${purchase.purchase_code} — ${line.description} (${line.quantity} pcs @ Rs. ${line.unit_cost.toLocaleString()})`,
+                                        }))}
+                                      />
+                                      <p className="text-xs text-gray-500 mt-1">
+                                        Linking this restock to a pending purchase line means the supplier cost/payment for that line are
+                                        already recorded — this step just adds the actual product/variant details. Other lines on the same
+                                        purchase can still be fulfilled separately later.
+                                      </p>
+                                    </div>
+                                  );
+                                })()}
 
                                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                                   <FormGroup>

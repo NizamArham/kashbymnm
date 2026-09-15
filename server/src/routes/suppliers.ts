@@ -4,7 +4,6 @@ import { db } from "../db/connection";
 import { generateSupplierCode } from "../lib/codes";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth, requireRole } from "../lib/auth";
-import { normalizeSriLankanPhone } from "../lib/phones";
 
 export const suppliersRouter = Router();
 
@@ -19,11 +18,19 @@ const supplierInput = z.object({
 });
 
 // balance_owed = total purchases from this supplier - total payments made
+// - any available credit (from damaged-goods returns the supplier agreed
+// to cover as a future discount rather than an immediate cash refund).
+// credit_balance is shown separately so it's clear WHY the owed amount
+// is lower than raw purchases-minus-payments would suggest.
 const BALANCE_SUBQUERY = `
   COALESCE((SELECT SUM(total_cost) FROM purchases WHERE supplier_id = suppliers.id), 0)
   -
-  COALESCE((SELECT SUM(amount) FROM supplier_payments WHERE supplier_id = suppliers.id), 0)
-  AS balance_owed
+  COALESCE((SELECT SUM(amount_paid) FROM purchases WHERE supplier_id = suppliers.id), 0)
+  -
+  COALESCE((SELECT SUM(amount) FROM supplier_credit_transactions WHERE supplier_id = suppliers.id), 0)
+  AS balance_owed,
+  COALESCE((SELECT SUM(amount) FROM supplier_credit_transactions WHERE supplier_id = suppliers.id), 0)
+  AS credit_balance
 `;
 
 // GET /api/suppliers — list all, with live balance_owed
@@ -54,15 +61,14 @@ suppliersRouter.post(
   "/",
   asyncHandler(async (req, res) => {
     const data = supplierInput.parse(req.body);
-    const phone = normalizeSriLankanPhone(data.phone);
-    const supplier_code = generateSupplierCode(data.name, phone);
+    const supplier_code = generateSupplierCode(data.name, data.phone);
 
     const result = db
       .prepare(
         `INSERT INTO suppliers (supplier_code, name, phone, city, notes)
          VALUES (?, ?, ?, ?, ?)`
       )
-      .run(supplier_code, data.name, phone ?? null, data.city ?? null, data.notes ?? null);
+      .run(supplier_code, data.name, data.phone ?? null, data.city ?? null, data.notes ?? null);
 
     const created = db.prepare(`SELECT * FROM suppliers WHERE id = ?`).get(result.lastInsertRowid);
     res.status(201).json(created);
@@ -77,7 +83,7 @@ suppliersRouter.put(
     const existing = db.prepare(`SELECT * FROM suppliers WHERE id = ?`).get(req.params.id);
     if (!existing) throw new ApiError(404, "Supplier not found");
 
-    const merged = { ...existing, ...data, phone: normalizeSriLankanPhone(data.phone ?? (existing as any).phone) } as any;
+    const merged = { ...existing, ...data } as any;
     db.prepare(
       `UPDATE suppliers SET name = ?, phone = ?, city = ?, notes = ? WHERE id = ?`
     ).run(merged.name, merged.phone, merged.city, merged.notes, req.params.id);

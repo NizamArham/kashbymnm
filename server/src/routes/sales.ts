@@ -41,6 +41,12 @@ const saleInput = z.object({
   // can be computed and shown later in Sale History rather than just
   // the net amount_paid after change was given.
   amount_received: z.number().nonnegative().optional(),
+  // When cash tendered exceeds the total, this is the explicit choice
+  // of what happens to the extra — true = keep it as store credit on
+  // the customer's account, false/absent = hand back as change (the
+  // default, matching how a normal cash sale works). Never assumed —
+  // the person at checkout picks this each time it's relevant.
+  keep_cash_overpayment_as_credit: z.boolean().default(false),
   sale_type: z.enum(["in_store", "online"]).default("in_store"),
   // Delivery details — only meaningful for sale_type "online", ignored
   // otherwise. Weight and partner determine the delivery fee (Rs. 450
@@ -72,9 +78,11 @@ salesRouter.get(
   asyncHandler(async (_req, res) => {
     const rows = db
       .prepare(
-        `SELECT sales.*, customers.name as customer_name, customers.customer_code
+        `SELECT sales.*, customers.name as customer_name, customers.customer_code,
+                deliveries.delivery_partner
          FROM sales
          LEFT JOIN customers ON customers.id = sales.customer_id
+         LEFT JOIN deliveries ON deliveries.sale_id = sales.id
          ORDER BY sales.id DESC`
       )
       .all();
@@ -138,8 +146,13 @@ salesRouter.post(
     const data = saleInput.parse(req.body);
 
     if (data.customer_id) {
-      const customer = db.prepare(`SELECT id FROM customers WHERE id = ?`).get(data.customer_id);
+      const customer = db.prepare(`SELECT id, is_suspended FROM customers WHERE id = ?`).get(data.customer_id) as
+        | { id: number; is_suspended: number }
+        | undefined;
       if (!customer) throw new ApiError(400, "Referenced customer does not exist");
+      if (customer.is_suspended) {
+        throw new ApiError(409, "This customer is suspended and can't be attached to a new sale until reactivated.");
+      }
     }
 
     // Credit — in-store or online — is never extended to a walk-in.
@@ -207,7 +220,10 @@ salesRouter.post(
         throw new ApiError(400, "Store credit can only be applied for a selected customer.");
       }
       const balanceRow = db
-        .prepare(`SELECT COALESCE(SUM(amount), 0) as balance FROM store_credit_transactions WHERE customer_id = ?`)
+        .prepare(
+          `SELECT COALESCE(SUM(amount), 0) as balance FROM store_credit_transactions
+           WHERE customer_id = ? AND (expires_at IS NULL OR expires_at > datetime('now') OR amount < 0)`
+        )
         .get(data.customer_id) as { balance: number };
       storeCreditApplied = Math.min(data.store_credit_applied, balanceRow.balance, total);
     }
@@ -220,19 +236,24 @@ salesRouter.post(
     if (effectiveAmountPaid >= total && total > 0) payment_status = "paid";
     else if (effectiveAmountPaid > 0) payment_status = "partial";
 
-    // Cash change due: only meaningful when cash was tendered above the
-    // total. amount_received itself is stored as given, so Sale History
-    // can show exactly what was handed over, not just the net kept.
-    const change_due =
+    // Cash tendered above the total is either change handed back (the
+    // default) or, if explicitly chosen at checkout, kept as store
+    // credit instead — never assumed either way.
+    const cashExtra =
       data.payment_method === "cash" && data.amount_received != null && data.amount_received > total
         ? data.amount_received - total
         : 0;
+    const change_due = cashExtra > 0 && !data.keep_cash_overpayment_as_credit ? cashExtra : 0;
 
-    // Overpayment on a non-cash (e.g. online/bank transfer) payment —
-    // tracked so it can be offered back as store credit, rather than
-    // silently treated as extra income the customer never gets credit for.
+    // Overpayment tracked for store credit — either a non-cash payment
+    // that came in above the total, or a cash payment where the extra
+    // was explicitly kept as credit rather than given back as change.
     const overpaid_amount =
-      data.payment_method !== "cash" && data.amount_paid > total ? data.amount_paid - total : 0;
+      data.payment_method !== "cash" && data.amount_paid > total
+        ? data.amount_paid - total
+        : cashExtra > 0 && data.keep_cash_overpayment_as_credit
+        ? cashExtra
+        : 0;
 
     // Which of the 5 invoice categories this sale falls into, driving
     // both the invoice prefix and its own independent sequence:
@@ -427,7 +448,121 @@ salesRouter.put(
   })
 );
 
-// PUT /api/sales/:id/void — admin-only. Reverses a sale that was a
+// PUT /api/sales/:id/confirm-cod — "Mark as paid / COD collected", for an
+// order that WAS delivered by the shop itself (not a courier) and paid
+// for on delivery. One atomic action: creates a cashbook entry for the
+// exact order total and flips payment_status to 'paid', together — never
+// two separate steps someone could do one of and forget the other.
+// Exact amount only (no partial/discount handling) — a mismatch between
+// what was collected and the order total is handled manually outside
+// the system, per the owner's own call.
+salesRouter.put(
+  "/:id/confirm-cod",
+  asyncHandler(async (req, res) => {
+    const bodySchema = z.object({ payment_method: z.enum(["cash", "bank_transfer", "card"]) });
+    const { payment_method } = bodySchema.parse(req.body);
+
+    const sale = db.prepare(`SELECT * FROM sales WHERE id = ?`).get(req.params.id) as any;
+    if (!sale) throw new ApiError(404, "Sale not found");
+    if (sale.is_voided) throw new ApiError(409, "This sale has been voided");
+    if (sale.payment_status === "paid") throw new ApiError(409, "This sale is already marked as paid");
+
+    // This action is only for orders the shop delivered itself (D2D). A
+    // courier-delivered order (CPAK/DEX) holds the cash until settlement
+    // — confirming it here would wrongly record money that hasn't
+    // actually reached the shop yet, and would also make that delivery
+    // invisible to courier settlement, since the system would think it
+    // was already paid. No delivery record at all is treated the same
+    // as self-delivered, since no courier was ever assigned to it.
+    const delivery = db.prepare(`SELECT delivery_partner FROM deliveries WHERE sale_id = ?`).get(req.params.id) as
+      | { delivery_partner: string | null }
+      | undefined;
+    if (delivery && delivery.delivery_partner && delivery.delivery_partner !== "D2D") {
+      throw new ApiError(
+        409,
+        "This order was shipped via a courier — its COD is collected by them and settled separately, not confirmed here."
+      );
+    }
+
+    const remaining = sale.total - sale.amount_paid;
+    if (remaining <= 0) throw new ApiError(409, "This sale has nothing outstanding to collect");
+
+    const runConfirm = db.transaction(() => {
+      db.prepare(`UPDATE sales SET amount_paid = total, payment_status = 'paid' WHERE id = ?`).run(req.params.id);
+
+      db.prepare(
+        `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
+         VALUES ('income', 'sale', ?, ?, ?, ?)`
+      ).run(payment_method, req.params.id, remaining, `COD collected on delivery — invoice ${sale.invoice}`);
+    });
+
+    runConfirm();
+
+    const updated = db.prepare(`SELECT * FROM sales WHERE id = ?`).get(req.params.id);
+    res.json(updated);
+  })
+);
+
+// PUT /api/sales/:id/undo-cod — reverse a "Mark as paid / COD collected"
+// confirmation made by mistake, within 24 hours of it happening. Only
+// undoes what that specific action did: restores amount_paid/status to
+// what they were right before it, and removes the ONE cash book entry
+// it created (matched precisely by its note text, not just category +
+// reference_id, since a sale could separately have an earlier partial
+// payment entry that must NOT be touched by this). Never touches stock
+// or the delivery — for anything bigger than a payment-recording
+// mistake, voiding the whole sale is the right tool, not this.
+salesRouter.put(
+  "/:id/undo-cod",
+  asyncHandler(async (req, res) => {
+    const sale = db.prepare(`SELECT * FROM sales WHERE id = ?`).get(req.params.id) as any;
+    if (!sale) throw new ApiError(404, "Sale not found");
+
+    const noteMarker = `COD collected on delivery — invoice ${sale.invoice}`;
+    const entry = db
+      .prepare(`SELECT * FROM cash_book WHERE category = 'sale' AND reference_id = ? AND notes = ? ORDER BY id DESC LIMIT 1`)
+      .get(req.params.id, noteMarker) as any;
+    if (!entry) throw new ApiError(404, "No COD confirmation found for this sale to undo");
+
+    const hoursSince = (Date.now() - new Date(entry.entry_date).getTime()) / (1000 * 60 * 60);
+    if (hoursSince > 24) {
+      throw new ApiError(409, "This confirmation is more than 24 hours old and can no longer be undone this way.");
+    }
+
+    // Never delete the original entry — a real financial ledger should
+    // show both the mistake and the correction as real events, not
+    // pretend the first one never happened. Undoing twice is blocked by
+    // checking a reversal for this exact entry doesn't already exist.
+    const reversalNote = `Reversed payment of invoice ${sale.invoice} (COD confirmation undone)`;
+    const alreadyReversed = db
+      .prepare(`SELECT id FROM cash_book WHERE category = 'sale' AND reference_id = ? AND notes = ?`)
+      .get(req.params.id, reversalNote);
+    if (alreadyReversed) throw new ApiError(409, "This confirmation has already been undone");
+
+    const runUndo = db.transaction(() => {
+      const restoredAmountPaid = Math.max(0, sale.amount_paid - entry.amount);
+      let restoredStatus: "paid" | "partial" | "unpaid" = "unpaid";
+      if (restoredAmountPaid >= sale.total && sale.total > 0) restoredStatus = "paid";
+      else if (restoredAmountPaid > 0) restoredStatus = "partial";
+
+      db.prepare(`UPDATE sales SET amount_paid = ?, payment_status = ? WHERE id = ?`).run(
+        restoredAmountPaid,
+        restoredStatus,
+        req.params.id
+      );
+
+      db.prepare(
+        `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
+         VALUES ('expense', 'sale', ?, ?, ?, ?)`
+      ).run(entry.payment_method, req.params.id, entry.amount, reversalNote);
+    });
+
+    runUndo();
+
+    const updated = db.prepare(`SELECT * FROM sales WHERE id = ?`).get(req.params.id);
+    res.json(updated);
+  })
+);
 // billing mistake: every sold unit goes back to 'available', the income
 // entry is reversed in the cash book, and any pending delivery is
 // cancelled. The sale record itself is kept (is_voided = 1) rather than

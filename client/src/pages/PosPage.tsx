@@ -99,6 +99,13 @@ export default function PosPage() {
   const [priceEditError, setPriceEditError] = useState<string | null>(null);
 
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
+  // When cash tendered exceeds the total AND a real customer is
+  // attached, this popup forces an explicit choice — give change back,
+  // or keep the extra as store credit on their account. Never assumed.
+  // A walk-in has nowhere to keep credit, so this never applies to them
+  // — they just always get change, exactly as before.
+  const [showOverpaymentChoice, setShowOverpaymentChoice] = useState(false);
+  const [keepOverpaymentAsCredit, setKeepOverpaymentAsCredit] = useState<boolean | null>(null);
 
   // Address verification gate — shown before the final review modal for
   // online orders, so a missing or unconfirmed address is caught here
@@ -125,6 +132,11 @@ export default function PosPage() {
   const [appliedCoupon, setAppliedCoupon] = useState<Coupon | null>(null);
   const [couponError, setCouponError] = useState<string | null>(null);
   const [couponChecking, setCouponChecking] = useState(false);
+
+  // Store credit from a past overpayment — offered automatically when
+  // the selected customer has a balance, applied against this sale's
+  // total if the person chooses to use it.
+  const [useStoreCredit, setUseStoreCredit] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("cash");
   // Cash tendered by the customer, so change due can be shown before the
   // sale is finalized — only meaningful when paymentMethod is "cash".
@@ -147,8 +159,11 @@ export default function PosPage() {
   const combinedDiscount = manualDiscountAmount + couponDiscountAmount;
 
   const total = Math.max(0, subtotal - combinedDiscount);
+  const availableStoreCredit = selectedCustomer?.store_credit_balance ?? 0;
+  const storeCreditApplied = useStoreCredit ? Math.min(availableStoreCredit, total) : 0;
+  const remainingAfterCredit = Math.max(0, total - storeCreditApplied);
   const paidAmount = parseFloat(amountPaid) || 0;
-  const changeDue = paymentMethod === "cash" && paidAmount > total ? paidAmount - total : 0;
+  const changeDue = paymentMethod === "cash" && paidAmount > remainingAfterCredit ? paidAmount - remainingAfterCredit : 0;
   const cashPresets = [500, 1000, 2000, 5000, 10000, 20000];
 
   const deliveryFee = calculateDeliveryFee(parseFloat(packageWeight) || 0, isFreeDelivery);
@@ -318,16 +333,43 @@ export default function PosPage() {
     );
   }
 
-  function selectCustomer(c: Customer) {
+  async function selectCustomer(c: Customer) {
+    if (c.is_suspended === 1) {
+      setCustomerSearchOpen(false);
+      alert(`${c.name} is suspended${c.suspended_reason ? ` (${c.suspended_reason})` : ""} and can't be selected for a new sale. Reactivate them from the Customers page first if this was a mistake.`);
+      return;
+    }
+    // Use the cached search result immediately so selection feels
+    // instant, then replace it with a fresh fetch — the cached
+    // allCustomers list can be stale for anyone who's been on this page
+    // a while (a payment, a return credit, anything could have changed
+    // their real balance since the list was first loaded this session).
     setSelectedCustomer(c);
     setCustomerQuery("");
     setCustomerResults([]);
     setCustomerSearchOpen(false);
+    try {
+      const fresh = await api.get<Customer>(`/customers/${c.id}`);
+      if (fresh.is_suspended === 1) {
+        // Suspended since the search results were shown — the fresh
+        // fetch just caught it. Undo the selection rather than letting
+        // it through.
+        setSelectedCustomer(null);
+        alert(`${fresh.name} was suspended just now and can't be selected for a new sale.`);
+        return;
+      }
+      setSelectedCustomer(fresh);
+    } catch {
+      // If the refresh fails, the cached version already selected is
+      // still a reasonable fallback — better than blocking selection
+      // entirely over a network hiccup.
+    }
   }
 
   function removeCustomer() {
     setSelectedCustomer(null);
     setIsCreditSale(false);
+    setUseStoreCredit(false);
   }
 
   function openAddCustomer() {
@@ -507,8 +549,23 @@ export default function PosPage() {
         setCheckoutError("Amount paid can't exceed the order total on a credit sale.");
         return;
       }
-    } else if (saleType === "in_store" && paymentMethod === "cash" && paidAmount < total) {
-      setCheckoutError("Cash tendered is less than the total due");
+    } else if (saleType === "in_store" && paymentMethod === "cash" && !isCreditSale && paidAmount < remainingAfterCredit) {
+      setCheckoutError("Cash tendered is less than the amount due");
+      return;
+    }
+
+    // Cash tendered above what's due, WITH a real customer attached —
+    // this needs an explicit choice (change back, or kept as credit)
+    // before proceeding. A walk-in has nowhere to keep credit, so this
+    // never applies to them; they just get change automatically, same
+    // as always.
+    const pendingCashExtra =
+      !isCreditSale && saleType === "in_store" && paymentMethod === "cash" && paidAmount > remainingAfterCredit
+        ? paidAmount - remainingAfterCredit
+        : 0;
+    if (pendingCashExtra > 0 && selectedCustomer && keepOverpaymentAsCredit === null) {
+      setSubmitting(false);
+      setShowOverpaymentChoice(true);
       return;
     }
 
@@ -530,7 +587,7 @@ export default function PosPage() {
         ? advanceAmount
         : paymentMethod === "cash"
         ? paidAmount
-        : total;
+        : remainingAfterCredit;
 
     setSubmitting(true);
     try {
@@ -556,8 +613,10 @@ export default function PosPage() {
         manual_discount_value: parseFloat(discountValue) || 0,
         coupon_code: appliedCoupon?.code,
         amount_paid: finalAmountPaid,
+        store_credit_applied: storeCreditApplied,
         payment_method: effectivePaymentMethod,
         amount_received: paymentMethod === "cash" && saleType === "in_store" && !isCreditSale ? paidAmount : undefined,
+        keep_cash_overpayment_as_credit: keepOverpaymentAsCredit === true,
         sale_type: saleType,
         is_credit_order: isCreditSale,
         ...(saleType === "online"
@@ -578,7 +637,9 @@ export default function PosPage() {
       setCouponCode("");
       setAppliedCoupon(null);
       setCouponError(null);
+      setUseStoreCredit(false);
       setAmountPaid("");
+      setKeepOverpaymentAsCredit(null);
       setAllAvailableUnits(null);
       setShowCheckoutModal(false);
       setIsCreditSale(false);
@@ -956,6 +1017,18 @@ export default function PosPage() {
                       <p className="text-xs text-amber-800">A customer is required for online orders, so delivery can use their saved address.</p>
                     </div>
                   )}
+
+                  {availableStoreCredit > 0 && (
+                    <div className="mt-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+                      <label className="flex items-center gap-2 text-sm text-blue-900 cursor-pointer">
+                        <input type="checkbox" checked={useStoreCredit} onChange={(e) => setUseStoreCredit(e.target.checked)} className="rounded" />
+                        Use store credit — Rs. {availableStoreCredit.toLocaleString()} available
+                      </label>
+                      {useStoreCredit && (
+                        <p className="text-xs text-blue-700 mt-1">Rs. {storeCreditApplied.toLocaleString()} will be applied to this sale.</p>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {saleType === "online" && (
@@ -1002,9 +1075,15 @@ export default function PosPage() {
                         <span>- Rs. {combinedDiscount.toLocaleString()}</span>
                       </div>
                     )}
+                    {storeCreditApplied > 0 && (
+                      <div className="flex justify-between text-sm text-blue-600">
+                        <span>Store credit applied</span>
+                        <span>- Rs. {storeCreditApplied.toLocaleString()}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between text-lg font-bold pt-1.5 border-t border-gray-200">
-                      <span>Total</span>
-                      <span>Rs. {total.toLocaleString()}</span>
+                      <span>{storeCreditApplied > 0 ? "Amount due" : "Total"}</span>
+                      <span>Rs. {(storeCreditApplied > 0 ? remainingAfterCredit : total).toLocaleString()}</span>
                     </div>
                   </div>
                 </div>
@@ -1249,7 +1328,7 @@ export default function PosPage() {
                                 </button>
                               ))}
                               <button
-                                onClick={() => setAmountPaid(total.toString())}
+                                onClick={() => setAmountPaid(remainingAfterCredit.toString())}
                                 className="px-2 py-0.5 bg-black text-white rounded text-xs hover:bg-gray-800"
                               >
                                 Exact
@@ -1554,6 +1633,18 @@ export default function PosPage() {
                   <span>Total</span>
                   <span>Rs. {total.toLocaleString()}</span>
                 </div>
+                {storeCreditApplied > 0 && (
+                  <>
+                    <div className="flex justify-between text-sm text-blue-600">
+                      <span>Store credit applied</span>
+                      <span>- Rs. {storeCreditApplied.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between text-sm font-semibold">
+                      <span>Amount due</span>
+                      <span>Rs. {remainingAfterCredit.toLocaleString()}</span>
+                    </div>
+                  </>
+                )}
                 {isCreditSale && (
                   <div className="flex justify-between text-sm text-amber-600 font-medium">
                     <span>Balance due (credit)</span>
@@ -1604,6 +1695,55 @@ export default function PosPage() {
                 className="flex-1 px-4 py-2.5 bg-black text-white rounded-xl hover:bg-gray-800 transition font-medium text-sm disabled:opacity-50"
               >
                 {submitting ? "Processing..." : "Confirm & complete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showOverpaymentChoice && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl">
+            <div className="p-5 border-b border-gray-100">
+              <h2 className="text-base font-semibold text-gray-900">Extra cash received</h2>
+            </div>
+            <div className="p-5">
+              <p className="text-sm text-gray-600 mb-1">
+                {selectedCustomer?.name} paid Rs. {paidAmount.toLocaleString()}, which is Rs.{" "}
+                {(paidAmount - remainingAfterCredit).toLocaleString()} more than the amount due.
+              </p>
+              <p className="text-xs text-gray-400 mb-4">What should happen to the extra?</p>
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={() => {
+                    setKeepOverpaymentAsCredit(false);
+                    setShowOverpaymentChoice(false);
+                    setTimeout(() => handleCheckout(), 0);
+                  }}
+                  className="border border-gray-200 rounded-xl px-4 py-3 text-sm text-left hover:border-gray-400 transition"
+                >
+                  <span className="font-medium text-gray-900">Give change</span>
+                  <div className="text-xs text-gray-400 mt-0.5">Hand back Rs. {(paidAmount - remainingAfterCredit).toLocaleString()} in cash</div>
+                </button>
+                <button
+                  onClick={() => {
+                    setKeepOverpaymentAsCredit(true);
+                    setShowOverpaymentChoice(false);
+                    setTimeout(() => handleCheckout(), 0);
+                  }}
+                  className="border border-gray-200 rounded-xl px-4 py-3 text-sm text-left hover:border-gray-400 transition"
+                >
+                  <span className="font-medium text-gray-900">Keep as store credit</span>
+                  <div className="text-xs text-gray-400 mt-0.5">
+                    Adds Rs. {(paidAmount - remainingAfterCredit).toLocaleString()} to {selectedCustomer?.name}'s account for later
+                  </div>
+                </button>
+              </div>
+              <button
+                onClick={() => setShowOverpaymentChoice(false)}
+                className="w-full text-center text-xs text-gray-400 hover:text-gray-600 mt-3"
+              >
+                Cancel and adjust the amount instead
               </button>
             </div>
           </div>

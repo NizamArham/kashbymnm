@@ -9,11 +9,10 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "db:migrate": "tsx src/db/migrate.ts",
+    "db:migrate-store-credit-exchange": "tsx src/db/migrate-store-credit-exchange.ts",
+    "db:migrate-customer-suspend-delete": "tsx src/db/migrate-customer-suspend-delete.ts",
     "db:seed": "tsx src/db/seed.ts",
-    "db:import": "tsx src/db/import-spreadsheet.ts",
-    "db:backfill-barcodes": "tsx src/db/backfill-barcodes.ts",
-    "db:backfill-prices": "tsx src/db/backfill-prices.ts",
-    "db:recategorize": "tsx src/db/recategorize-products.ts",
+    "db:import-opening-stock": "tsx src/db/import-opening-stock.ts",
     "db:import-legacy-customers": "tsx src/db/import-legacy-customers.ts"
   },
   "dependencies": {

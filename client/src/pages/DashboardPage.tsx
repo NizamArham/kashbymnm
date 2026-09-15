@@ -71,7 +71,7 @@ export default function DashboardPage() {
               {recentSales.map((sale) => (
                 <tr key={sale.id}>
                   <Td>{sale.invoice}</Td>
-                  <Td>{sale.customer_name ?? "Walk-in"}</Td>
+                  <Td>{sale.customer_name ?? (sale.deleted_customer_snapshot ? `[Deleted: ${sale.deleted_customer_snapshot}]` : "Walk-in")}</Td>
                   <Td>{sale.sale_type === "online" ? "Online" : "In-Store"}</Td>
                   <Td>Rs. {sale.total.toLocaleString()}</Td>
                   <Td className="capitalize">{sale.payment_status}</Td>

@@ -8,7 +8,6 @@ import {
   RotateCcw,
   Truck,
   Landmark,
-  UserPlus,
   Search,
   Plus,
   Settings,
@@ -18,7 +17,11 @@ import {
   Menu,
   X,
   ShoppingBag,
-  ClipboardCheck,
+  FolderOpen,
+  CreditCard,
+  UserCog,
+  SlidersHorizontal,
+  Clock,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
@@ -49,12 +52,26 @@ export default function AppShell() {
   const [openMenus, setOpenMenus] = useState<Record<string, boolean>>({
     inventory: false,
     pos: false,
+    directory: false,
+    returns: false,
     finance: false,
+    deliveries: false,
+    settings: false,
   });
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const menu: MenuItem[] = [
     { id: "dashboard", label: "Dashboard", icon: Home, path: "/", adminOnly: true },
+    {
+      id: "pos",
+      label: "POS",
+      icon: ShoppingCart,
+      path: "/pos",
+      subItems: [
+        { id: "checkout", label: "Checkout", path: "/pos", icon: ShoppingCart },
+        { id: "sales-history", label: "Sale History", path: "/sales", icon: History },
+      ],
+    },
     {
       id: "inventory",
       label: "Inventory",
@@ -67,15 +84,21 @@ export default function AppShell() {
       ],
     },
     {
-      id: "pos",
-      label: "POS",
-      icon: ShoppingCart,
-      path: "/pos",
+      id: "directory",
+      label: "Directory",
+      icon: FolderOpen,
+      path: "/customers",
       subItems: [
-        { id: "new-sale", label: "New Sale", path: "/pos", icon: ShoppingCart },
-        { id: "sales-history", label: "Sales History", path: "/sales", icon: History },
-        { id: "returns", label: "Returns", path: "/returns", icon: RotateCcw },
+        { id: "view-customers", label: "Customers", path: "/customers", icon: Users },
+        { id: "staff", label: "Staff", path: "/staff", icon: UserCog, adminOnly: true },
+        { id: "suppliers", label: "Suppliers", path: "/suppliers", icon: Truck, adminOnly: true },
       ],
+    },
+    {
+      id: "returns",
+      label: "Returns",
+      icon: RotateCcw,
+      path: "/returns",
     },
     {
       id: "finance",
@@ -84,21 +107,30 @@ export default function AppShell() {
       path: "/cash-book",
       adminOnly: true,
       subItems: [
-        { id: "suppliers", label: "Suppliers", path: "/suppliers", icon: Truck },
         { id: "purchases", label: "Purchases", path: "/purchases", icon: Package },
+        { id: "supplier-payments", label: "Supplier Payments", path: "/supplier-payments", icon: CreditCard },
         { id: "cash-book", label: "Cash Book", path: "/cash-book", icon: Landmark },
       ],
     },
-    { id: "shipping", label: "Deliveries / Courier", icon: Truck, path: "/deliveries", adminOnly: true },
-    { id: "attendance", label: "Attendance", icon: ClipboardCheck, path: "/attendance", adminOnly: true },
     {
-      id: "customers",
-      label: "Customers",
-      icon: Users,
-      path: "/customers",
+      id: "deliveries",
+      label: "Deliveries & Couriers",
+      icon: Truck,
+      path: "/deliveries",
       subItems: [
-        { id: "view-customers", label: "View Customers", path: "/customers", icon: Users },
-        { id: "add-customer", label: "Add Customer", path: "/customers/add", icon: UserPlus },
+        { id: "deliveries", label: "Deliveries", path: "/deliveries", icon: Truck },
+        { id: "couriers", label: "Couriers", path: "/couriers", icon: Truck, adminOnly: true },
+      ],
+    },
+    {
+      id: "settings",
+      label: "Settings",
+      icon: SlidersHorizontal,
+      path: "/attendance",
+      adminOnly: true,
+      subItems: [
+        { id: "attendance", label: "Attendance", path: "/attendance", icon: Clock },
+        { id: "general-settings", label: "General Settings", path: "/settings/general", icon: Settings },
       ],
     },
     { id: "profile", label: "My Profile", icon: Settings, path: "/profile" },
@@ -112,13 +144,21 @@ export default function AppShell() {
 
   useEffect(() => {
     const path = location.pathname;
+    const isOnPos = path === "/pos" || path === "/sales";
     const isOnInventory = path === "/inventory" || path === "/products" || path === "/products/add";
-    const isOnPos = path === "/pos" || path === "/sales" || path === "/returns";
-    const isOnFinance = path === "/suppliers" || path === "/purchases" || path === "/cash-book";
+    const isOnDirectory = path === "/customers" || path === "/customers/add" || path === "/staff" || path === "/staff/add" || path === "/suppliers";
+    const isOnReturns = path === "/returns";
+    const isOnFinance = path === "/purchases" || path === "/supplier-payments" || path === "/cash-book";
+    const isOnDeliveries = path === "/deliveries" || path === "/couriers";
+    const isOnSettings = path === "/attendance" || path === "/settings/general";
 
-    if (isOnInventory) setOpenMenus((prev) => ({ ...prev, inventory: true }));
     if (isOnPos) setOpenMenus((prev) => ({ ...prev, pos: true }));
+    if (isOnInventory) setOpenMenus((prev) => ({ ...prev, inventory: true }));
+    if (isOnDirectory) setOpenMenus((prev) => ({ ...prev, directory: true }));
+    if (isOnReturns) setOpenMenus((prev) => ({ ...prev, returns: true }));
     if (isOnFinance) setOpenMenus((prev) => ({ ...prev, finance: true }));
+    if (isOnDeliveries) setOpenMenus((prev) => ({ ...prev, deliveries: true }));
+    if (isOnSettings) setOpenMenus((prev) => ({ ...prev, settings: true }));
   }, [location.pathname]);
 
   function toggleMenu(id: string) {
@@ -140,16 +180,6 @@ export default function AppShell() {
     if (item.subItems) return item.subItems.some((sub) => location.pathname === sub.path);
     return location.pathname.startsWith(item.path);
   }
-
-  const breadcrumbLabels: Record<string, string> = {
-    "/products/add": "Inventory / Add Product",
-    "/customers/add": "Customers / Add Customer",
-    "/purchases": "Finance / Purchases",
-    "/deliveries": "Shipping / Deliveries",
-    "/cash-book": "Finance / Cash Book",
-    "/attendance": "Profile / Attendance",
-  };
-  const breadcrumb = breadcrumbLabels[location.pathname];
 
   const initials = (user?.name || user?.username || "?")
     .split(" ")
@@ -271,16 +301,22 @@ export default function AppShell() {
       </div>
 
       <div className="flex-1 lg:ml-64 min-h-screen bg-gray-50">
-        <button
-          onClick={() => setSidebarOpen(true)}
-          className="fixed left-3 top-3 z-40 rounded-lg bg-black p-2 text-white shadow-lg lg:hidden"
-          aria-label="Open sidebar"
-        >
-          <Menu size={20} />
-        </button>
+        <div className="sticky top-0 z-30 bg-white border-b border-gray-200 px-4 py-3 lg:px-6 lg:py-4 flex items-center gap-3">
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="lg:hidden p-1.5 hover:bg-gray-100 rounded-lg transition"
+            aria-label="Open sidebar"
+          >
+            <Menu size={24} className="text-gray-700" />
+          </button>
+          <h2 className="text-sm lg:text-base font-medium text-gray-700">
+            {visibleMenu.find(
+              (item) => location.pathname === item.path || item.subItems?.some((s) => location.pathname === s.path)
+            )?.label || "Dashboard"}
+          </h2>
+        </div>
 
-        <div className="p-4 pt-14 lg:p-6">
-          {breadcrumb && <div className="px-1 py-2 text-xs text-gray-400">{breadcrumb}</div>}
+        <div className="p-4 lg:p-6">
           <div className="bg-white border border-gray-200 rounded-2xl p-4 lg:p-6 shadow-sm">
             <Outlet />
           </div>
