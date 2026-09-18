@@ -48,7 +48,7 @@ export default function AddProductPage() {
   // FO/OG/OR/OP classification — set once at creation, never changed
   // afterward. A different type of "the same shirt" is entered as a
   // completely separate product, not edited later.
-  const [productType, setProductType] = useState<"FO" | "OG" | "OR" | "OP">("OG");
+  const [productType, setProductType] = useState<"FO" | "OG" | "OR" | "OP" | "IM">("OG");
 
 
   const [colors, setColors] = useState<string[]>([]);
@@ -74,6 +74,17 @@ export default function AddProductPage() {
   const [addingNewSize, setAddingNewSize] = useState(false);
 
   const [variantRows, setVariantRows] = useState<VariantRow[]>([]);
+  // The pick-one-at-a-time flow: choose a color and size already added
+  // as tags above, then a quantity field appears, then Add creates the
+  // row. If that exact color+size combination is already in the table,
+  // nothing new is added — the existing row is highlighted instead, so
+  // the quantity can be corrected right there rather than creating a
+  // second, confusing row for the same variant.
+  const [pickColor, setPickColor] = useState("");
+  const [pickSize, setPickSize] = useState("");
+  const [pickQuantity, setPickQuantity] = useState("");
+  const [pickError, setPickError] = useState<string | null>(null);
+  const [highlightedRowKey, setHighlightedRowKey] = useState<string | null>(null);
 
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -110,22 +121,12 @@ export default function AddProductPage() {
     return () => clearTimeout(timeout);
   }, [form.product_title, mode]);
 
-  useEffect(() => {
-    setVariantRows((prevRows) => {
-      const bySizeColor = new Map(prevRows.map((r) => [`${r.size}|${r.color}`, r.quantity]));
-      if (colors.length === 0 && sizes.length === 0) return [];
-
-      const colorList = colors.length > 0 ? colors : [""];
-      const sizeList = sizes.length > 0 ? sizes : [""];
-      const next: VariantRow[] = [];
-      for (const color of colorList) {
-        for (const size of sizeList) {
-          next.push({ size, color, quantity: bySizeColor.get(`${size}|${color}`) ?? "" });
-        }
-      }
-      return next;
-    });
-  }, [colors, sizes]);
+  // Variant rows are no longer auto-generated from every color × size
+  // combination — that created a full grid even for combinations never
+  // actually received. Instead, rows are added one at a time via the
+  // color+size+quantity picker below (see addVariantRow), which is a
+  // much closer match to how stock actually arrives (a specific, uneven
+  // mix, not a complete grid).
 
   function update<K extends keyof typeof form>(key: K, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -168,6 +169,49 @@ export default function AddProductPage() {
     setVariantRows((rows) => rows.map((r) => ({ ...r, quantity: value })));
   }
 
+  function addVariantRow() {
+    setPickError(null);
+    if (colors.length === 0) {
+      setPickError("Add at least one color above first");
+      return;
+    }
+    if (sizes.length === 0) {
+      setPickError("Add at least one size above first");
+      return;
+    }
+    if (!pickColor) {
+      setPickError("Select a color");
+      return;
+    }
+    if (!pickSize) {
+      setPickError("Select a size");
+      return;
+    }
+    const qty = parseInt(pickQuantity, 10);
+    if (!qty || qty <= 0) {
+      setPickError("Enter a quantity greater than 0");
+      return;
+    }
+
+    const key = `${pickColor}|${pickSize}`;
+    const existingIndex = variantRows.findIndex((r) => `${r.color}|${r.size}` === key);
+
+    if (existingIndex !== -1) {
+      // Already have this exact combination — don't create a second,
+      // confusing row for it. Just highlight the real one so the
+      // quantity can be corrected there directly.
+      setHighlightedRowKey(key);
+      setTimeout(() => setHighlightedRowKey(null), 2000);
+      document.getElementById(`variant-row-${existingIndex}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    } else {
+      setVariantRows((rows) => [...rows, { color: pickColor, size: pickSize, quantity: String(qty) }]);
+    }
+
+    setPickColor("");
+    setPickSize("");
+    setPickQuantity("");
+  }
+
   const totalUnits = useMemo(
     () => variantRows.reduce((sum, r) => sum + (parseInt(r.quantity, 10) || 0), 0),
     [variantRows]
@@ -190,6 +234,11 @@ export default function AddProductPage() {
     setAddingNewSize(false);
     setColors([]);
     setSizes([]);
+    setVariantRows([]);
+    setPickColor("");
+    setPickSize("");
+    setPickQuantity("");
+    setPickError(null);
     const product = products.find((p) => String(p.id) === id);
     if (product) {
       setForm((f) => ({
@@ -326,6 +375,11 @@ export default function AddProductPage() {
               setAddingNewColor(false);
               setAddingNewSize(false);
               setExistingProductId("");
+              setVariantRows([]);
+              setPickColor("");
+              setPickSize("");
+              setPickQuantity("");
+              setPickError(null);
             }}
             options={[
               { value: "new", label: "New product" },
@@ -500,12 +554,13 @@ export default function AddProductPage() {
                     <Label>Product type</Label>
                     <Dropdown
                       value={productType}
-                      onChange={(v) => setProductType(v as "FO" | "OG" | "OR" | "OP")}
+                      onChange={(v) => setProductType(v as "FO" | "OG" | "OR" | "OP" | "IM")}
                       options={[
                         { value: "FO", label: "FO — Factory Outlet" },
                         { value: "OG", label: "OG — Original (with labels)" },
                         { value: "OR", label: "OR — Overrun" },
                         { value: "OP", label: "OP — Own Production" },
+                        { value: "IM", label: "IM — Imported" },
                       ]}
                     />
                     <p className="text-xs text-gray-400 mt-1">
@@ -682,6 +737,53 @@ export default function AddProductPage() {
                 </div>
               </div>
 
+              <div className="mt-5 border-t border-gray-100 pt-4">
+                <Label>Add a variant</Label>
+                <p className="text-xs text-gray-400 mb-2">
+                  Pick the color and size you actually received, enter how many, and add it — one combination at a time, matching what's really in the delivery rather than every possible combination.
+                </p>
+                <div className="flex gap-2 items-end flex-wrap">
+                  <div className="w-36">
+                    <Dropdown
+                      value={pickColor}
+                      onChange={setPickColor}
+                      placeholder={colors.length > 0 ? "Color" : "Color"}
+                      disabled={colors.length === 0}
+                      options={colors.map((c) => ({ value: c, label: c }))}
+                    />
+                  </div>
+                  <div className="w-28">
+                    <Dropdown
+                      value={pickSize}
+                      onChange={setPickSize}
+                      placeholder={sizes.length > 0 ? "Size" : "Size"}
+                      disabled={sizes.length === 0}
+                      options={sizes.map((s) => ({ value: s, label: s }))}
+                    />
+                  </div>
+                  <div className="w-24">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={pickQuantity}
+                      onChange={(e) => setPickQuantity(e.target.value.replace(/[^0-9]/g, ""))}
+                      onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addVariantRow())}
+                      placeholder="Qty"
+                      className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-gray-400"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addVariantRow}
+                    className="px-3.5 py-2.5 bg-black text-white rounded-xl text-sm flex items-center gap-1 hover:bg-gray-800"
+                  >
+                    <Plus size={14} />
+                    Add
+                  </button>
+                </div>
+                {pickError && <ErrorText>{pickError}</ErrorText>}
+              </div>
+
               {variantRows.length > 0 && (
                 <div className="mt-5 border-t border-gray-100 pt-4">
                   <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
@@ -717,8 +819,13 @@ export default function AddProductPage() {
                         {variantRows.map((row, i) => {
                           const current = mode === "existing" ? currentStockFor(row.color, row.size) : 0;
                           const adding = parseInt(row.quantity, 10) || 0;
+                          const isHighlighted = highlightedRowKey === `${row.color}|${row.size}`;
                           return (
-                            <tr key={`${row.color}-${row.size}`}>
+                            <tr
+                              key={`${row.color}-${row.size}`}
+                              id={`variant-row-${i}`}
+                              className={isHighlighted ? "bg-amber-100 transition-colors duration-1000" : "transition-colors duration-1000"}
+                            >
                               <td className="px-3 py-2 border-b border-gray-50">{row.color || "—"}</td>
                               <td className="px-3 py-2 border-b border-gray-50 font-medium">{row.size || "—"}</td>
                               {mode === "existing" && (
@@ -791,6 +898,26 @@ export default function AddProductPage() {
                     {suppliers.find((s) => String(s.id) === form.supplier_id)?.name ?? "—"}
                   </span>
                 </div>
+
+                {form.cost_price && form.selling_price && parseFloat(form.selling_price) > 0 && (() => {
+                  const cost = parseFloat(form.cost_price);
+                  const sell = parseFloat(form.selling_price);
+                  const marginPercent = ((sell - cost) / sell) * 100;
+                  const isHealthy = marginPercent >= 30;
+                  const isLow = marginPercent < 15;
+                  return (
+                    <div className="border-t border-gray-100 pt-3 flex justify-between items-center text-sm">
+                      <span className="text-gray-500">Margin on this batch</span>
+                      <span
+                        className={`font-semibold ${
+                          marginPercent < 0 ? "text-red-600" : isLow ? "text-amber-600" : isHealthy ? "text-green-600" : "text-gray-700"
+                        }`}
+                      >
+                        {marginPercent < 0 ? "Loss" : `${marginPercent.toFixed(0)}%`}
+                      </span>
+                    </div>
+                  );
+                })()}
 
                 <div className="border-t border-gray-100 pt-3 flex justify-between text-sm">
                   <span className="text-gray-500">Colors</span>

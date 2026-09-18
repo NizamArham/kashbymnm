@@ -322,7 +322,7 @@ CREATE TABLE IF NOT EXISTS products (
   -- with their own cost/price/supplier, not variants of one product.
   -- FO = Factory Outlet, OG = Original (with labels), OR = Overrun,
   -- OP = Own Production.
-  product_type TEXT NOT NULL DEFAULT 'OG' CHECK (product_type IN ('FO','OG','OR','OP')),
+  product_type TEXT NOT NULL DEFAULT 'OG' CHECK (product_type IN ('FO','OG','OR','OP','IM')),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -435,10 +435,20 @@ CREATE INDEX IF NOT EXISTS idx_sales_customer ON sales(customer_id);
 CREATE TABLE IF NOT EXISTS sale_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   sale_id INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
-  inventory_id INTEGER NOT NULL REFERENCES inventory(id),
+  -- ON DELETE SET NULL: if the product this unit belonged to is later
+  -- deliberately deleted (see the products DELETE route), the sale
+  -- itself survives intact — inventory_id just goes NULL rather than
+  -- blocking the deletion or leaving a dangling reference. product_snapshot
+  -- (below) is what keeps the receipt readable once that happens.
+  inventory_id INTEGER REFERENCES inventory(id) ON DELETE SET NULL,
   quantity INTEGER NOT NULL DEFAULT 1,
   unit_price REAL NOT NULL,
-  line_total REAL NOT NULL
+  line_total REAL NOT NULL,
+  -- Set ONLY at the moment inventory_id is nulled out by a product
+  -- deletion — never touched for a normal, still-valid sale item. A
+  -- plain text fallback ("Product Name — Color / Size") so a receipt
+  -- still reads correctly after the real inventory/product row is gone.
+  product_snapshot TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_sale_items_sale ON sale_items(sale_id);
@@ -458,7 +468,7 @@ CREATE TABLE IF NOT EXISTS return_requests (
   quantity INTEGER NOT NULL DEFAULT 1,
   condition TEXT NOT NULL CHECK (condition IN ('clean','damaged')),
   resolution TEXT NOT NULL CHECK (resolution IN ('refund','exchange','store_credit_exchange')),
-  exchange_inventory_id INTEGER REFERENCES inventory(id),
+  exchange_inventory_id INTEGER REFERENCES inventory(id) ON DELETE SET NULL,
   -- Only meaningful for store_credit_exchange — how many days the
   -- resulting credit is valid for, chosen at request time (45 is the
   -- real default; anything else is a deliberate exception, not an
@@ -493,7 +503,7 @@ CREATE TABLE IF NOT EXISTS returns (
   condition TEXT NOT NULL CHECK (condition IN ('clean','damaged')),
   resolution TEXT NOT NULL CHECK (resolution IN ('refund','exchange','store_credit_exchange')),
   refund_amount REAL NOT NULL DEFAULT 0,
-  exchange_inventory_id INTEGER REFERENCES inventory(id),
+  exchange_inventory_id INTEGER REFERENCES inventory(id) ON DELETE SET NULL,
   reason TEXT,
   return_date TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -565,7 +575,7 @@ CREATE TABLE IF NOT EXISTS pending_purchase_lines (
   -- over as a default when this line is eventually fulfilled into a
   -- real product on Add Product, since the type is normally decided at
   -- the moment the goods are ordered/received.
-  product_type TEXT NOT NULL DEFAULT 'OG' CHECK (product_type IN ('FO','OG','OR','OP'))
+  product_type TEXT NOT NULL DEFAULT 'OG' CHECK (product_type IN ('FO','OG','OR','OP','IM'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_pending_purchase_lines_purchase ON pending_purchase_lines(purchase_id);
@@ -639,7 +649,7 @@ CREATE TABLE IF NOT EXISTS purchase_return_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   purchase_return_id INTEGER NOT NULL REFERENCES purchase_returns(id) ON DELETE CASCADE,
   pending_line_id INTEGER REFERENCES pending_purchase_lines(id),
-  inventory_id INTEGER REFERENCES inventory(id),
+  inventory_id INTEGER REFERENCES inventory(id) ON DELETE SET NULL,
   quantity INTEGER NOT NULL DEFAULT 1,
   unit_cost REAL NOT NULL
 );
@@ -650,11 +660,19 @@ CREATE INDEX IF NOT EXISTS idx_purchase_return_items_return ON purchase_return_i
 CREATE TABLE IF NOT EXISTS purchase_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   purchase_id INTEGER NOT NULL REFERENCES purchases(id) ON DELETE CASCADE,
-  product_id INTEGER NOT NULL REFERENCES products(id),
+  -- ON DELETE SET NULL: if this product is later deliberately deleted
+  -- (see the products DELETE route), this purchase history line
+  -- survives intact — product_id just goes NULL rather than blocking
+  -- the deletion. product_snapshot (below) is what keeps this line
+  -- readable once that happens.
+  product_id INTEGER REFERENCES products(id) ON DELETE SET NULL,
   quantity INTEGER NOT NULL,
   unit_cost REAL NOT NULL,
   size TEXT,
-  color TEXT
+  color TEXT,
+  -- Set ONLY at the moment product_id is nulled out by a product
+  -- deletion — never touched for a normal, still-valid purchase line.
+  product_snapshot TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_purchase_items_purchase ON purchase_items(purchase_id);

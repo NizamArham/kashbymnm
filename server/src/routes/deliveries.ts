@@ -74,10 +74,11 @@ deliveriesRouter.get(
 
     const items = db
       .prepare(
-        `SELECT sale_items.*, products.product_title, products.brand, inventory.sku, inventory.size, inventory.color
+        `SELECT sale_items.*, COALESCE(products.product_title, sale_items.product_snapshot) as product_title,
+                products.brand, inventory.sku, inventory.size, inventory.color
          FROM sale_items
-         JOIN inventory ON inventory.id = sale_items.inventory_id
-         JOIN products ON products.id = inventory.product_id
+         LEFT JOIN inventory ON inventory.id = sale_items.inventory_id
+         LEFT JOIN products ON products.id = inventory.product_id
          WHERE sale_items.sale_id = ?`
       )
       .all(row.sale_id);

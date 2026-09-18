@@ -96,7 +96,7 @@ const pendingPurchaseLineInput = z.object({
   description: z.string().min(1),
   quantity: z.number().int().positive(),
   unit_cost: z.number().nonnegative(),
-  product_type: z.enum(["FO", "OG", "OR", "OP"]).default("OG"),
+  product_type: z.enum(["FO", "OG", "OR", "OP", "IM"]).default("OG"),
 });
 
 const purchaseExpenseInput = z.object({
@@ -683,8 +683,8 @@ purchasesRouter.get(
 
     const items = db
       .prepare(
-        `SELECT purchase_items.*, products.product_title
-         FROM purchase_items JOIN products ON products.id = purchase_items.product_id
+        `SELECT purchase_items.*, COALESCE(products.product_title, purchase_items.product_snapshot) as product_title
+         FROM purchase_items LEFT JOIN products ON products.id = purchase_items.product_id
          WHERE purchase_items.purchase_id = ?`
       )
       .all(req.params.id);

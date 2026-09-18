@@ -23,6 +23,8 @@ import {
   SlidersHorizontal,
   Clock,
   Banknote,
+  PackageCheck,
+  Send,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
@@ -51,18 +53,18 @@ export default function AppShell() {
   const isAdmin = user?.role === "admin";
 
   const [openMenus, setOpenMenus] = useState<Record<string, boolean>>({
-    inventory: false,
     pos: false,
+    inventory: false,
     directory: false,
-    returns: false,
+    purchases: false,
     finance: false,
     deliveries: false,
-    settings: false,
+    admin: false,
   });
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const menu: MenuItem[] = [
-    { id: "dashboard", label: "Dashboard", icon: Home, path: "/", adminOnly: true },
+    { id: "dashboard", label: "Dashboard", icon: Home, path: "/" },
     {
       id: "pos",
       label: "POS",
@@ -80,8 +82,8 @@ export default function AppShell() {
       path: "/inventory",
       subItems: [
         { id: "view-inventory", label: "View Inventory", path: "/inventory", icon: Search },
-        { id: "add-product", label: "Add Product", path: "/products/add", icon: Plus, adminOnly: true },
         { id: "manage-products", label: "Manage Products", path: "/products", icon: Settings, adminOnly: true },
+        { id: "add-product", label: "Add Product", path: "/products/add", icon: Plus, adminOnly: true },
       ],
     },
     {
@@ -100,9 +102,17 @@ export default function AppShell() {
       label: "Returns",
       icon: RotateCcw,
       path: "/returns",
+    },
+    {
+      id: "purchases",
+      label: "Purchases",
+      icon: Package,
+      path: "/purchases",
+      adminOnly: true,
       subItems: [
-        { id: "returns-pending", label: "Pending Requests", path: "/returns", icon: RotateCcw },
-        { id: "returns-history", label: "History", path: "/returns", icon: History },
+        { id: "purchases", label: "Purchases", path: "/purchases", icon: Package },
+        { id: "purchase-returns", label: "Purchase Returns", path: "/purchases/returns", icon: RotateCcw },
+        { id: "supplier-payments", label: "Supplier Payments", path: "/supplier-payments", icon: CreditCard },
       ],
     },
     {
@@ -112,25 +122,24 @@ export default function AppShell() {
       path: "/cash-book",
       adminOnly: true,
       subItems: [
-        { id: "purchases", label: "Purchases", path: "/purchases", icon: Package },
-        { id: "supplier-payments", label: "Supplier Payments", path: "/supplier-payments", icon: CreditCard },
-        { id: "cheques", label: "Cheques", path: "/cheques", icon: Banknote },
         { id: "cash-book", label: "Cash Book", path: "/cash-book", icon: Landmark },
+        { id: "cheques", label: "Cheques", path: "/cheques", icon: Banknote },
       ],
     },
     {
       id: "deliveries",
-      label: "Deliveries & Couriers",
+      label: "Shipments",
       icon: Truck,
       path: "/deliveries",
       subItems: [
         { id: "deliveries", label: "Deliveries", path: "/deliveries", icon: Truck },
-        { id: "couriers", label: "Couriers", path: "/couriers", icon: Truck, adminOnly: true },
+        { id: "couriers", label: "Couriers", path: "/couriers", icon: Send, adminOnly: true },
+        { id: "waybill-generator", label: "Waybill Generator", path: "/waybill-generator", icon: PackageCheck },
       ],
     },
     {
-      id: "settings",
-      label: "Settings",
+      id: "admin",
+      label: "Admin",
       icon: SlidersHorizontal,
       path: "/attendance",
       adminOnly: true,
@@ -139,7 +148,6 @@ export default function AppShell() {
         { id: "general-settings", label: "General Settings", path: "/settings/general", icon: Settings },
       ],
     },
-    { id: "profile", label: "My Profile", icon: Settings, path: "/profile" },
   ];
 
   const visibleMenu = menu.filter((item) => !item.adminOnly || isAdmin);
@@ -153,18 +161,18 @@ export default function AppShell() {
     const isOnPos = path === "/pos" || path === "/sales";
     const isOnInventory = path === "/inventory" || path === "/products" || path === "/products/add";
     const isOnDirectory = path === "/customers" || path === "/customers/add" || path === "/staff" || path === "/suppliers";
-    const isOnReturns = path === "/returns";
-    const isOnFinance = path === "/purchases" || path === "/supplier-payments" || path === "/cheques" || path === "/cash-book";
-    const isOnDeliveries = path === "/deliveries" || path === "/couriers";
-    const isOnSettings = path === "/attendance" || path === "/settings/general";
+    const isOnPurchases = path === "/purchases" || path === "/purchases/returns" || path === "/supplier-payments";
+    const isOnFinance = path === "/cash-book" || path === "/cheques";
+    const isOnDeliveries = path === "/deliveries" || path === "/couriers" || path === "/waybill-generator";
+    const isOnAdmin = path === "/attendance" || path === "/settings/general";
 
     if (isOnPos) setOpenMenus((prev) => ({ ...prev, pos: true }));
     if (isOnInventory) setOpenMenus((prev) => ({ ...prev, inventory: true }));
     if (isOnDirectory) setOpenMenus((prev) => ({ ...prev, directory: true }));
-    if (isOnReturns) setOpenMenus((prev) => ({ ...prev, returns: true }));
+    if (isOnPurchases) setOpenMenus((prev) => ({ ...prev, purchases: true }));
     if (isOnFinance) setOpenMenus((prev) => ({ ...prev, finance: true }));
     if (isOnDeliveries) setOpenMenus((prev) => ({ ...prev, deliveries: true }));
-    if (isOnSettings) setOpenMenus((prev) => ({ ...prev, settings: true }));
+    if (isOnAdmin) setOpenMenus((prev) => ({ ...prev, admin: true }));
   }, [location.pathname]);
 
   function toggleMenu(id: string) {
@@ -193,6 +201,8 @@ export default function AppShell() {
     .join("")
     .slice(0, 2)
     .toUpperCase();
+
+  const isOnProfile = location.pathname === "/profile";
 
   return (
     <div className="min-h-screen flex bg-gray-50 text-black">
@@ -283,17 +293,20 @@ export default function AppShell() {
         </div>
 
         <div className="border-t border-gray-800 flex-shrink-0">
-          <div className="px-3 lg:px-4 py-2 lg:py-3">
-            <div className="flex items-center gap-2 lg:gap-3">
-              <div className="w-8 h-8 lg:w-10 lg:h-10 bg-gray-700 rounded-full flex items-center justify-center flex-shrink-0">
-                <span className="text-xs lg:text-sm font-medium text-white">{initials}</span>
-              </div>
-              <div className="flex-1 min-w-0 hidden lg:block">
-                <p className="text-sm font-medium text-gray-200 truncate">{user?.name || user?.username}</p>
-                <p className="text-xs text-gray-500 capitalize">{user?.role}</p>
-              </div>
+          <Link
+            to="/profile"
+            onClick={handleLinkClick}
+            className={`mx-3 lg:mx-4 my-2 lg:my-3 flex items-center gap-2 lg:gap-3 px-2 lg:px-3 py-2 rounded-xl transition
+              ${isOnProfile ? "bg-gray-800" : "hover:bg-gray-900"}`}
+          >
+            <div className="w-8 h-8 lg:w-10 lg:h-10 bg-gray-700 rounded-full flex items-center justify-center flex-shrink-0">
+              <span className="text-xs lg:text-sm font-medium text-white">{initials}</span>
             </div>
-          </div>
+            <div className="flex-1 min-w-0 hidden lg:block">
+              <p className="text-sm font-medium text-gray-200 truncate">{user?.name || user?.username}</p>
+              <p className="text-xs text-gray-500 capitalize">{user?.role}</p>
+            </div>
+          </Link>
           <div className="px-3 lg:px-4 pb-3 lg:pb-4">
             <button
               onClick={handleLogout}
@@ -307,18 +320,18 @@ export default function AppShell() {
       </div>
 
       <div className="flex-1 lg:ml-64 min-h-screen bg-gray-50">
-        <div className="sticky top-0 z-30 bg-white border-b border-gray-200 px-4 py-3 lg:px-6 lg:py-4 flex items-center gap-3">
+        <div className="sticky top-0 z-30 bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-3 lg:hidden">
           <button
             onClick={() => setSidebarOpen(true)}
-            className="lg:hidden p-1.5 hover:bg-gray-100 rounded-lg transition"
+            className="p-1.5 hover:bg-gray-100 rounded-lg transition"
             aria-label="Open sidebar"
           >
             <Menu size={24} className="text-gray-700" />
           </button>
-          <h2 className="text-sm lg:text-base font-medium text-gray-700">
+          <h2 className="text-sm font-medium text-gray-700">
             {visibleMenu.find(
               (item) => location.pathname === item.path || item.subItems?.some((s) => location.pathname === s.path)
-            )?.label || "Dashboard"}
+            )?.label || (isOnProfile ? "My Profile" : "Dashboard")}
           </h2>
         </div>
 

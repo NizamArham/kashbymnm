@@ -1,5 +1,5 @@
-import { useEffect, useState, Fragment } from "react";
-import { Package, ChevronDown, ChevronRight, Plus, X, Pencil, AlertTriangle, MinusCircle, CheckCircle, Search } from "lucide-react";
+import { useEffect, useState, Fragment, useRef } from "react";
+import { Package, ChevronDown, ChevronRight, Plus, X, Pencil, AlertTriangle, MinusCircle, CheckCircle, Search, Trash2 } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Product, InventoryUnit, Supplier, RemovalReason, Purchase } from "../lib/types";
 import { compareSizes } from "../lib/sizeSort";
@@ -26,6 +26,8 @@ import {
 const LOW_STOCK_THRESHOLD = 5;
 const removalReasons: RemovalReason[] = ["Damaged", "Gifted", "Staff Use", "Stolen", "Lost", "Other"];
 
+type ExpandedTab = "stock" | "restock" | "details";
+
 interface VariantSummary {
   color: string;
   size: string;
@@ -33,14 +35,7 @@ interface VariantSummary {
   skuSample: string;
   barcodeRange: string;
   status: string;
-  // True when this variant's units don't all share the same cost_price
-  // or the same batch supplier — i.e. it was restocked more than once
-  // under different terms. The flat count still shows as one row; this
-  // just says "there's more going on here than one number implies."
   hasMixedBatches: boolean;
-  // The actual per-batch breakdown, shown only on demand (not by
-  // default) since this is real cost data — appropriate to have
-  // available on this admin page, just not shoved in front of every row.
   batches: { cost: number | null; supplierName: string | null; count: number }[];
 }
 
@@ -61,8 +56,6 @@ function summarizeVariants(units: InventoryUnit[]): VariantSummary[] {
     if (barcodes.length === 1) barcodeRange = barcodes[0];
     else if (barcodes.length > 1) barcodeRange = `${barcodes[0]} – ${barcodes[barcodes.length - 1]}`;
 
-    // Group this variant's own units by (cost, supplier) pair to see if
-    // they actually came from more than one batch under different terms.
     const batchMap = new Map<string, { cost: number | null; supplierName: string | null; count: number }>();
     for (const u of sorted) {
       const cost = u.cost_price ?? null;
@@ -93,6 +86,149 @@ function summarizeVariants(units: InventoryUnit[]): VariantSummary[] {
   });
 }
 
+function ComboPicker({
+  label,
+  placeholder,
+  existing,
+  selected,
+  onSelect,
+  onDeselect,
+  uppercase,
+}: {
+  label: string;
+  placeholder: string;
+  existing: string[];
+  selected: string[];
+  onSelect: (v: string) => void;
+  onDeselect: (v: string) => void;
+  uppercase?: boolean;
+}) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (!wrapRef.current) return;
+      if (!wrapRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+
+  const normalized = uppercase ? query.trim().toUpperCase() : query.trim();
+
+  const available = existing.filter((v) => !selected.includes(v));
+  const matches = normalized
+    ? available.filter((v) => v.toLowerCase().includes(normalized.toLowerCase()))
+    : available;
+
+  const canAddNew =
+    normalized.length > 0 &&
+    !existing.some((v) => v.toLowerCase() === normalized.toLowerCase()) &&
+    !selected.some((v) => v.toLowerCase() === normalized.toLowerCase());
+
+  function commit(value: string) {
+    const v = uppercase ? value.trim().toUpperCase() : value.trim();
+    if (!v) return;
+    if (!selected.includes(v)) onSelect(v);
+    setQuery("");
+    setOpen(false);
+  }
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <Label>{label}</Label>
+
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {selected.map((v) => (
+            <span
+              key={v}
+              className="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 border border-gray-200 rounded-full text-xs font-medium"
+            >
+              {v}
+              <button
+                type="button"
+                onClick={() => onDeselect(v)}
+                className="text-gray-400 hover:text-red-500"
+              >
+                <X size={12} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="relative">
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              if (matches.length > 0) commit(matches[0]);
+              else if (canAddNew) commit(query);
+            }
+            if (e.key === "Escape") {
+              setOpen(false);
+              setQuery("");
+            }
+          }}
+          placeholder={
+            existing.length
+              ? placeholder
+              : "No colors on record yet — type to add one"
+          }
+          className="w-full pl-3 pr-10 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-gray-400"
+        />
+        <button
+          type="button"
+          disabled={!canAddNew}
+          onClick={() => commit(query)}
+          className={`absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center justify-center w-7 h-7 rounded-md transition ${
+            canAddNew
+              ? "bg-black text-white hover:bg-gray-800"
+              : "bg-gray-100 text-gray-300 cursor-not-allowed"
+          }`}
+          title={canAddNew ? "Add as new" : "Type a value to add"}
+        >
+          <Plus size={14} />
+        </button>
+      </div>
+
+      {open && (matches.length > 0 || canAddNew) && (
+        <div className="absolute z-10 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-sm max-h-44 overflow-y-auto">
+          {matches.map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => commit(m)}
+              className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+            >
+              {m}
+            </button>
+          ))}
+          {canAddNew && (
+            <button
+              type="button"
+              onClick={() => commit(query)}
+              className="w-full text-left px-3 py-2 text-sm text-amber-700 hover:bg-amber-50 border-t border-gray-100"
+            >
+              Add new {uppercase ? "size" : "color"}: <span className="font-medium">{normalized}</span>
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ManageProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
@@ -101,6 +237,7 @@ export default function ManageProductsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [expandedTab, setExpandedTab] = useState<ExpandedTab>("stock");
 
   const [editForm, setEditForm] = useState({
     product_title: "",
@@ -113,46 +250,26 @@ export default function ManageProductsPage() {
   const [editError, setEditError] = useState<string | null>(null);
   const [editSuccess, setEditSuccess] = useState<string | null>(null);
 
-  const [restockOpenFor, setRestockOpenFor] = useState<number | null>(null);
-  // Multi-select, matching Add Product's pattern: pick several colors and
-  // several sizes, and every combination becomes its own row with its
-  // own quantity — restocking "Navy + Black" in "S + M" in one go
-  // produces 4 separate variant rows, not just one.
   const [restockColors, setRestockColors] = useState<string[]>([]);
   const [restockSizes, setRestockSizes] = useState<string[]>([]);
   const [restockVariantRows, setRestockVariantRows] = useState<{ color: string; size: string; quantity: string }[]>([]);
   const [restockCost, setRestockCost] = useState("");
   const [restockSellingPrice, setRestockSellingPrice] = useState("");
   const [restockSupplierId, setRestockSupplierId] = useState("");
-  // If set, this restock FULFILLS an existing pending purchase (goods
-  // already arrived and paid for) instead of recording a brand-new one.
   const [fulfillsLineId, setFulfillsLineId] = useState("");
   const [pendingPurchases, setPendingPurchases] = useState<Purchase[]>([]);
   const [restockError, setRestockError] = useState<string | null>(null);
   const [restockSuccess, setRestockSuccess] = useState<string | null>(null);
   const [restockSubmitting, setRestockSubmitting] = useState(false);
-  // Toggles the color/size fields into "type it" mode for a genuinely new
-  // variant — off by default, since picking from what's already on
-  // record is what prevents a typo'd duplicate (e.g. "Navy" vs "Navy Blue").
-  const [restockAddingNewColor, setRestockAddingNewColor] = useState(false);
-  const [restockAddingNewSize, setRestockAddingNewSize] = useState(false);
-  const [restockNewColorInput, setRestockNewColorInput] = useState("");
-  const [restockNewSizeInput, setRestockNewSizeInput] = useState("");
 
-  // Write-off (remove stock) state, per variant row
   const [removeOpenKey, setRemoveOpenKey] = useState<string | null>(null);
   const [removeReason, setRemoveReason] = useState<RemovalReason>("Damaged");
   const [removeNote, setRemoveNote] = useState("");
   const [removeError, setRemoveError] = useState<string | null>(null);
   const [removeSubmitting, setRemoveSubmitting] = useState(false);
 
-  // Which variant row's batch/cost breakdown is currently shown — only
-  // one at a time, and hidden by default even when a variant has mixed
-  // batches, since the flat count + a small flag is enough at a glance.
   const [batchDetailKey, setBatchDetailKey] = useState<string | null>(null);
 
-  // Edit footer is read-only until "Edit" is explicitly clicked, so an
-  // accidental click/keystroke while browsing can never change a price.
   const [isEditingDetails, setIsEditingDetails] = useState(false);
   const [showNewSupplierModal, setShowNewSupplierModal] = useState(false);
 
@@ -178,10 +295,6 @@ export default function ManageProductsPage() {
     load();
   }, []);
 
-  // Regenerate the restock variant grid whenever the picked colors/sizes
-  // change — every (color, size) combination gets its own row, keeping
-  // whatever quantity was already typed for a combination that's still
-  // present after the change.
   useEffect(() => {
     setRestockVariantRows((prevRows) => {
       const byKey = new Map(prevRows.map((r) => [`${r.color}|${r.size}`, r.quantity]));
@@ -220,12 +333,20 @@ export default function ManageProductsPage() {
   function toggleExpand(p: Product) {
     if (expandedId === p.id) {
       setExpandedId(null);
-      setRestockOpenFor(null);
       return;
     }
     setExpandedId(p.id);
-    setRestockOpenFor(null);
+    setExpandedTab("stock");
     setIsEditingDetails(false);
+    setRestockColors([]);
+    setRestockSizes([]);
+    setRestockVariantRows([]);
+    setRestockCost(String(p.cost_price ?? ""));
+    setRestockSellingPrice(String(p.selling_price));
+    setRestockSupplierId(p.supplier_id ? String(p.supplier_id) : "");
+    setRestockError(null);
+    setRestockSuccess(null);
+    setFulfillsLineId("");
     setEditForm({
       product_title: p.product_title,
       brand: p.brand ?? "",
@@ -259,10 +380,17 @@ export default function ManageProductsPage() {
     }
   }
 
-  async function handleDelete(id: number) {
-    if (!confirm("Delete this product permanently? This only works if it has never had any inventory or purchase history — otherwise it will be rejected.")) return;
+  async function handleDelete(p: Product) {
+    if (
+      !confirm(
+        `Delete "${p.product_title}" permanently?\n\n` +
+          `This removes the product and every unit of its stock — including units already sold. This cannot be undone.\n\n` +
+          `Old sale receipts and purchase history are preserved.`
+      )
+    )
+      return;
     try {
-      await api.delete(`/products/${id}`);
+      await api.delete(`/products/${p.id}`);
       setExpandedId(null);
       load();
     } catch (err) {
@@ -270,8 +398,7 @@ export default function ManageProductsPage() {
     }
   }
 
-  function openRestock(p: Product) {
-    setRestockOpenFor(p.id);
+  function openRestockTab(p: Product) {
     setRestockColors([]);
     setRestockSizes([]);
     setRestockVariantRows([]);
@@ -280,10 +407,6 @@ export default function ManageProductsPage() {
     setRestockSupplierId(p.supplier_id ? String(p.supplier_id) : "");
     setRestockError(null);
     setRestockSuccess(null);
-    setRestockAddingNewColor(false);
-    setRestockAddingNewSize(false);
-    setRestockNewColorInput("");
-    setRestockNewSizeInput("");
     setFulfillsLineId("");
   }
 
@@ -338,9 +461,6 @@ export default function ManageProductsPage() {
         }
       );
 
-      // Report each variant separately, distinguishing a genuinely new
-      // combination from restocking something already on record — same
-      // wording as before, just now covering every row in one go.
       const existingUnits = inventoryByProduct[p.id] ?? [];
       const messages = rowsWithQty.map((row) => {
         const colorLabel = row.color.trim() || "—";
@@ -375,12 +495,6 @@ export default function ManageProductsPage() {
     setRemoveError(null);
   }
 
-  // Removing a whole variant SUMMARY row (which can represent several
-  // physical units sharing the same color/size/status) writes off just
-  // ONE unit from that group per click — the safer default, since
-  // removing several units at once from one button press risks an
-  // accidental bulk write-off. The person clicks again for each
-  // additional unit they actually need to remove.
   async function submitRemoval(p: Product, units: InventoryUnit[], color: string, size: string, status: string) {
     setRemoveError(null);
     const candidate = units.find(
@@ -407,8 +521,6 @@ export default function ManageProductsPage() {
     }
   }
 
-  // Matches product title, brand, or category — the three fields already
-  // visible in the table, so what you can see is what you can search by.
   const filteredProducts = products.filter((p) => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return true;
@@ -420,613 +532,520 @@ export default function ManageProductsPage() {
   });
 
   return (
-    <div>
-      <PageHeader title="Manage products" subtitle="Click a product to view its stock, edit details, or restock." />
+    <div className="flex flex-col h-full min-h-0">
+      {/* Fixed top section — never scrolls */}
+      <div className="flex-shrink-0">
+        <PageHeader title="Manage products" subtitle="Click a product to view its stock, edit details, or restock." />
 
-      {error && <ErrorText>{error}</ErrorText>}
+        {error && <ErrorText>{error}</ErrorText>}
 
-      {!loading && products.length > 0 && (
-        <div className="relative mb-4 max-w-md">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search by product name, brand, or category..."
-            className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-gray-400"
-          />
-        </div>
-      )}
+        {!loading && products.length > 0 && (
+          <div className="relative mb-4 max-w-md">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search by product name, brand, or category..."
+              className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-gray-400"
+            />
+          </div>
+        )}
+      </div>
 
-      {loading ? (
-        <p className="text-sm text-gray-400">Loading...</p>
-      ) : products.length === 0 ? (
-        <EmptyState icon={Package} title="No products yet" subtitle="Add one to get started" />
-      ) : filteredProducts.length === 0 ? (
-        <EmptyState icon={Search} title="No products match your search" subtitle={`Nothing found for "${searchQuery}"`} />
-      ) : (
-        <Card className="p-0 overflow-hidden">
-          <Table>
-            <thead>
-              <tr>
-                <Th></Th>
-                <Th>Product title</Th>
-                <Th>Brand</Th>
-                <Th>Category</Th>
-                <Th>Selling price</Th>
-                <Th>In stock</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredProducts.map((p) => {
-                const isExpanded = expandedId === p.id;
-                const units = inventoryByProduct[p.id] ?? [];
+      {/* Scrollable table region — fills remaining height */}
+      <div className="flex-1 min-h-0">
+        {loading ? (
+          <p className="text-sm text-gray-400">Loading...</p>
+        ) : products.length === 0 ? (
+          <EmptyState icon={Package} title="No products yet" subtitle="Add one to get started" />
+        ) : filteredProducts.length === 0 ? (
+          <EmptyState icon={Search} title="No products match your search" subtitle={`Nothing found for "${searchQuery}"`} />
+        ) : (
+          <Card className="p-0 overflow-hidden h-full flex flex-col">
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              <Table>
+                <thead className="sticky top-0 z-10 bg-white">
+                  <tr>
+                    <Th className="w-8"></Th>
+                    <Th>Product title</Th>
+                    <Th>Brand</Th>
+                    <Th>Category</Th>
+                    <Th>Selling price</Th>
+                    <Th>In stock</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredProducts.map((p) => {
+                    const isExpanded = expandedId === p.id;
+                    const units = inventoryByProduct[p.id] ?? [];
 
-                return (
-                  <Fragment key={p.id}>
-                    <tr onClick={() => toggleExpand(p)} className="cursor-pointer hover:bg-gray-50">
-                      <Td className="w-8">
-                        {isExpanded ? <ChevronDown size={15} className="text-gray-400" /> : <ChevronRight size={15} className="text-gray-400" />}
-                      </Td>
-                      <Td className="font-medium">{p.product_title}</Td>
-                      <Td>{p.brand ?? "—"}</Td>
-                      <Td>{p.category ?? "—"}</Td>
-                      <Td>Rs. {p.selling_price.toLocaleString()}</Td>
-                      <Td>
-                        <div className="flex items-center gap-2">
-                          <span>{p.qty}</span>
-                          {p.qty < LOW_STOCK_THRESHOLD && (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
-                              <AlertTriangle size={11} />
-                              Low
-                            </span>
-                          )}
-                        </div>
-                      </Td>
-                    </tr>
+                    return (
+                      <Fragment key={p.id}>
+                        <tr onClick={() => toggleExpand(p)} className="cursor-pointer hover:bg-gray-50">
+                          <Td className="w-8">
+                            {isExpanded ? <ChevronDown size={15} className="text-gray-400" /> : <ChevronRight size={15} className="text-gray-400" />}
+                          </Td>
+                          <Td className="font-medium">{p.product_title}</Td>
+                          <Td>{p.brand ?? "—"}</Td>
+                          <Td>{p.category ?? "—"}</Td>
+                          <Td>Rs. {p.selling_price.toLocaleString()}</Td>
+                          <Td>
+                            <div className="flex items-center gap-2">
+                              <span>{p.qty}</span>
+                              {p.qty < LOW_STOCK_THRESHOLD && (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
+                                  <AlertTriangle size={11} />
+                                  Low
+                                </span>
+                              )}
+                            </div>
+                          </Td>
+                        </tr>
 
-                    {isExpanded && (
-                      <tr>
-                        <Td colSpan={6} className="bg-gray-50">
-                          <div className="py-3 space-y-4">
-                            {units.length === 0 ? (
-                              <p className="text-xs text-gray-400 px-1">No inventory units yet for this product.</p>
-                            ) : (
-                              <>
-                                <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
-                                  <table className="w-full text-sm">
-                                    <thead>
-                                      <tr>
-                                        <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Color</th>
-                                        <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Size</th>
-                                        <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Qty</th>
-                                        <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">SKU</th>
-                                        <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Barcode</th>
-                                        <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Status</th>
-                                        <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400"></th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {summarizeVariants(units).map((row) => {
-                                        const rowKey = `${row.color}::${row.size}::${row.status}`;
-                                        const canRemove = row.status === "available";
-                                        return (
-                                          <Fragment key={rowKey}>
-                                            <tr className={removeOpenKey === rowKey ? "bg-red-50/40" : ""}>
-                                              <td className="px-3 py-1.5">{row.color}</td>
-                                              <td className="px-3 py-1.5 font-medium">{row.size}</td>
-                                              <td className="px-3 py-1.5">
-                                                {row.count}
-                                                {row.hasMixedBatches && (
-                                                  <button
-                                                    onClick={() => setBatchDetailKey(batchDetailKey === rowKey ? null : rowKey)}
-                                                    className="ml-1.5 text-[10px] text-amber-600 hover:text-amber-800 underline"
-                                                    title="This variant has units from more than one batch"
-                                                  >
-                                                    multiple batches
-                                                  </button>
-                                                )}
-                                              </td>
-                                              <td className="px-3 py-1.5">
-                                                {row.count > 1 ? `${row.skuSample} (+${row.count - 1} more)` : row.skuSample}
-                                              </td>
-                                              <td className="px-3 py-1.5 font-mono text-xs">{row.barcodeRange}</td>
-                                              <td className="px-3 py-1.5">
-                                                <Badge label={row.status} tone={inventoryStatusTone(row.status)} />
-                                              </td>
-                                              <td className="px-3 py-1.5">
-                                                {canRemove && (
-                                                  <button
-                                                    onClick={() => (removeOpenKey === rowKey ? setRemoveOpenKey(null) : openRemove(rowKey))}
-                                                    className="text-gray-400 hover:text-red-500 transition inline-flex items-center gap-1 text-xs"
-                                                    title="Remove one unit from stock (damage, gift, etc.)"
-                                                  >
-                                                    <MinusCircle size={14} />
-                                                  </button>
-                                                )}
-                                              </td>
-                                            </tr>
-                                            {batchDetailKey === rowKey && (
-                                              <tr>
-                                                <td colSpan={7} className="px-3 py-2 bg-amber-50/50">
-                                                  <p className="text-xs text-amber-800 mb-1">
-                                                    This variant was restocked more than once under different terms:
-                                                  </p>
-                                                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600">
-                                                    {row.batches.map((b, i) => (
-                                                      <span key={i}>
-                                                        {b.count} pcs @ Rs. {b.cost?.toLocaleString() ?? "—"}
-                                                        {b.supplierName ? ` from ${b.supplierName}` : ""}
-                                                      </span>
-                                                    ))}
-                                                  </div>
-                                                </td>
-                                              </tr>
-                                            )}
-                                          </Fragment>
-                                        );
-                                      })}
-                                    </tbody>
-                                  </table>
+                        {isExpanded && (
+                          <tr>
+                            <Td colSpan={6} className="bg-gray-50">
+                              <div className="py-3 space-y-4">
+                                <div className="flex items-center gap-1 border-b border-gray-200">
+                                  {(["stock", "restock", "details"] as ExpandedTab[]).map((tab) => (
+                                    <button
+                                      key={tab}
+                                      onClick={() => {
+                                        setExpandedTab(tab);
+                                        if (tab === "restock") openRestockTab(p);
+                                      }}
+                                      className={`px-3 py-1.5 text-xs font-medium rounded-t-lg transition ${
+                                        expandedTab === tab
+                                          ? "bg-white border border-b-white border-gray-200 text-gray-900 -mb-px"
+                                          : "text-gray-500 hover:text-gray-800"
+                                      }`}
+                                    >
+                                      {tab === "stock" ? "Stock" : tab === "restock" ? "Restock" : "Details"}
+                                    </button>
+                                  ))}
                                 </div>
 
-                                {/* Removal panel lives OUTSIDE the overflow-hidden table
-                                    container above, so its Reason dropdown can render its
-                                    floating list without being clipped. */}
-                                {removeOpenKey &&
-                                  (() => {
-                                    const [color, size, status] = removeOpenKey.split("::");
-                                    return (
-                                      <div className="bg-white border border-gray-200 rounded-xl p-4">
-                                        <div className="flex flex-wrap items-end gap-3">
+                                {/* STOCK TAB */}
+                                {expandedTab === "stock" && (
+                                  <>
+                                    {units.length === 0 ? (
+                                      <p className="text-xs text-gray-400 px-1 py-2">No inventory units yet for this product.</p>
+                                    ) : (
+                                      <>
+                                        <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
+                                          <table className="w-full text-sm">
+                                            <thead>
+                                              <tr>
+                                                <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Color</th>
+                                                <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Size</th>
+                                                <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Qty</th>
+                                                <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">SKU</th>
+                                                <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Barcode</th>
+                                                <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Status</th>
+                                                <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400"></th>
+                                              </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-100">
+                                              {summarizeVariants(units).map((row) => {
+                                                const rowKey = `${row.color}::${row.size}::${row.status}`;
+                                                const canRemove = row.status === "available";
+                                                return (
+                                                  <Fragment key={rowKey}>
+                                                    <tr className={removeOpenKey === rowKey ? "bg-red-50/40" : ""}>
+                                                      <td className="px-3 py-2">{row.color}</td>
+                                                      <td className="px-3 py-2 font-medium">{row.size}</td>
+                                                      <td className="px-3 py-2">
+                                                        {row.count}
+                                                        {row.hasMixedBatches && (
+                                                          <button
+                                                            onClick={() => setBatchDetailKey(batchDetailKey === rowKey ? null : rowKey)}
+                                                            className="ml-2 inline-flex items-center text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 hover:bg-amber-100"
+                                                            title="This variant has units from more than one batch"
+                                                          >
+                                                            mixed batches
+                                                          </button>
+                                                        )}
+                                                      </td>
+                                                      <td className="px-3 py-2">
+                                                        {row.count > 1 ? `${row.skuSample} (+${row.count - 1} more)` : row.skuSample}
+                                                      </td>
+                                                      <td className="px-3 py-2 font-mono text-xs">{row.barcodeRange}</td>
+                                                      <td className="px-3 py-2">
+                                                        <Badge label={row.status} tone={inventoryStatusTone(row.status)} />
+                                                      </td>
+                                                      <td className="px-3 py-2">
+                                                        {canRemove && (
+                                                          <button
+                                                            onClick={() => (removeOpenKey === rowKey ? setRemoveOpenKey(null) : openRemove(rowKey))}
+                                                            className="text-gray-400 hover:text-red-500 transition inline-flex items-center gap-1 text-xs"
+                                                            title="Remove one unit from stock (damage, gift, etc.)"
+                                                          >
+                                                            <MinusCircle size={14} />
+                                                          </button>
+                                                        )}
+                                                      </td>
+                                                    </tr>
+                                                    {batchDetailKey === rowKey && (
+                                                      <tr>
+                                                        <td colSpan={7} className="px-3 py-2 bg-amber-50/50">
+                                                          <p className="text-xs text-amber-800 mb-1">
+                                                            This variant was restocked more than once under different terms:
+                                                          </p>
+                                                          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600">
+                                                            {row.batches.map((b, i) => (
+                                                              <span key={i}>
+                                                                {b.count} pcs @ Rs. {b.cost?.toLocaleString() ?? "—"}
+                                                                {b.supplierName ? ` from ${b.supplierName}` : ""}
+                                                              </span>
+                                                            ))}
+                                                          </div>
+                                                        </td>
+                                                      </tr>
+                                                    )}
+                                                  </Fragment>
+                                                );
+                                              })}
+                                            </tbody>
+                                          </table>
+                                        </div>
+
+                                        {removeOpenKey &&
+                                          (() => {
+                                            const [color, size, status] = removeOpenKey.split("::");
+                                            return (
+                                              <div className="bg-white border border-gray-200 rounded-xl p-4 mt-4">
+                                                <div className="flex flex-wrap items-end gap-3">
+                                                  <FormGroup>
+                                                    <Label>Reason</Label>
+                                                    <Dropdown
+                                                      value={removeReason}
+                                                      onChange={(v) => setRemoveReason(v as RemovalReason)}
+                                                      options={removalReasons.map((r) => ({ value: r, label: r }))}
+                                                    />
+                                                  </FormGroup>
+                                                  <FormGroup>
+                                                    <Label>Note (optional)</Label>
+                                                    <Input value={removeNote} onChange={(e) => setRemoveNote(e.target.value)} placeholder="Details..." />
+                                                  </FormGroup>
+                                                  <div className="ml-auto flex gap-2">
+                                                    <Button size="sm" onClick={() => setRemoveOpenKey(null)}>
+                                                      Cancel
+                                                    </Button>
+                                                    <Button
+                                                      size="sm"
+                                                      variant="danger"
+                                                      disabled={removeSubmitting}
+                                                      onClick={() => submitRemoval(p, units, color, size, status)}
+                                                    >
+                                                      {removeSubmitting ? "Removing..." : "Remove 1 unit"}
+                                                    </Button>
+                                                  </div>
+                                                </div>
+                                                {removeError && <ErrorText>{removeError}</ErrorText>}
+                                              </div>
+                                            );
+                                          })()}
+                                      </>
+                                    )}
+                                  </>
+                                )}
+
+                                {/* RESTOCK TAB */}
+                                {expandedTab === "restock" && (
+                                  <div className="bg-white border border-gray-200 rounded-xl p-4">
+                                    <div className="flex items-center justify-between mb-3">
+                                      <h3 className="text-sm font-semibold text-gray-900">Restock this product</h3>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-4 mb-4">
+                                      <ComboPicker
+                                        label="Colors"
+                                        placeholder="— Type to search or add a color —"
+                                        existing={Array.from(
+                                          new Set(units.map((u) => u.color).filter((c): c is string => !!c))
+                                        ).sort()}
+                                        selected={restockColors}
+                                        onSelect={(v) => setRestockColors((c) => (c.includes(v) ? c : [...c, v]))}
+                                        onDeselect={(v) => setRestockColors((c) => c.filter((x) => x !== v))}
+                                      />
+                                      <ComboPicker
+                                        label="Sizes"
+                                        placeholder="— Type to search or add a size —"
+                                        existing={Array.from(
+                                          new Set(units.map((u) => u.size).filter((s): s is string => !!s))
+                                        ).sort()}
+                                        selected={restockSizes}
+                                        onSelect={(v) => setRestockSizes((s) => (s.includes(v) ? s : [...s, v]))}
+                                        onDeselect={(v) => setRestockSizes((s) => s.filter((x) => x !== v))}
+                                        uppercase
+                                      />
+                                    </div>
+
+                                    {restockVariantRows.length > 0 && (
+                                      <div className="mb-4 border border-gray-100 rounded-xl overflow-hidden">
+                                        <table className="w-full text-sm">
+                                          <thead>
+                                            <tr className="bg-gray-50">
+                                              <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Color</th>
+                                              <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Size</th>
+                                              <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Currently in stock</th>
+                                              <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Quantity to add</th>
+                                              <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">New total</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody>
+                                            {restockVariantRows.map((row, i) => {
+                                              const current = units.filter(
+                                                (u) => (u.color ?? "") === row.color && (u.size ?? "") === row.size && u.status === "available"
+                                              ).length;
+                                              const adding = parseInt(row.quantity, 10) || 0;
+                                              return (
+                                                <tr key={`${row.color}-${row.size}`}>
+                                                  <td className="px-3 py-1.5 border-t border-gray-50">{row.color || "—"}</td>
+                                                  <td className="px-3 py-1.5 border-t border-gray-50 font-medium">{row.size || "—"}</td>
+                                                  <td className="px-3 py-1.5 border-t border-gray-50 text-gray-500">{current}</td>
+                                                  <td className="px-3 py-1.5 border-t border-gray-50">
+                                                    <input
+                                                      type="text"
+                                                      inputMode="numeric"
+                                                      value={row.quantity}
+                                                      onChange={(e) => {
+                                                        const numeric = e.target.value.replace(/[^0-9]/g, "");
+                                                        setRestockVariantRows((rows) =>
+                                                          rows.map((r, idx) => (idx === i ? { ...r, quantity: numeric } : r))
+                                                        );
+                                                      }}
+                                                      placeholder="0"
+                                                      className="w-20 px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-gray-400"
+                                                    />
+                                                  </td>
+                                                  <td className="px-3 py-1.5 border-t border-gray-50 font-medium text-gray-900">
+                                                    {adding > 0 ? current + adding : "—"}
+                                                  </td>
+                                                </tr>
+                                              );
+                                            })}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    )}
+
+                                    {(() => {
+                                      const matchingPending = pendingPurchases.filter(
+                                        (pp) => !restockSupplierId || String(pp.supplier_id) === restockSupplierId
+                                      );
+                                      const openLines = matchingPending.flatMap((pp) =>
+                                        (pp.lines ?? [])
+                                          .filter((line) => !line.is_fulfilled)
+                                          .map((line) => ({ purchase: pp, line }))
+                                      );
+                                      if (openLines.length === 0) return null;
+                                      return (
+                                        <div className="mb-3 border border-gray-300 rounded-xl p-3">
+                                          <Label>Fulfilling a line from an existing pending purchase?</Label>
+                                          <Dropdown
+                                            value={fulfillsLineId}
+                                            onChange={(v) => {
+                                              setFulfillsLineId(v);
+                                              const match = openLines.find((ol) => String(ol.line.id) === v);
+                                              if (match) {
+                                                setRestockSupplierId(String(match.purchase.supplier_id));
+                                                setRestockCost(String(match.line.unit_cost));
+                                              }
+                                            }}
+                                            placeholder="— Not linked to a pending purchase —"
+                                            options={openLines.map(({ purchase, line }) => ({
+                                              value: String(line.id),
+                                              label: `${purchase.purchase_code} — ${line.description} (${line.quantity} pcs @ Rs. ${line.unit_cost.toLocaleString()})`,
+                                            }))}
+                                          />
+                                          <p className="text-xs text-gray-500 mt-1">
+                                            Linking this restock to a pending purchase line means the supplier cost/payment for that line are
+                                            already recorded — this step just adds the actual product/variant details. Other lines on the same
+                                            purchase can still be fulfilled separately later.
+                                          </p>
+                                        </div>
+                                      );
+                                    })()}
+
+                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                      <FormGroup>
+                                        <Label>Supplier</Label>
+                                        <Dropdown
+                                          value={restockSupplierId}
+                                          onChange={setRestockSupplierId}
+                                          placeholder="— Select —"
+                                          searchable
+                                          onCreateNew={() => setShowNewSupplierModal(true)}
+                                          createNewLabel="+ New supplier"
+                                          options={suppliers.map((s) => ({ value: String(s.id), label: s.name, sublabel: s.supplier_code }))}
+                                        />
+                                      </FormGroup>
+                                      <FormGroup>
+                                        <Label>Cost for this batch (Rs.)</Label>
+                                        <Input type="number" min="0" value={restockCost} onChange={(e) => setRestockCost(e.target.value)} />
+                                      </FormGroup>
+                                      <FormGroup>
+                                        <Label>Selling price for this batch (Rs.)</Label>
+                                        <Input type="number" min="0" value={restockSellingPrice} onChange={(e) => setRestockSellingPrice(e.target.value)} />
+                                      </FormGroup>
+                                    </div>
+                                    <p className="text-xs text-gray-400 mt-1">
+                                      Older stock keeps its own cost/price — this only applies to the new units you're adding now. This same
+                                      cost/price applies to every variant row above.
+                                    </p>
+                                    {restockError && <ErrorText>{restockError}</ErrorText>}
+                                    {restockSuccess && <SuccessText>{restockSuccess}</SuccessText>}
+                                    <div className="flex justify-end gap-2 mt-3">
+                                      <Button size="sm" onClick={() => setExpandedTab("stock")}>
+                                        Cancel
+                                      </Button>
+                                      <Button variant="primary" disabled={restockSubmitting} onClick={() => submitRestock(p)}>
+                                        {restockSubmitting ? "Adding stock..." : "Add stock"}
+                                      </Button>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* DETAILS TAB */}
+                                {expandedTab === "details" && (
+                                  <div className="bg-white border border-gray-200 rounded-xl p-4">
+                                    <div className="flex items-center justify-between mb-3">
+                                      <h3 className="text-sm font-semibold text-gray-900">Product details</h3>
+                                      {!isEditingDetails && (
+                                        <div className="flex items-center gap-1">
+                                          <button
+                                            onClick={() => setIsEditingDetails(true)}
+                                            className="text-xs text-gray-500 hover:text-gray-800 inline-flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100"
+                                          >
+                                            <Pencil size={12} />
+                                            Edit
+                                          </button>
+                                          <button
+                                            onClick={() => handleDelete(p)}
+                                            className="text-xs text-red-500 hover:text-red-700 inline-flex items-center gap-1 px-2 py-1 rounded hover:bg-red-50"
+                                          >
+                                            <Trash2 size={12} />
+                                            Delete
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    {isEditingDetails ? (
+                                      <>
+                                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                                           <FormGroup>
-                                            <Label>Reason</Label>
-                                            <Dropdown
-                                              value={removeReason}
-                                              onChange={(v) => setRemoveReason(v as RemovalReason)}
-                                              options={removalReasons.map((r) => ({ value: r, label: r }))}
+                                            <Label>Title</Label>
+                                            <Input
+                                              value={editForm.product_title}
+                                              onChange={(e) => setEditForm((f) => ({ ...f, product_title: e.target.value }))}
                                             />
                                           </FormGroup>
                                           <FormGroup>
-                                            <Label>Note (optional)</Label>
-                                            <Input value={removeNote} onChange={(e) => setRemoveNote(e.target.value)} placeholder="Details..." />
+                                            <Label>Brand</Label>
+                                            <Input value={editForm.brand} onChange={(e) => setEditForm((f) => ({ ...f, brand: e.target.value }))} />
                                           </FormGroup>
-                                          <Button
-                                            size="sm"
-                                            variant="danger"
-                                            disabled={removeSubmitting}
-                                            onClick={() => submitRemoval(p, units, color, size, status)}
-                                          >
-                                            {removeSubmitting ? "Removing..." : "Remove 1 unit"}
-                                          </Button>
-                                          <Button size="sm" onClick={() => setRemoveOpenKey(null)}>
+                                          <FormGroup>
+                                            <Label>Category</Label>
+                                            <Dropdown
+                                              value={editForm.category}
+                                              onChange={(v) => setEditForm((f) => ({ ...f, category: v }))}
+                                              placeholder="— Select —"
+                                              options={mainCategories.map((c) => ({ value: c, label: c }))}
+                                            />
+                                          </FormGroup>
+                                          <FormGroup>
+                                            <Label>Cost price (Rs.)</Label>
+                                            <Input
+                                              type="number"
+                                              value={editForm.cost_price}
+                                              onChange={(e) => setEditForm((f) => ({ ...f, cost_price: e.target.value }))}
+                                            />
+                                          </FormGroup>
+                                          <FormGroup>
+                                            <Label>Selling price (Rs.)</Label>
+                                            <Input
+                                              type="number"
+                                              value={editForm.selling_price}
+                                              onChange={(e) => setEditForm((f) => ({ ...f, selling_price: e.target.value }))}
+                                            />
+                                          </FormGroup>
+                                        </div>
+                                        <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer mt-3">
+                                          <input
+                                            type="checkbox"
+                                            checked={editForm.allow_returns}
+                                            onChange={(e) => setEditForm((f) => ({ ...f, allow_returns: e.target.checked }))}
+                                            className="rounded"
+                                          />
+                                          Allow returns on this product
+                                        </label>
+                                        {!editForm.allow_returns && (
+                                          <p className="text-xs text-amber-600 mt-1">
+                                            Marked as Final Sale — customers won't see a return option for this item, though an admin can still
+                                            force one through with a logged reason.
+                                          </p>
+                                        )}
+                                        {editError && <ErrorText>{editError}</ErrorText>}
+                                        {editSuccess && <SuccessText>{editSuccess}</SuccessText>}
+                                        <div className="flex justify-end gap-2 mt-3">
+                                          <Button size="sm" onClick={() => cancelEdit(p)}>
                                             Cancel
                                           </Button>
+                                          <Button variant="primary" size="sm" onClick={() => saveEdit(p.id)}>
+                                            Save changes
+                                          </Button>
                                         </div>
-                                        {removeError && <ErrorText>{removeError}</ErrorText>}
-                                      </div>
-                                    );
-                                  })()}
-                              </>
-                            )}
-
-                            {restockOpenFor === p.id ? (
-                              <div className="bg-white border border-gray-200 rounded-xl p-4">
-                                <div className="flex items-center justify-between mb-3">
-                                  <h3 className="text-sm font-semibold text-gray-900">Restock this product</h3>
-                                  <button onClick={() => setRestockOpenFor(null)} className="text-gray-400 hover:text-gray-600">
-                                    <X size={16} />
-                                  </button>
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-4 mb-4">
-                                  <div>
-                                    <Label>Colors</Label>
-                                    {(() => {
-                                      const units = inventoryByProduct[p.id] ?? [];
-                                      const existingColors = Array.from(new Set(units.map((u) => u.color).filter((c): c is string => !!c))).sort();
-                                      return restockAddingNewColor ? (
-                                        <div className="flex gap-1.5">
-                                          <Input
-                                            value={restockNewColorInput}
-                                            onChange={(e) => setRestockNewColorInput(e.target.value)}
-                                            placeholder="e.g. Black"
-                                            autoFocus
-                                            onKeyDown={(e) => {
-                                              if (e.key !== "Enter") return;
-                                              e.preventDefault();
-                                              const v = restockNewColorInput.trim();
-                                              if (v && !restockColors.includes(v)) setRestockColors((c) => [...c, v]);
-                                              setRestockNewColorInput("");
-                                              setRestockAddingNewColor(false);
-                                            }}
-                                          />
-                                          <button
-                                            type="button"
-                                            onClick={() => {
-                                              const v = restockNewColorInput.trim();
-                                              if (v && !restockColors.includes(v)) setRestockColors((c) => [...c, v]);
-                                              setRestockNewColorInput("");
-                                              setRestockAddingNewColor(false);
-                                            }}
-                                            className="flex items-center justify-center w-9 h-9 bg-black text-white rounded-lg hover:bg-gray-800 flex-shrink-0"
-                                            title="Add this color"
-                                          >
-                                            <CheckCircle size={14} />
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={() => {
-                                              setRestockAddingNewColor(false);
-                                              setRestockNewColorInput("");
-                                            }}
-                                            className="flex items-center justify-center w-9 h-9 border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50 flex-shrink-0"
-                                            title="Cancel"
-                                          >
-                                            <X size={14} />
-                                          </button>
+                                      </>
+                                    ) : (
+                                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                                        <div>
+                                          <p className="text-xs text-gray-400">Title</p>
+                                          <p className="text-gray-900">{p.product_title}</p>
                                         </div>
-                                      ) : (
-                                        <Dropdown
-                                          value=""
-                                          onChange={(v) => {
-                                            if (!restockColors.includes(v)) setRestockColors((c) => [...c, v]);
-                                          }}
-                                          placeholder={existingColors.length ? "— Pick an existing color —" : "No colors on record yet"}
-                                          searchable
-                                          onCreateNew={() => setRestockAddingNewColor(true)}
-                                          createNewLabel="+ New color"
-                                          options={existingColors.filter((c) => !restockColors.includes(c)).map((c) => ({ value: c, label: c }))}
-                                        />
-                                      );
-                                    })()}
-                                    {restockColors.length > 0 && (
-                                      <div className="flex flex-wrap gap-1.5 mt-2">
-                                        {restockColors.map((c) => (
-                                          <span key={c} className="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 border border-gray-200 rounded-full text-xs">
-                                            {c}
-                                            <button
-                                              type="button"
-                                              onClick={() => setRestockColors((cs) => cs.filter((v) => v !== c))}
-                                              className="text-gray-400 hover:text-red-500"
-                                            >
-                                              <X size={12} />
-                                            </button>
-                                          </span>
-                                        ))}
+                                        <div>
+                                          <p className="text-xs text-gray-400">Brand</p>
+                                          <p className="text-gray-900">{p.brand ?? "—"}</p>
+                                        </div>
+                                        <div>
+                                          <p className="text-xs text-gray-400">Category</p>
+                                          <p className="text-gray-900">{p.category ?? "—"}</p>
+                                        </div>
+                                        <div>
+                                          <p className="text-xs text-gray-400">Cost price</p>
+                                          <p className="text-gray-900">Rs. {p.cost_price?.toLocaleString() ?? "—"}</p>
+                                        </div>
+                                        <div>
+                                          <p className="text-xs text-gray-400">Selling price</p>
+                                          <p className="text-gray-900">Rs. {p.selling_price.toLocaleString()}</p>
+                                        </div>
+                                        <div>
+                                          <p className="text-xs text-gray-400">Returns</p>
+                                          <p className="text-gray-900">{p.allow_returns !== 0 ? "Allowed" : "Final Sale — No Returns"}</p>
+                                        </div>
                                       </div>
                                     )}
                                   </div>
-
-                                  <div>
-                                    <Label>Sizes</Label>
-                                    {(() => {
-                                      const units = inventoryByProduct[p.id] ?? [];
-                                      const existingSizes = Array.from(new Set(units.map((u) => u.size).filter((s): s is string => !!s))).sort();
-                                      return restockAddingNewSize ? (
-                                        <div className="flex gap-1.5">
-                                          <Input
-                                            value={restockNewSizeInput}
-                                            onChange={(e) => setRestockNewSizeInput(e.target.value)}
-                                            placeholder="e.g. M"
-                                            autoFocus
-                                            onKeyDown={(e) => {
-                                              if (e.key !== "Enter") return;
-                                              e.preventDefault();
-                                              const v = restockNewSizeInput.trim().toUpperCase();
-                                              if (v && !restockSizes.includes(v)) setRestockSizes((s) => [...s, v]);
-                                              setRestockNewSizeInput("");
-                                              setRestockAddingNewSize(false);
-                                            }}
-                                          />
-                                          <button
-                                            type="button"
-                                            onClick={() => {
-                                              const v = restockNewSizeInput.trim().toUpperCase();
-                                              if (v && !restockSizes.includes(v)) setRestockSizes((s) => [...s, v]);
-                                              setRestockNewSizeInput("");
-                                              setRestockAddingNewSize(false);
-                                            }}
-                                            className="flex items-center justify-center w-9 h-9 bg-black text-white rounded-lg hover:bg-gray-800 flex-shrink-0"
-                                            title="Add this size"
-                                          >
-                                            <CheckCircle size={14} />
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={() => {
-                                              setRestockAddingNewSize(false);
-                                              setRestockNewSizeInput("");
-                                            }}
-                                            className="flex items-center justify-center w-9 h-9 border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50 flex-shrink-0"
-                                            title="Cancel"
-                                          >
-                                            <X size={14} />
-                                          </button>
-                                        </div>
-                                      ) : (
-                                        <Dropdown
-                                          value=""
-                                          onChange={(v) => {
-                                            if (!restockSizes.includes(v)) setRestockSizes((s) => [...s, v]);
-                                          }}
-                                          placeholder={existingSizes.length ? "— Pick an existing size —" : "No sizes on record yet"}
-                                          searchable
-                                          onCreateNew={() => setRestockAddingNewSize(true)}
-                                          createNewLabel="+ New size"
-                                          options={existingSizes.filter((s) => !restockSizes.includes(s)).map((s) => ({ value: s, label: s }))}
-                                        />
-                                      );
-                                    })()}
-                                    {restockSizes.length > 0 && (
-                                      <div className="flex flex-wrap gap-1.5 mt-2">
-                                        {restockSizes.map((s) => (
-                                          <span key={s} className="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 border border-gray-200 rounded-full text-xs font-medium">
-                                            {s}
-                                            <button
-                                              type="button"
-                                              onClick={() => setRestockSizes((ss) => ss.filter((v) => v !== s))}
-                                              className="text-gray-400 hover:text-red-500"
-                                            >
-                                              <X size={12} />
-                                            </button>
-                                          </span>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-
-                                {restockVariantRows.length > 0 && (
-                                  <div className="mb-4 border border-gray-100 rounded-xl overflow-hidden">
-                                    <table className="w-full text-sm">
-                                      <thead>
-                                        <tr className="bg-gray-50">
-                                          <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Color</th>
-                                          <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Size</th>
-                                          <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Currently in stock</th>
-                                          <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Quantity to add</th>
-                                          <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">New total</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {restockVariantRows.map((row, i) => {
-                                          const units = inventoryByProduct[p.id] ?? [];
-                                          const current = units.filter(
-                                            (u) => (u.color ?? "") === row.color && (u.size ?? "") === row.size && u.status === "available"
-                                          ).length;
-                                          const adding = parseInt(row.quantity, 10) || 0;
-                                          return (
-                                            <tr key={`${row.color}-${row.size}`}>
-                                              <td className="px-3 py-1.5 border-t border-gray-50">{row.color || "—"}</td>
-                                              <td className="px-3 py-1.5 border-t border-gray-50 font-medium">{row.size || "—"}</td>
-                                              <td className="px-3 py-1.5 border-t border-gray-50 text-gray-500">{current}</td>
-                                              <td className="px-3 py-1.5 border-t border-gray-50">
-                                                <input
-                                                  type="text"
-                                                  inputMode="numeric"
-                                                  value={row.quantity}
-                                                  onChange={(e) => {
-                                                    const numeric = e.target.value.replace(/[^0-9]/g, "");
-                                                    setRestockVariantRows((rows) =>
-                                                      rows.map((r, idx) => (idx === i ? { ...r, quantity: numeric } : r))
-                                                    );
-                                                  }}
-                                                  placeholder="0"
-                                                  className="w-20 px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-gray-400"
-                                                />
-                                              </td>
-                                              <td className="px-3 py-1.5 border-t border-gray-50 font-medium text-gray-900">
-                                                {adding > 0 ? current + adding : "—"}
-                                              </td>
-                                            </tr>
-                                          );
-                                        })}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                )}
-
-                                {(() => {
-                                  const matchingPending = pendingPurchases.filter(
-                                    (pp) => !restockSupplierId || String(pp.supplier_id) === restockSupplierId
-                                  );
-                                  const openLines = matchingPending.flatMap((pp) =>
-                                    (pp.lines ?? [])
-                                      .filter((line) => !line.is_fulfilled)
-                                      .map((line) => ({ purchase: pp, line }))
-                                  );
-                                  if (openLines.length === 0) return null;
-                                  return (
-                                    <div className="mb-3 border border-gray-300 rounded-xl p-3">
-                                      <Label>Fulfilling a line from an existing pending purchase?</Label>
-                                      <Dropdown
-                                        value={fulfillsLineId}
-                                        onChange={(v) => {
-                                          setFulfillsLineId(v);
-                                          const match = openLines.find((ol) => String(ol.line.id) === v);
-                                          if (match) {
-                                            setRestockSupplierId(String(match.purchase.supplier_id));
-                                            setRestockCost(String(match.line.unit_cost));
-                                          }
-                                        }}
-                                        placeholder="— Not linked to a pending purchase —"
-                                        options={openLines.map(({ purchase, line }) => ({
-                                          value: String(line.id),
-                                          label: `${purchase.purchase_code} — ${line.description} (${line.quantity} pcs @ Rs. ${line.unit_cost.toLocaleString()})`,
-                                        }))}
-                                      />
-                                      <p className="text-xs text-gray-500 mt-1">
-                                        Linking this restock to a pending purchase line means the supplier cost/payment for that line are
-                                        already recorded — this step just adds the actual product/variant details. Other lines on the same
-                                        purchase can still be fulfilled separately later.
-                                      </p>
-                                    </div>
-                                  );
-                                })()}
-
-                                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                                  <FormGroup>
-                                    <Label>Supplier</Label>
-                                    <Dropdown
-                                      value={restockSupplierId}
-                                      onChange={setRestockSupplierId}
-                                      placeholder="— Select —"
-                                      searchable
-                                      onCreateNew={() => setShowNewSupplierModal(true)}
-                                      createNewLabel="+ New supplier"
-                                      options={suppliers.map((s) => ({ value: String(s.id), label: s.name, sublabel: s.supplier_code }))}
-                                    />
-                                  </FormGroup>
-                                  <FormGroup>
-                                    <Label>Cost for this batch (Rs.)</Label>
-                                    <Input type="number" min="0" value={restockCost} onChange={(e) => setRestockCost(e.target.value)} />
-                                  </FormGroup>
-                                  <FormGroup>
-                                    <Label>Selling price for this batch (Rs.)</Label>
-                                    <Input type="number" min="0" value={restockSellingPrice} onChange={(e) => setRestockSellingPrice(e.target.value)} />
-                                  </FormGroup>
-                                </div>
-                                <p className="text-xs text-gray-400 mt-1">
-                                  Older stock keeps its own cost/price — this only applies to the new units you're adding now. This same
-                                  cost/price applies to every variant row above.
-                                </p>
-                                {restockError && <ErrorText>{restockError}</ErrorText>}
-                                {restockSuccess && <SuccessText>{restockSuccess}</SuccessText>}
-                                <Button variant="primary" className="mt-3" disabled={restockSubmitting} onClick={() => submitRestock(p)}>
-                                  {restockSubmitting ? "Adding stock..." : "Add stock"}
-                                </Button>
-                              </div>
-                            ) : (
-                              <Button size="sm" onClick={() => openRestock(p)} className="inline-flex items-center gap-1.5">
-                                <Plus size={14} />
-                                Restock this product
-                              </Button>
-                            )}
-
-                            <div className="bg-white border border-gray-200 rounded-xl p-4">
-                              <div className="flex items-center justify-between mb-3">
-                                <h3 className="text-sm font-semibold text-gray-900">Product details</h3>
-                                {!isEditingDetails && (
-                                  <button
-                                    onClick={() => setIsEditingDetails(true)}
-                                    className="text-xs text-gray-500 hover:text-gray-800 inline-flex items-center gap-1"
-                                  >
-                                    <Pencil size={12} />
-                                    Edit
-                                  </button>
                                 )}
                               </div>
-
-                              {isEditingDetails ? (
-                                <>
-                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                                    <FormGroup>
-                                      <Label>Title</Label>
-                                      <Input
-                                        value={editForm.product_title}
-                                        onChange={(e) => setEditForm((f) => ({ ...f, product_title: e.target.value }))}
-                                      />
-                                    </FormGroup>
-                                    <FormGroup>
-                                      <Label>Brand</Label>
-                                      <Input value={editForm.brand} onChange={(e) => setEditForm((f) => ({ ...f, brand: e.target.value }))} />
-                                    </FormGroup>
-                                    <FormGroup>
-                                      <Label>Category</Label>
-                                      <Dropdown
-                                        value={editForm.category}
-                                        onChange={(v) => setEditForm((f) => ({ ...f, category: v }))}
-                                        placeholder="— Select —"
-                                        options={mainCategories.map((c) => ({ value: c, label: c }))}
-                                      />
-                                    </FormGroup>
-                                    <FormGroup>
-                                      <Label>Cost price (Rs.)</Label>
-                                      <Input
-                                        type="number"
-                                        value={editForm.cost_price}
-                                        onChange={(e) => setEditForm((f) => ({ ...f, cost_price: e.target.value }))}
-                                      />
-                                    </FormGroup>
-                                    <FormGroup>
-                                      <Label>Selling price (Rs.)</Label>
-                                      <Input
-                                        type="number"
-                                        value={editForm.selling_price}
-                                        onChange={(e) => setEditForm((f) => ({ ...f, selling_price: e.target.value }))}
-                                      />
-                                    </FormGroup>
-                                  </div>
-                                  <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer mt-1">
-                                    <input
-                                      type="checkbox"
-                                      checked={editForm.allow_returns}
-                                      onChange={(e) => setEditForm((f) => ({ ...f, allow_returns: e.target.checked }))}
-                                      className="rounded"
-                                    />
-                                    Allow returns on this product
-                                  </label>
-                                  {!editForm.allow_returns && (
-                                    <p className="text-xs text-amber-600 -mt-1">
-                                      Marked as Final Sale — customers won't see a return option for this item, though an admin can still
-                                      force one through with a logged reason.
-                                    </p>
-                                  )}
-                                  {editError && <ErrorText>{editError}</ErrorText>}
-                                  {editSuccess && <SuccessText>{editSuccess}</SuccessText>}
-                                  <div className="flex gap-2 mt-3">
-                                    <Button variant="primary" size="sm" onClick={() => saveEdit(p.id)}>
-                                      Save changes
-                                    </Button>
-                                    <Button size="sm" onClick={() => cancelEdit(p)}>
-                                      Cancel
-                                    </Button>
-                                    <Button variant="danger" size="sm" onClick={() => handleDelete(p.id)}>
-                                      Delete product
-                                    </Button>
-                                  </div>
-                                </>
-                              ) : (
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                                  <div>
-                                    <p className="text-xs text-gray-400">Title</p>
-                                    <p className="text-gray-900">{p.product_title}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-xs text-gray-400">Brand</p>
-                                    <p className="text-gray-900">{p.brand ?? "—"}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-xs text-gray-400">Category</p>
-                                    <p className="text-gray-900">{p.category ?? "—"}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-xs text-gray-400">Cost price</p>
-                                    <p className="text-gray-900">Rs. {p.cost_price?.toLocaleString() ?? "—"}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-xs text-gray-400">Selling price</p>
-                                    <p className="text-gray-900">Rs. {p.selling_price.toLocaleString()}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-xs text-gray-400">Returns</p>
-                                    <p className="text-gray-900">{p.allow_returns !== 0 ? "Allowed" : "Final Sale — No Returns"}</p>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </Td>
-                      </tr>
-                    )}
-                  </Fragment>
-                );
-              })}
-            </tbody>
-          </Table>
-        </Card>
-      )}
+                            </Td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+              </Table>
+            </div>
+            {/* Optional footer showing count — helps replace pagination at a glance */}
+            <div className="flex-shrink-0 border-t border-gray-100 px-4 py-2 text-xs text-gray-400">
+              Showing {filteredProducts.length} of {products.length} product{products.length === 1 ? "" : "s"}
+            </div>
+          </Card>
+        )}
+      </div>
 
       {showNewSupplierModal && (
         <NewSupplierModal

@@ -19,27 +19,97 @@ const entryInput = z.object({
   entry_date: z.string().optional(),
 });
 
-// GET /api/cash-book — full ledger with running_balance computed on the fly,
-// ordered oldest -> newest so the running total accumulates correctly.
-// Response is then reversed so the newest entry shows first, as expected in a UI.
+// GET /api/cash-book — paginated ledger, newest first, with a TRUE
+// running balance on every row.
+//
+// The running balance is computed over ALL entries (unfiltered), THEN
+// the date filter and pagination are applied. This is essential: a
+// filtered subset cannot tell you the balance at any given row, because
+// the balance depends on everything that happened before it, including
+// entries outside the current filter window.
+//
+// With this ordering:
+//   - The newest row's balance always equals /summary's current_balance
+//   - Filtering to "last 7 days" still shows the real balance on each row
+//     (the balance that existed at that moment in history)
+//   - Pagination is honest — "Showing 1-50 of N" reflects the filtered set
+//
+// For very large datasets (millions of entries) this in-memory walk
+// would need a stored running_balance column, but for cash-book volumes
+// it's negligible.
 cashBookRouter.get(
   "/",
-  asyncHandler(async (_req, res) => {
-    const rows = db
+  asyncHandler(async (req, res) => {
+    // ---- Step 1: compute running balance across ALL entries ----
+    const allRows = db
       .prepare(`SELECT * FROM cash_book ORDER BY entry_date ASC, id ASC`)
       .all() as any[];
 
     let running = 0;
-    const withBalance = rows.map((row) => {
+    const withBalance = allRows.map((row) => {
       running += row.type === "income" ? row.amount : -row.amount;
       return { ...row, running_balance: running };
     });
 
-    res.json(withBalance.reverse());
+    // ---- Step 2: apply the date filter to that enriched set ----
+    const filtered = withBalance.filter((row) => {
+      if (req.query.start && row.entry_date < String(req.query.start)) return false;
+      if (req.query.end && row.entry_date > `${String(req.query.end)} 23:59:59`) return false;
+      return true;
+    });
+
+    const total = filtered.length;
+    const page = Math.max(1, parseInt(String(req.query.page ?? "1"), 10) || 1);
+    const pageSize = Math.min(500, Math.max(1, parseInt(String(req.query.pageSize ?? "50"), 10) || 50));
+    const offset = (page - 1) * pageSize;
+
+    // ---- Step 3: newest first, then slice the requested page ----
+    const newestFirst = [...filtered].reverse();
+    const rows = newestFirst.slice(offset, offset + pageSize);
+
+    res.json({ rows, total, page, pageSize });
   })
 );
 
-// GET /api/cash-book/balance — just the current total, for a dashboard widget
+// GET /api/cash-book/summary — aggregate totals across ALL entries
+// (independent of pagination / date filter), used for the four stat
+// cards: current balance, cash in hand, bank balance, unspecified.
+//
+// Cheque is grouped with card and bank_transfer because a cheque is a
+// bank instrument: a cheque deposited lands in your bank account, a
+// cheque issued is drawn on your bank account. Either way, the money
+// moves between the bank and the outside world — never cash-in-hand,
+// and never "unclassified". Grouping it here means:
+//   - Bank [HNB] reflects the true bank position including cheques
+//   - Unspecified stays reserved for genuinely unclassifiable entries
+//
+// MUST be registered BEFORE /:id, or Express will try to match
+// "summary" as an id parameter.
+cashBookRouter.get(
+  "/summary",
+  asyncHandler(async (_req, res) => {
+    const row = db
+      .prepare(
+        `SELECT
+           COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE -amount END), 0) AS current_balance,
+           COALESCE(SUM(CASE WHEN payment_method = 'cash' THEN (CASE WHEN type = 'income' THEN amount ELSE -amount END) ELSE 0 END), 0) AS cash_total,
+           COALESCE(SUM(CASE WHEN payment_method IN ('card','bank_transfer','cheque') THEN (CASE WHEN type = 'income' THEN amount ELSE -amount END) ELSE 0 END), 0) AS bank_total,
+           COALESCE(SUM(CASE WHEN payment_method IS NULL OR payment_method NOT IN ('cash','card','bank_transfer','cheque') THEN (CASE WHEN type = 'income' THEN amount ELSE -amount END) ELSE 0 END), 0) AS unspecified_total
+         FROM cash_book`
+      )
+      .get() as {
+      current_balance: number;
+      cash_total: number;
+      bank_total: number;
+      unspecified_total: number;
+    };
+    res.json(row);
+  })
+);
+
+// GET /api/cash-book/balance — just the current total, for a dashboard widget.
+// Kept as its own small endpoint since it's cheap and used by the dashboard,
+// which doesn't need the four-way split that /summary provides.
 cashBookRouter.get(
   "/balance",
   asyncHandler(async (_req, res) => {

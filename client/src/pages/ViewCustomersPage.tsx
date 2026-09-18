@@ -1,25 +1,25 @@
-import { useEffect, useState, useMemo, Fragment } from "react";
-import { Users, Search, MessageCircle, Pencil, Plus, Star, X, ChevronDown, ChevronRight, Wallet, UserX, UserCheck, Trash2, AlertTriangle } from "lucide-react";
+import { useEffect, useState, useMemo, Fragment, useRef } from "react";
+import { Users, Search, MessageCircle, Pencil, Plus, Star, X, ChevronDown, ChevronRight, Wallet, UserX, UserCheck, Trash2, AlertTriangle, ArrowLeft, Building2, FileText, MoreHorizontal, ShoppingBag, Receipt } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Customer, CustomerAddress, BankAccount } from "../lib/types";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { PageHeader, Card, Table, Th, Td, Input, Button, EmptyState, ErrorText, SuccessText, Label, FormGroup, Dropdown, DatePicker } from "../components/ui";
-import { CityPicker } from "../components/CityPicker";
+
+function useCities(): string[] {
+  return [];
+}
 
 function whatsappLink(phone: string): string {
   const digitsOnly = phone.replace(/\D/g, "").replace(/^0/, "");
   return `https://wa.me/94${digitsOnly}`;
 }
 
-// The two receipt texts, phrased so "please settle soon" lands as a
-// gentle nudge rather than a demand — used right after a payment is
-// recorded, opened for review before sending, never auto-sent silently.
 function paymentReceiptMessage(name: string, amount: number, remainingBalance: number): string {
   if (remainingBalance <= 0) {
-    return `Hi ${name}! 🙏 We've received your payment of Rs. ${amount.toLocaleString()} — your account with M&M Clothing is now fully settled. Thank you so much for your trust, and see you again soon! 😊`;
+    return `Hi ${name}, we've received your payment of Rs. ${amount.toLocaleString()} — your account with M&M Clothing is now fully settled. Thank you so much for your trust, and see you again soon.`;
   }
-  return `Hi ${name}! Thank you for your payment of Rs. ${amount.toLocaleString()} 🙏 Your M&M Clothing balance now stands at Rs. ${remainingBalance.toLocaleString()}. Whenever it's convenient, feel free to settle the rest — no rush at all. We really appreciate you! 😊`;
+  return `Hi ${name}, thank you for your payment of Rs. ${amount.toLocaleString()}. Your M&M Clothing balance now stands at Rs. ${remainingBalance.toLocaleString()}. Whenever it's convenient, feel free to settle the rest — no rush at all. We really appreciate you.`;
 }
 
 function whatsappMessageLink(phone: string, message: string): string {
@@ -27,13 +27,225 @@ function whatsappMessageLink(phone: string, message: string): string {
   return `https://wa.me/94${digitsOnly}?text=${encodeURIComponent(message)}`;
 }
 
+type ExpandedTab = "overview" | "contact" | "addresses" | "bank";
+type PaymentMethod = "cash" | "bank_transfer" | "cheque" | "other";
+
+function startOfToday(): Date {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function isPastDate(yyyymmdd: string): boolean {
+  if (!yyyymmdd) return false;
+  const parsed = new Date(yyyymmdd + "T00:00:00");
+  if (isNaN(parsed.getTime())) return false;
+  return parsed.getTime() < startOfToday().getTime();
+}
+
+function todayIso(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function ComboPicker({
+  label,
+  placeholder,
+  existing,
+  value,
+  onSelect,
+  uppercase,
+}: {
+  label: string;
+  placeholder: string;
+  existing: string[];
+  value: string;
+  onSelect: (v: string) => void;
+  uppercase?: boolean;
+}) {
+  const [query, setQuery] = useState(value);
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setQuery(value);
+  }, [value]);
+
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (!wrapRef.current) return;
+      if (!wrapRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+
+  const normalized = uppercase ? query.trim().toUpperCase() : query.trim();
+  const matches = normalized
+    ? existing.filter((v) => v.toLowerCase().includes(normalized.toLowerCase()))
+    : existing;
+
+  const canAddNew =
+    normalized.length > 0 &&
+    !existing.some((v) => v.toLowerCase() === normalized.toLowerCase());
+
+  function commit(v: string) {
+    const final = uppercase ? v.trim().toUpperCase() : v.trim();
+    if (!final) return;
+    onSelect(final);
+    setQuery(final);
+    setOpen(false);
+  }
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <Label>{label}</Label>
+      <div className="relative">
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              if (matches.length > 0) commit(matches[0]);
+              else if (canAddNew) commit(query);
+            }
+            if (e.key === "Escape") {
+              setOpen(false);
+              setQuery(value);
+            }
+          }}
+          placeholder={existing.length ? placeholder : "Type to add a new city"}
+          className="w-full pl-3 pr-10 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-gray-400"
+        />
+        <button
+          type="button"
+          disabled={!canAddNew}
+          onClick={() => commit(query)}
+          className={`absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center justify-center w-7 h-7 rounded-md transition ${
+            canAddNew
+              ? "bg-black text-white hover:bg-gray-800"
+              : "bg-gray-100 text-gray-300 cursor-not-allowed"
+          }`}
+          title={canAddNew ? "Add as new" : "Type a value to add"}
+        >
+          <Plus size={14} />
+        </button>
+      </div>
+
+      {open && (matches.length > 0 || canAddNew) && (
+        <div className="absolute z-10 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-sm max-h-44 overflow-y-auto">
+          {matches.map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => commit(m)}
+              className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+            >
+              {m}
+            </button>
+          ))}
+          {canAddNew && (
+            <button
+              type="button"
+              onClick={() => commit(query)}
+              className="w-full text-left px-3 py-2 text-sm text-amber-700 hover:bg-amber-50 border-t border-gray-100"
+            >
+              Add new city: <span className="font-medium">{normalized}</span>
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PaymentPreviewPane({
+  amount,
+  loading,
+  preview,
+  currentBalance,
+}: {
+  amount: number;
+  loading: boolean;
+  preview: {
+    allocations: { sale_id: number; invoice: string; date: string; owed_before: number; applied: number; new_status: string }[];
+    unapplied: number;
+  } | null;
+  currentBalance: number;
+}) {
+  if (amount <= 0) {
+    return (
+      <p className="text-xs text-gray-400 leading-relaxed">
+        Enter an amount to see how it covers the customer's oldest unpaid invoices.
+      </p>
+    );
+  }
+  if (loading) {
+    return <p className="text-xs text-gray-400">Calculating...</p>;
+  }
+  if (!preview || preview.allocations.length === 0) {
+    return <p className="text-xs text-gray-400">Nothing outstanding to apply against.</p>;
+  }
+
+  const totalApplied = preview.allocations.reduce((s, a) => s + a.applied, 0);
+  const newBalance = Math.max(0, currentBalance - totalApplied);
+
+  return (
+    <div className="space-y-3">
+      <div className="border border-gray-200 rounded-lg overflow-hidden bg-white divide-y divide-gray-100">
+        {preview.allocations.map((a) => (
+          <div key={a.sale_id} className="flex items-center justify-between px-3 py-2 text-xs">
+            <span className="text-gray-700">{a.invoice}</span>
+            <span className="tabular-nums text-gray-900">Rs. {a.applied.toLocaleString()}</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="bg-white border border-gray-100 rounded-lg px-3 py-2 text-xs space-y-1">
+        {newBalance > 0 ? (
+          <div className="flex justify-between">
+            <span className="text-gray-500">New balance</span>
+            <span className="font-medium text-gray-900 tabular-nums">
+              Rs. {newBalance.toLocaleString()}
+            </span>
+          </div>
+        ) : (
+          <div className="flex justify-between">
+            <span className="text-gray-500">New balance</span>
+            <span className="font-medium text-green-700">Fully settled</span>
+          </div>
+        )}
+        {preview.unapplied > 0 && (
+          <div className="flex justify-between">
+            <span className="text-gray-500">Left as credit</span>
+            <span className="font-medium text-gray-900 tabular-nums">
+              Rs. {preview.unapplied.toLocaleString()}
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function ViewCustomersPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+  const cities = useCities();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [expandedDetail, setExpandedDetail] = useState<Customer | null>(null);
+  const [expandedTab, setExpandedTab] = useState<ExpandedTab>("overview");
   const [creditBreakdown, setCreditBreakdown] = useState<{ amount: number; reason: string; expires_at: string | null }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -55,22 +267,24 @@ export default function ViewCustomersPage() {
   const [editBankAccount, setEditBankAccount] = useState({ bank_name: "", account_name: "", account_number: "", branch: "" });
   const [editBankAccountError, setEditBankAccountError] = useState<string | null>(null);
 
-  // Record Payment — one amount, applied FIFO across the customer's
-  // outstanding sales. Live preview updates as the amount changes, so
-  // the person sees exactly what it'll cover before confirming.
   const [payingCustomer, setPayingCustomer] = useState<Customer | null>(null);
+  const [paymentStep, setPaymentStep] = useState<1 | 2>(1);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [paymentAmount, setPaymentAmount] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<"cash" | "bank_transfer" | "cheque" | "other">("cash");
-  // Cheques received are a real LIST — a customer often hands over
-  // several at once, each with its own real amount, not identical
-  // ones. All amounts are summed and FIFO-allocated together as one
-  // combined payment once submitted.
   const [chequeNumber, setChequeNumber] = useState("");
   const [chequeBankName, setChequeBankName] = useState("");
+  const [chequePayeeName, setChequePayeeName] = useState("");
   const [chequeAmount, setChequeAmount] = useState("");
   const [chequeDate, setChequeDate] = useState("");
   const [chequeListError, setChequeListError] = useState<string | null>(null);
-  const [chequeList, setChequeList] = useState<{ cheque_number: string; bank_name: string; amount: number; cheque_date: string }[]>([]);
+  const [chequeList, setChequeList] = useState<{
+    cheque_number: string;
+    bank_name: string;
+    payee_name: string;
+    amount: number;
+    cheque_date: string;
+    received_date: string;
+  }[]>([]);
   const chequeListTotal = chequeList.reduce((sum, c) => sum + c.amount, 0);
   const [paymentNotes, setPaymentNotes] = useState("");
   const [paymentPreview, setPaymentPreview] = useState<{
@@ -80,12 +294,8 @@ export default function ViewCustomersPage() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
-  // After a successful payment, the receipt link waits here for the
-  // person to review and send themselves — never opened automatically.
   const [receiptAfterPayment, setReceiptAfterPayment] = useState<{ name: string; phone: string | null; message: string } | null>(null);
 
-  // Suspend / reactivate — both admin-only, both require a real reason,
-  // kept as a genuine audit trail rather than a silent toggle.
   const [suspendTarget, setSuspendTarget] = useState<Customer | null>(null);
   const [suspendReason, setSuspendReason] = useState("");
   const [suspendError, setSuspendError] = useState<string | null>(null);
@@ -96,9 +306,6 @@ export default function ViewCustomersPage() {
   const [reactivateError, setReactivateError] = useState<string | null>(null);
   const [reactivateSubmitting, setReactivateSubmitting] = useState(false);
 
-  // Delete — two real steps. First attempt may come back with a warning
-  // (customer has sales); deleteWarning holds that message, and clicking
-  // delete again sends confirm=true to actually go through with it.
   const [deleteTarget, setDeleteTarget] = useState<Customer | null>(null);
   const [deleteWarning, setDeleteWarning] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -123,14 +330,9 @@ export default function ViewCustomersPage() {
     load();
   }, []);
 
-  // Live preview — refetches the FIFO breakdown a moment after the
-  // relevant amount stops changing, so it doesn't fire on every
-  // keystroke. For cheque, that's the sum of the whole list (several
-  // cheques settle together as one combined payment); otherwise it's
-  // just the plain amount field.
   useEffect(() => {
     const previewAmount = paymentMethod === "cheque" ? chequeListTotal : parseFloat(paymentAmount) || 0;
-    if (!payingCustomer || previewAmount <= 0) {
+    if (!payingCustomer || paymentStep !== 2 || previewAmount <= 0) {
       setPaymentPreview(null);
       return;
     }
@@ -146,7 +348,7 @@ export default function ViewCustomersPage() {
         .finally(() => setPreviewLoading(false));
     }, 400);
     return () => clearTimeout(timeout);
-  }, [paymentAmount, paymentMethod, chequeListTotal, payingCustomer]);
+  }, [paymentAmount, paymentMethod, chequeListTotal, payingCustomer, paymentStep]);
 
   async function toggleExpand(c: Customer) {
     if (expandedId === c.id) {
@@ -158,8 +360,10 @@ export default function ViewCustomersPage() {
       return;
     }
     setExpandedId(c.id);
+    setExpandedTab("overview");
     setIsEditing(false);
     setShowAddAddress(false);
+    setShowAddBankAccount(false);
     setEditError(null);
     setEditSuccess(null);
     const full = await api.get<Customer>(`/customers/${c.id}`);
@@ -190,29 +394,71 @@ export default function ViewCustomersPage() {
 
   function openPayment(c: Customer) {
     setPayingCustomer(c);
-    setPaymentAmount("");
+    setPaymentStep(1);
     setPaymentMethod("cash");
+    setPaymentAmount("");
     setPaymentNotes("");
     setPaymentPreview(null);
     setPaymentError(null);
     setChequeNumber("");
     setChequeBankName("");
+    setChequePayeeName("");
     setChequeAmount("");
     setChequeDate("");
     setChequeListError(null);
     setChequeList([]);
   }
 
+  function chooseMethod(m: PaymentMethod) {
+    setPaymentMethod(m);
+    setPaymentStep(2);
+  }
+
   function addCheque() {
     setChequeListError(null);
+
     const amt = parseFloat(chequeAmount);
-    if (!chequeNumber.trim() || !chequeBankName.trim() || !amt || amt <= 0 || !chequeDate) {
-      setChequeListError("Cheque number, bank name, a valid amount, and date are all required");
+
+    if (!chequeNumber.trim()) {
+      setChequeListError("Cheque number is required");
       return;
     }
-    setChequeList((list) => [...list, { cheque_number: chequeNumber.trim(), bank_name: chequeBankName.trim(), amount: amt, cheque_date: chequeDate }]);
+    if (!chequeBankName.trim()) {
+      setChequeListError("Bank name is required");
+      return;
+    }
+    if (!chequePayeeName.trim()) {
+      setChequeListError("Payee name (as written on the cheque) is required");
+      return;
+    }
+    if (!amt || amt <= 0) {
+      setChequeListError("Enter a valid amount greater than 0");
+      return;
+    }
+    if (!chequeDate) {
+      setChequeListError("Cheque date is required");
+      return;
+    }
+    if (isPastDate(chequeDate)) {
+      setChequeListError("Cheque date cannot be in the past");
+      return;
+    }
+
+    setChequeList((list) => [
+      ...list,
+      {
+        cheque_number: chequeNumber.trim(),
+        bank_name: chequeBankName.trim(),
+        payee_name: chequePayeeName.trim(),
+        amount: amt,
+        cheque_date: chequeDate,
+        received_date: todayIso(),
+      },
+    ]);
+
     setChequeNumber("");
     setChequeBankName("");
+    setChequePayeeName("");
     setChequeAmount("");
     setChequeDate("");
   }
@@ -239,7 +485,17 @@ export default function ViewCustomersPage() {
           amount: paymentMethod === "cheque" ? undefined : amount,
           method: paymentMethod,
           notes: paymentNotes.trim() || undefined,
-          cheques: paymentMethod === "cheque" ? chequeList : undefined,
+          cheques:
+            paymentMethod === "cheque"
+              ? chequeList.map((c) => ({
+                  cheque_number: c.cheque_number,
+                  bank_name: c.bank_name,
+                  payee_name: c.payee_name,
+                  amount: c.amount,
+                  cheque_date: c.cheque_date,
+                  received_date: c.received_date,
+                }))
+              : undefined,
         }
       );
 
@@ -248,8 +504,10 @@ export default function ViewCustomersPage() {
       setReceiptAfterPayment({ name: payingCustomer.name, phone: payingCustomer.phone, message });
 
       setPayingCustomer(null);
+      setPaymentStep(1);
       setChequeNumber("");
       setChequeBankName("");
+      setChequePayeeName("");
       setChequeAmount("");
       setChequeDate("");
       setChequeList([]);
@@ -331,9 +589,6 @@ export default function ViewCustomersPage() {
       }
       load();
     } catch (err) {
-      // A 409 from this specific endpoint is always the sales-history
-      // warning (the only case it can produce) — show it as something
-      // to confirm past, not a hard failure.
       if (err instanceof ApiRequestError && err.status === 409) {
         setDeleteWarning(err.message);
         return;
@@ -391,9 +646,7 @@ export default function ViewCustomersPage() {
     try {
       await api.put(`/customers/${customerId}/addresses/${address.id}`, { is_default: true });
       refreshExpanded(customerId);
-    } catch {
-      // minor action — no need for a full error banner if it fails
-    }
+    } catch {}
   }
 
   function startEditAddress(a: CustomerAddress) {
@@ -462,9 +715,7 @@ export default function ViewCustomersPage() {
     try {
       await api.put(`/customers/${customerId}/bank-accounts/${account.id}`, { is_default: true });
       refreshExpanded(customerId);
-    } catch {
-      // minor action — no need for a full error banner if it fails
-    }
+    } catch {}
   }
 
   function startEditBankAccount(a: BankAccount) {
@@ -520,6 +771,22 @@ export default function ViewCustomersPage() {
     );
   }, [customers, query]);
 
+  // Three-tier ordering, most actionable first:
+  //   1. Pending  — customer owes money (balance_due > 0)
+  //   2. Overpaid — has store credit and no debt
+  //   3. Settled  — nothing outstanding either way
+  // Within each tier, the original order from the API is preserved
+  // (stable sort). Re-runs only when the filtered list changes, so
+  // the order stays stable during a session.
+  const sortedCustomers = useMemo(() => {
+    function tier(c: Customer): number {
+      if ((c.balance_due ?? 0) > 0) return 0; // pending — owes us money
+      if ((c.store_credit_balance ?? 0) > 0) return 1; // overpaid — we owe them credit
+      return 2; // settled
+    }
+    return [...filteredCustomers].sort((a, b) => tier(a) - tier(b));
+  }, [filteredCustomers]);
+
   return (
     <div>
       <PageHeader
@@ -563,7 +830,7 @@ export default function ViewCustomersPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredCustomers.map((c) => {
+              {sortedCustomers.map((c) => {
                 const isExpanded = expandedId === c.id;
                 const netBalance = c.store_credit_balance - c.balance_due;
                 return (
@@ -606,78 +873,6 @@ export default function ViewCustomersPage() {
                               </button>
                             </div>
 
-                            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-5 text-sm">
-                              <div>
-                                <p className="text-xs text-gray-400">Loyalty points</p>
-                                <p className="text-gray-900 font-medium">{expandedDetail.loyalty_points}</p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-gray-400">Balance due</p>
-                                <p className="text-gray-900 font-medium">
-                                  {expandedDetail.balance_due > 0 ? `Rs. ${expandedDetail.balance_due.toLocaleString()}` : "Settled"}
-                                </p>
-                                {expandedDetail.balance_due > 0 && (
-                                  <button
-                                    onClick={() => openPayment(expandedDetail)}
-                                    className="inline-flex items-center gap-1 text-xs text-black underline hover:no-underline mt-1"
-                                  >
-                                    <Wallet size={12} />
-                                    Record Payment
-                                  </button>
-                                )}
-                              </div>
-                              <div>
-                                <p className="text-xs text-gray-400">Store credit</p>
-                                <p className="text-gray-900 font-medium">
-                                  {expandedDetail.store_credit_balance > 0
-                                    ? `Rs. ${expandedDetail.store_credit_balance.toLocaleString()}`
-                                    : "—"}
-                                </p>
-                                {creditBreakdown.length > 0 && (
-                                  <div className="mt-1 space-y-0.5">
-                                    {creditBreakdown.map((g, i) => {
-                                      const daysLeft = g.expires_at
-                                        ? Math.ceil((new Date(g.expires_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
-                                        : null;
-                                      return (
-                                        <p key={i} className="text-xs text-gray-400">
-                                          +Rs. {g.amount.toLocaleString()}
-                                          {g.expires_at
-                                            ? ` (expires in ${daysLeft} day${daysLeft === 1 ? "" : "s"}, on ${g.expires_at.slice(0, 10)})`
-                                            : " (no expiry)"}
-                                        </p>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                                {expandedDetail.store_credit_balance > 0 && (
-                                  <p className="text-xs text-gray-400 mt-1">Applied automatically at checkout</p>
-                                )}
-                              </div>
-                              <div>
-                                <p className="text-xs text-gray-400">Last order</p>
-                                <p className="text-gray-900 font-medium">
-                                  {expandedDetail.last_order_date ? expandedDetail.last_order_date.slice(0, 10) : "No orders yet"}
-                                </p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-gray-400">Message</p>
-                                {expandedDetail.phone ? (
-                                  <a
-                                    href={whatsappLink(expandedDetail.phone)}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1.5 text-green-600 hover:text-green-700 font-medium"
-                                  >
-                                    <MessageCircle size={15} />
-                                    WhatsApp
-                                  </a>
-                                ) : (
-                                  <p className="text-gray-300">No phone</p>
-                                )}
-                              </div>
-                            </div>
-
                             {expandedDetail.is_suspended === 1 && (
                               <div className="bg-red-50 border border-red-200 rounded-xl px-3 py-2 mb-4 flex items-start gap-2">
                                 <AlertTriangle size={14} className="text-red-500 flex-shrink-0 mt-0.5" />
@@ -691,345 +886,480 @@ export default function ViewCustomersPage() {
                               </div>
                             )}
 
-                            {isAdmin && (
-                              <div className="flex items-center gap-3 mb-4 text-xs">
-                                {expandedDetail.is_suspended === 1 ? (
-                                  <button
-                                    onClick={() => {
-                                      setReactivateTarget(expandedDetail);
-                                      setReactivateReason("");
-                                      setReactivateError(null);
-                                    }}
-                                    className="inline-flex items-center gap-1 text-gray-500 hover:text-black"
-                                  >
-                                    <UserCheck size={13} />
-                                    Reactivate
-                                  </button>
-                                ) : (
-                                  <button
-                                    onClick={() => {
-                                      setSuspendTarget(expandedDetail);
-                                      setSuspendReason("");
-                                      setSuspendError(null);
-                                    }}
-                                    className="inline-flex items-center gap-1 text-gray-500 hover:text-black"
-                                  >
-                                    <UserX size={13} />
-                                    Suspend
-                                  </button>
-                                )}
+                            <div className="flex items-center gap-1 border-b border-gray-200 mb-4">
+                              {(["overview", "contact", "addresses", "bank"] as ExpandedTab[]).map((tab) => (
                                 <button
-                                  onClick={() => openDelete(expandedDetail)}
-                                  className="inline-flex items-center gap-1 text-gray-500 hover:text-red-600"
+                                  key={tab}
+                                  onClick={() => setExpandedTab(tab)}
+                                  className={`px-3 py-1.5 text-xs font-medium rounded-t-lg transition ${
+                                    expandedTab === tab
+                                      ? "bg-white border border-b-white border-gray-200 text-gray-900 -mb-px"
+                                      : "text-gray-500 hover:text-gray-800"
+                                  }`}
                                 >
-                                  <Trash2 size={13} />
-                                  Delete
+                                  {tab === "overview" ? "Overview" : tab === "contact" ? "Contact" : tab === "addresses" ? "Addresses" : "Bank accounts"}
                                 </button>
+                              ))}
+                            </div>
+
+                            {expandedTab === "overview" && (
+                              <div className="bg-white border border-gray-200 rounded-xl p-4">
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                                  <div>
+                                    <p className="text-xs text-gray-400">Loyalty points</p>
+                                    <p className="text-gray-900 font-medium">{expandedDetail.loyalty_points}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-xs text-gray-400">Balance due</p>
+                                    <p className="text-gray-900 font-medium">
+                                      {expandedDetail.balance_due > 0 ? `Rs. ${expandedDetail.balance_due.toLocaleString()}` : "Settled"}
+                                    </p>
+                                    {expandedDetail.balance_due > 0 && (
+                                      <button
+                                        onClick={() => openPayment(expandedDetail)}
+                                        className="inline-flex items-center gap-1 text-xs text-black underline hover:no-underline mt-1"
+                                      >
+                                        <Wallet size={12} />
+                                        Record Payment
+                                      </button>
+                                    )}
+                                  </div>
+                                  <div>
+                                    <p className="text-xs text-gray-400">Store credit</p>
+                                    <p className="text-gray-900 font-medium">
+                                      {expandedDetail.store_credit_balance > 0
+                                        ? `Rs. ${expandedDetail.store_credit_balance.toLocaleString()}`
+                                        : "—"}
+                                    </p>
+                                    {expandedDetail.store_credit_balance > 0 && creditBreakdown.length > 0 && (
+                                      <div className="mt-1 space-y-1.5">
+                                        {creditBreakdown.map((g, i) => {
+                                          const daysLeft = g.expires_at
+                                            ? Math.ceil((new Date(g.expires_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+                                            : null;
+                                          const urgent = daysLeft !== null && daysLeft <= 14;
+                                          return (
+                                            <div key={i}>
+                                              <p className="text-xs text-gray-500">+ Rs. {g.amount.toLocaleString()}</p>
+                                              {g.expires_at && (
+                                                <p
+                                                  className={`inline-block mt-0.5 text-[10px] px-1.5 py-0.5 rounded border ${
+                                                    urgent
+                                                      ? "text-amber-700 bg-amber-50 border-amber-200"
+                                                      : "text-gray-500 bg-gray-50 border-gray-200"
+                                                  }`}
+                                                >
+                                                  {new Date(g.expires_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                                                  {daysLeft !== null && <> · {daysLeft}d left</>}
+                                                </p>
+                                              )}
+                                              {!g.expires_at && g.reason && (
+                                                <p className="inline-block mt-0.5 text-[10px] px-1.5 py-0.5 rounded border text-gray-500 bg-gray-50 border-gray-200">
+                                                  {g.reason}
+                                                </p>
+                                              )}
+                                            </div>
+                                          );
+                                        })}
+                                        <p className="text-[10px] text-gray-400">Applied automatically at checkout</p>
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div>
+                                    <p className="text-xs text-gray-400">Last order</p>
+                                    <p className="text-gray-900 font-medium">
+                                      {expandedDetail.last_order_date ? expandedDetail.last_order_date.slice(0, 10) : "No orders yet"}
+                                    </p>
+                                    <button
+                                      onClick={() => navigate(`/customers/${expandedDetail.id}/orders`)}
+                                      className="inline-flex items-center gap-1 text-xs text-black underline hover:no-underline mt-1"
+                                    >
+                                      <ShoppingBag size={12} />
+                                      View order history
+                                    </button>
+                                    <button
+                                      onClick={() => navigate(`/customers/${expandedDetail.id}/payment-history`)}
+                                      className="inline-flex items-center gap-1 text-xs text-black underline hover:no-underline mt-1 ml-3"
+                                    >
+                                      <Receipt size={12} />
+                                      View payment history
+                                    </button>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-100">
+                                  <div>
+                                    {expandedDetail.phone ? (
+                                      <a
+                                        href={whatsappLink(expandedDetail.phone)}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1.5 text-green-600 hover:text-green-700 font-medium text-sm"
+                                      >
+                                        <MessageCircle size={15} />
+                                        Message on WhatsApp
+                                      </a>
+                                    ) : (
+                                      <p className="text-xs text-gray-300">No phone number on file</p>
+                                    )}
+                                  </div>
+
+                                  {isAdmin && (
+                                    <div className="flex items-center gap-3 text-xs">
+                                      {expandedDetail.is_suspended === 1 ? (
+                                        <button
+                                          onClick={() => {
+                                            setReactivateTarget(expandedDetail);
+                                            setReactivateReason("");
+                                            setReactivateError(null);
+                                          }}
+                                          className="inline-flex items-center gap-1 text-gray-500 hover:text-black"
+                                        >
+                                          <UserCheck size={13} />
+                                          Reactivate
+                                        </button>
+                                      ) : (
+                                        <button
+                                          onClick={() => {
+                                            setSuspendTarget(expandedDetail);
+                                            setSuspendReason("");
+                                            setSuspendError(null);
+                                          }}
+                                          className="inline-flex items-center gap-1 text-gray-500 hover:text-black"
+                                        >
+                                          <UserX size={13} />
+                                          Suspend
+                                        </button>
+                                      )}
+                                      <button
+                                        onClick={() => openDelete(expandedDetail)}
+                                        className="inline-flex items-center gap-1 text-gray-500 hover:text-red-600"
+                                      >
+                                        <Trash2 size={13} />
+                                        Delete
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                             )}
 
-                            <div className="border-t border-gray-200 pt-4 mb-4">
-                              <div className="flex items-center justify-between mb-2">
-                                <h3 className="text-sm font-semibold text-gray-900">Contact details</h3>
-                                {!isEditing && (
-                                  <button
-                                    onClick={() => setIsEditing(true)}
-                                    className="text-xs text-gray-500 hover:text-gray-800 inline-flex items-center gap-1"
-                                  >
-                                    <Pencil size={12} />
-                                    Edit
-                                  </button>
-                                )}
-                              </div>
-
-                              {isEditing ? (
-                                <>
-                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                    <FormGroup>
-                                      <Label>Name</Label>
-                                      <Input value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} />
-                                    </FormGroup>
-                                    <FormGroup>
-                                      <Label>Phone</Label>
-                                      <Input value={editForm.phone} onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))} />
-                                    </FormGroup>
-                                    <FormGroup>
-                                      <Label>Phone 2</Label>
-                                      <Input value={editForm.phone2} onChange={(e) => setEditForm((f) => ({ ...f, phone2: e.target.value }))} />
-                                    </FormGroup>
-                                  </div>
-                                  {editError && <ErrorText>{editError}</ErrorText>}
-                                  {editSuccess && <SuccessText>{editSuccess}</SuccessText>}
-                                  <div className="flex gap-2 mt-2">
-                                    <Button size="sm" variant="primary" onClick={() => saveEdit(expandedDetail.id)}>
-                                      Save
-                                    </Button>
-                                    <Button size="sm" onClick={cancelEdit}>
-                                      Cancel
-                                    </Button>
-                                  </div>
-                                </>
-                              ) : (
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-                                  <div>
-                                    <p className="text-xs text-gray-400">Name</p>
-                                    <p className="text-gray-900">{expandedDetail.name}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-xs text-gray-400">Phone</p>
-                                    <p className="text-gray-900">{expandedDetail.phone ?? "—"}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-xs text-gray-400">Phone 2</p>
-                                    <p className="text-gray-900">{expandedDetail.phone2 ?? "—"}</p>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-
-                            <div className="border-t border-gray-200 pt-4">
-                              <div className="flex items-center justify-between mb-2">
-                                <h3 className="text-sm font-semibold text-gray-900">Saved addresses</h3>
-                                {!showAddAddress && (
-                                  <button
-                                    onClick={() => setShowAddAddress(true)}
-                                    className="text-xs text-gray-500 hover:text-gray-800 inline-flex items-center gap-1"
-                                  >
-                                    <Plus size={12} />
-                                    Add address
-                                  </button>
-                                )}
-                              </div>
-
-                              {(!expandedDetail.addresses || expandedDetail.addresses.length === 0) && !showAddAddress ? (
-                                <p className="text-xs text-gray-400">No saved addresses.</p>
-                              ) : (
-                                <div className="space-y-2">
-                                  {expandedDetail.addresses?.map((a) =>
-                                    editingAddressId === a.id ? (
-                                      <div key={a.id} className="bg-white border border-gray-200 rounded-xl p-3">
-                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                          <FormGroup>
-                                            <Label>Address line 1</Label>
-                                            <Input
-                                              value={editAddr.address_line1}
-                                              onChange={(e) => setEditAddr((f) => ({ ...f, address_line1: e.target.value }))}
-                                            />
-                                          </FormGroup>
-                                          <FormGroup>
-                                            <Label>Address line 2</Label>
-                                            <Input
-                                              value={editAddr.address_line2}
-                                              onChange={(e) => setEditAddr((f) => ({ ...f, address_line2: e.target.value }))}
-                                            />
-                                          </FormGroup>
-                                          <FormGroup>
-                                            <Label>City</Label>
-                                            <CityPicker value={editAddr.city} onChange={(v) => setEditAddr((f) => ({ ...f, city: v }))} />
-                                          </FormGroup>
-                                        </div>
-                                        {editAddrError && <ErrorText>{editAddrError}</ErrorText>}
-                                        <div className="flex gap-2 mt-2">
-                                          <Button size="sm" variant="primary" onClick={() => saveEditAddress(expandedDetail.id, a.id)}>
-                                            Save
-                                          </Button>
-                                          <Button size="sm" onClick={cancelEditAddress}>
-                                            Cancel
-                                          </Button>
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <div key={a.id} className="flex items-center justify-between bg-white border border-gray-100 rounded-lg px-3 py-2 text-sm">
-                                        <span className="text-gray-700">
-                                          {[a.address_line1, a.address_line2, a.city].filter(Boolean).join(", ") || "—"}
-                                        </span>
-                                        <div className="flex items-center gap-3 flex-shrink-0">
-                                          {a.is_default ? (
-                                            <span className="text-xs text-green-600 font-medium">Default</span>
-                                          ) : (
-                                            <button onClick={() => makeDefault(expandedDetail.id, a)} className="text-xs text-gray-400 hover:text-gray-700">
-                                              Make default
-                                            </button>
-                                          )}
-                                          <button onClick={() => startEditAddress(a)} className="text-xs text-gray-400 hover:text-gray-700">
-                                            Edit
-                                          </button>
-                                          <button onClick={() => deleteAddress(expandedDetail.id, a.id)} className="text-xs text-red-400 hover:text-red-600">
-                                            Delete
-                                          </button>
-                                        </div>
-                                      </div>
-                                    )
+                            {expandedTab === "contact" && (
+                              <div className="bg-white border border-gray-200 rounded-xl p-4">
+                                <div className="flex items-center justify-between mb-3">
+                                  <h3 className="text-sm font-semibold text-gray-900">Contact details</h3>
+                                  {!isEditing && (
+                                    <button
+                                      onClick={() => setIsEditing(true)}
+                                      className="text-xs text-gray-500 hover:text-gray-800 inline-flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100"
+                                    >
+                                      <Pencil size={12} />
+                                      Edit
+                                    </button>
                                   )}
                                 </div>
-                              )}
 
-                              {showAddAddress && (
-                                <div className="mt-3 bg-white border border-gray-200 rounded-xl p-3">
-                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                    <FormGroup>
-                                      <Label>Address line 1</Label>
-                                      <Input value={newAddr.address_line1} onChange={(e) => setNewAddr((f) => ({ ...f, address_line1: e.target.value }))} />
-                                    </FormGroup>
-                                    <FormGroup>
-                                      <Label>Address line 2</Label>
-                                      <Input value={newAddr.address_line2} onChange={(e) => setNewAddr((f) => ({ ...f, address_line2: e.target.value }))} />
-                                    </FormGroup>
-                                    <FormGroup>
-                                      <Label>City</Label>
-                                      <CityPicker value={newAddr.city} onChange={(v) => setNewAddr((f) => ({ ...f, city: v }))} />
-                                    </FormGroup>
+                                {isEditing ? (
+                                  <>
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                      <FormGroup>
+                                        <Label>Name</Label>
+                                        <Input value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} />
+                                      </FormGroup>
+                                      <FormGroup>
+                                        <Label>Phone</Label>
+                                        <Input value={editForm.phone} onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))} />
+                                      </FormGroup>
+                                      <FormGroup>
+                                        <Label>Phone 2</Label>
+                                        <Input value={editForm.phone2} onChange={(e) => setEditForm((f) => ({ ...f, phone2: e.target.value }))} />
+                                      </FormGroup>
+                                    </div>
+                                    {editError && <ErrorText>{editError}</ErrorText>}
+                                    {editSuccess && <SuccessText>{editSuccess}</SuccessText>}
+                                    <div className="flex justify-end gap-2 mt-3">
+                                      <Button size="sm" onClick={cancelEdit}>
+                                        Cancel
+                                      </Button>
+                                      <Button size="sm" variant="primary" onClick={() => saveEdit(expandedDetail.id)}>
+                                        Save
+                                      </Button>
+                                    </div>
+                                  </>
+                                ) : (
+                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                                    <div>
+                                      <p className="text-xs text-gray-400">Name</p>
+                                      <p className="text-gray-900">{expandedDetail.name}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-xs text-gray-400">Phone</p>
+                                      <p className="text-gray-900">{expandedDetail.phone ?? "—"}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-xs text-gray-400">Phone 2</p>
+                                      <p className="text-gray-900">{expandedDetail.phone2 ?? "—"}</p>
+                                    </div>
                                   </div>
-                                  {addrError && <ErrorText>{addrError}</ErrorText>}
-                                  <div className="flex gap-2 mt-2">
-                                    <Button size="sm" variant="primary" onClick={() => addAddress(expandedDetail.id)}>
-                                      Save address
-                                    </Button>
-                                    <Button size="sm" onClick={() => setShowAddAddress(false)}>
-                                      Cancel
-                                    </Button>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-
-                            <div className="border-t border-gray-200 pt-4">
-                              <div className="flex items-center justify-between mb-2">
-                                <h3 className="text-sm font-semibold text-gray-900">Bank accounts</h3>
-                                {!showAddBankAccount && (
-                                  <button
-                                    onClick={() => setShowAddBankAccount(true)}
-                                    className="text-xs text-gray-500 hover:text-gray-800 inline-flex items-center gap-1"
-                                  >
-                                    <Plus size={12} />
-                                    Add account
-                                  </button>
                                 )}
                               </div>
+                            )}
 
-                              {(!expandedDetail.bank_accounts || expandedDetail.bank_accounts.length === 0) && !showAddBankAccount ? (
-                                <p className="text-xs text-gray-400">No bank accounts on file — needed for a bank-transfer refund or payment.</p>
-                              ) : (
-                                <div className="space-y-2">
-                                  {expandedDetail.bank_accounts?.map((a) =>
-                                    editingBankAccountId === a.id ? (
-                                      <div key={a.id} className="bg-white border border-gray-200 rounded-xl p-3">
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                          <FormGroup>
-                                            <Label>Bank name</Label>
-                                            <Input
-                                              value={editBankAccount.bank_name}
-                                              onChange={(e) => setEditBankAccount((f) => ({ ...f, bank_name: e.target.value }))}
+                            {expandedTab === "addresses" && (
+                              <div className="bg-white border border-gray-200 rounded-xl p-4">
+                                <div className="flex items-center justify-between mb-3">
+                                  <h3 className="text-sm font-semibold text-gray-900">Saved addresses</h3>
+                                  {!showAddAddress && (
+                                    <button
+                                      onClick={() => setShowAddAddress(true)}
+                                      className="text-xs text-gray-500 hover:text-gray-800 inline-flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100"
+                                    >
+                                      <Plus size={12} />
+                                      Add address
+                                    </button>
+                                  )}
+                                </div>
+
+                                {(!expandedDetail.addresses || expandedDetail.addresses.length === 0) && !showAddAddress ? (
+                                  <p className="text-xs text-gray-400">No saved addresses.</p>
+                                ) : (
+                                  <div className="space-y-2">
+                                    {expandedDetail.addresses?.map((a) =>
+                                      editingAddressId === a.id ? (
+                                        <div key={a.id} className="bg-gray-50 border border-gray-200 rounded-xl p-3">
+                                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                            <FormGroup>
+                                              <Label>Address line 1</Label>
+                                              <Input
+                                                value={editAddr.address_line1}
+                                                onChange={(e) => setEditAddr((f) => ({ ...f, address_line1: e.target.value }))}
+                                              />
+                                            </FormGroup>
+                                            <FormGroup>
+                                              <Label>Address line 2</Label>
+                                              <Input
+                                                value={editAddr.address_line2}
+                                                onChange={(e) => setEditAddr((f) => ({ ...f, address_line2: e.target.value }))}
+                                              />
+                                            </FormGroup>
+                                            <ComboPicker
+                                              label="City"
+                                              placeholder="— Type to search or add a city —"
+                                              existing={cities}
+                                              value={editAddr.city}
+                                              onSelect={(v) => setEditAddr((f) => ({ ...f, city: v }))}
                                             />
-                                          </FormGroup>
-                                          <FormGroup>
-                                            <Label>Branch (optional)</Label>
-                                            <Input
-                                              value={editBankAccount.branch}
-                                              onChange={(e) => setEditBankAccount((f) => ({ ...f, branch: e.target.value }))}
-                                            />
-                                          </FormGroup>
-                                          <FormGroup>
-                                            <Label>Account holder name</Label>
-                                            <Input
-                                              value={editBankAccount.account_name}
-                                              onChange={(e) => setEditBankAccount((f) => ({ ...f, account_name: e.target.value }))}
-                                            />
-                                          </FormGroup>
-                                          <FormGroup>
-                                            <Label>Account number</Label>
-                                            <Input
-                                              value={editBankAccount.account_number}
-                                              onChange={(e) => setEditBankAccount((f) => ({ ...f, account_number: e.target.value }))}
-                                            />
-                                          </FormGroup>
+                                          </div>
+                                          {editAddrError && <ErrorText>{editAddrError}</ErrorText>}
+                                          <div className="flex justify-end gap-2 mt-3">
+                                            <Button size="sm" onClick={cancelEditAddress}>
+                                              Cancel
+                                            </Button>
+                                            <Button size="sm" variant="primary" onClick={() => saveEditAddress(expandedDetail.id, a.id)}>
+                                              Save
+                                            </Button>
+                                          </div>
                                         </div>
-                                        {editBankAccountError && <ErrorText>{editBankAccountError}</ErrorText>}
-                                        <div className="flex gap-2 mt-2">
-                                          <Button size="sm" variant="primary" onClick={() => saveEditBankAccount(expandedDetail.id, a.id)}>
-                                            Save
-                                          </Button>
-                                          <Button size="sm" onClick={cancelEditBankAccount}>
-                                            Cancel
-                                          </Button>
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <div key={a.id} className="flex items-center justify-between bg-white border border-gray-100 rounded-lg px-3 py-2 text-sm">
-                                        <div>
+                                      ) : (
+                                        <div key={a.id} className="flex items-center justify-between bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 text-sm">
                                           <span className="text-gray-700">
-                                            {a.bank_name} — {a.account_name} — {a.account_number}
+                                            {[a.address_line1, a.address_line2, a.city].filter(Boolean).join(", ") || "—"}
                                           </span>
-                                          {a.branch && <div className="text-xs text-gray-400">{a.branch}</div>}
-                                        </div>
-                                        <div className="flex items-center gap-3 flex-shrink-0">
-                                          {a.is_default ? (
-                                            <span className="text-xs text-green-600 font-medium">Default</span>
-                                          ) : (
-                                            <button
-                                              onClick={() => makeBankAccountDefault(expandedDetail.id, a)}
-                                              className="text-xs text-gray-400 hover:text-gray-700"
-                                            >
-                                              Make default
+                                          <div className="flex items-center gap-3 flex-shrink-0">
+                                            {a.is_default ? (
+                                              <span className="text-xs text-green-600 font-medium">Default</span>
+                                            ) : (
+                                              <button onClick={() => makeDefault(expandedDetail.id, a)} className="text-xs text-gray-400 hover:text-gray-700">
+                                                Make default
+                                              </button>
+                                            )}
+                                            <button onClick={() => startEditAddress(a)} className="text-xs text-gray-400 hover:text-gray-700">
+                                              Edit
                                             </button>
-                                          )}
-                                          <button onClick={() => startEditBankAccount(a)} className="text-xs text-gray-400 hover:text-gray-700">
-                                            Edit
-                                          </button>
-                                          <button onClick={() => deleteBankAccount(expandedDetail.id, a.id)} className="text-xs text-red-400 hover:text-red-600">
-                                            Delete
-                                          </button>
+                                            <button onClick={() => deleteAddress(expandedDetail.id, a.id)} className="text-xs text-red-400 hover:text-red-600">
+                                              Delete
+                                            </button>
+                                          </div>
                                         </div>
-                                      </div>
-                                    )
+                                      )
+                                    )}
+                                  </div>
+                                )}
+
+                                {showAddAddress && (
+                                  <div className="mt-3 bg-gray-50 border border-gray-200 rounded-xl p-3">
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                      <FormGroup>
+                                        <Label>Address line 1</Label>
+                                        <Input value={newAddr.address_line1} onChange={(e) => setNewAddr((f) => ({ ...f, address_line1: e.target.value }))} />
+                                      </FormGroup>
+                                      <FormGroup>
+                                        <Label>Address line 2</Label>
+                                        <Input value={newAddr.address_line2} onChange={(e) => setNewAddr((f) => ({ ...f, address_line2: e.target.value }))} />
+                                      </FormGroup>
+                                      <ComboPicker
+                                        label="City"
+                                        placeholder="— Type to search or add a city —"
+                                        existing={cities}
+                                        value={newAddr.city}
+                                        onSelect={(v) => setNewAddr((f) => ({ ...f, city: v }))}
+                                      />
+                                    </div>
+                                    {addrError && <ErrorText>{addrError}</ErrorText>}
+                                    <div className="flex justify-end gap-2 mt-3">
+                                      <Button size="sm" onClick={() => setShowAddAddress(false)}>
+                                        Cancel
+                                      </Button>
+                                      <Button size="sm" variant="primary" onClick={() => addAddress(expandedDetail.id)}>
+                                        Save address
+                                      </Button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {expandedTab === "bank" && (
+                              <div className="bg-white border border-gray-200 rounded-xl p-4">
+                                <div className="flex items-center justify-between mb-3">
+                                  <h3 className="text-sm font-semibold text-gray-900">Bank accounts</h3>
+                                  {!showAddBankAccount && (
+                                    <button
+                                      onClick={() => setShowAddBankAccount(true)}
+                                      className="text-xs text-gray-500 hover:text-gray-800 inline-flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100"
+                                    >
+                                      <Plus size={12} />
+                                      Add account
+                                    </button>
                                   )}
                                 </div>
-                              )}
 
-                              {showAddBankAccount && (
-                                <div className="mt-3 bg-white border border-gray-200 rounded-xl p-3">
-                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                    <FormGroup>
-                                      <Label>Bank name</Label>
-                                      <Input
-                                        value={newBankAccount.bank_name}
-                                        onChange={(e) => setNewBankAccount((f) => ({ ...f, bank_name: e.target.value }))}
-                                      />
-                                    </FormGroup>
-                                    <FormGroup>
-                                      <Label>Branch (optional)</Label>
-                                      <Input
-                                        value={newBankAccount.branch}
-                                        onChange={(e) => setNewBankAccount((f) => ({ ...f, branch: e.target.value }))}
-                                      />
-                                    </FormGroup>
-                                    <FormGroup>
-                                      <Label>Account holder name</Label>
-                                      <Input
-                                        value={newBankAccount.account_name}
-                                        onChange={(e) => setNewBankAccount((f) => ({ ...f, account_name: e.target.value }))}
-                                      />
-                                    </FormGroup>
-                                    <FormGroup>
-                                      <Label>Account number</Label>
-                                      <Input
-                                        value={newBankAccount.account_number}
-                                        onChange={(e) => setNewBankAccount((f) => ({ ...f, account_number: e.target.value }))}
-                                      />
-                                    </FormGroup>
+                                {(!expandedDetail.bank_accounts || expandedDetail.bank_accounts.length === 0) && !showAddBankAccount ? (
+                                  <p className="text-xs text-gray-400">
+                                    No bank accounts on file — needed for a bank-transfer refund or payment.
+                                  </p>
+                                ) : (
+                                  <div className="space-y-2">
+                                    {expandedDetail.bank_accounts?.map((a) =>
+                                      editingBankAccountId === a.id ? (
+                                        <div key={a.id} className="bg-gray-50 border border-gray-200 rounded-xl p-3">
+                                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                            <FormGroup>
+                                              <Label>Bank name</Label>
+                                              <Input
+                                                value={editBankAccount.bank_name}
+                                                onChange={(e) => setEditBankAccount((f) => ({ ...f, bank_name: e.target.value }))}
+                                              />
+                                            </FormGroup>
+                                            <FormGroup>
+                                              <Label>Branch (optional)</Label>
+                                              <Input
+                                                value={editBankAccount.branch}
+                                                onChange={(e) => setEditBankAccount((f) => ({ ...f, branch: e.target.value }))}
+                                              />
+                                            </FormGroup>
+                                            <FormGroup>
+                                              <Label>Account holder name</Label>
+                                              <Input
+                                                value={editBankAccount.account_name}
+                                                onChange={(e) => setEditBankAccount((f) => ({ ...f, account_name: e.target.value }))}
+                                              />
+                                            </FormGroup>
+                                            <FormGroup>
+                                              <Label>Account number</Label>
+                                              <Input
+                                                value={editBankAccount.account_number}
+                                                onChange={(e) => setEditBankAccount((f) => ({ ...f, account_number: e.target.value }))}
+                                              />
+                                            </FormGroup>
+                                          </div>
+                                          {editBankAccountError && <ErrorText>{editBankAccountError}</ErrorText>}
+                                          <div className="flex justify-end gap-2 mt-3">
+                                            <Button size="sm" onClick={cancelEditBankAccount}>
+                                              Cancel
+                                            </Button>
+                                            <Button size="sm" variant="primary" onClick={() => saveEditBankAccount(expandedDetail.id, a.id)}>
+                                              Save
+                                            </Button>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <div key={a.id} className="flex items-center justify-between bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 text-sm">
+                                          <div>
+                                            <span className="text-gray-700">
+                                              {a.bank_name} — {a.account_name} — {a.account_number}
+                                            </span>
+                                            {a.branch && <div className="text-xs text-gray-400">{a.branch}</div>}
+                                          </div>
+                                          <div className="flex items-center gap-3 flex-shrink-0">
+                                            {a.is_default ? (
+                                              <span className="text-xs text-green-600 font-medium">Default</span>
+                                            ) : (
+                                              <button
+                                                onClick={() => makeBankAccountDefault(expandedDetail.id, a)}
+                                                className="text-xs text-gray-400 hover:text-gray-700"
+                                              >
+                                                Make default
+                                              </button>
+                                            )}
+                                            <button onClick={() => startEditBankAccount(a)} className="text-xs text-gray-400 hover:text-gray-700">
+                                              Edit
+                                            </button>
+                                            <button onClick={() => deleteBankAccount(expandedDetail.id, a.id)} className="text-xs text-red-400 hover:text-red-600">
+                                              Delete
+                                            </button>
+                                          </div>
+                                        </div>
+                                      )
+                                    )}
                                   </div>
-                                  {bankAccountError && <ErrorText>{bankAccountError}</ErrorText>}
-                                  <div className="flex gap-2 mt-2">
-                                    <Button size="sm" variant="primary" onClick={() => addBankAccount(expandedDetail.id)}>
-                                      Save account
-                                    </Button>
-                                    <Button size="sm" onClick={() => setShowAddBankAccount(false)}>
-                                      Cancel
-                                    </Button>
+                                )}
+
+                                {showAddBankAccount && (
+                                  <div className="mt-3 bg-gray-50 border border-gray-200 rounded-xl p-3">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                      <FormGroup>
+                                        <Label>Bank name</Label>
+                                        <Input
+                                          value={newBankAccount.bank_name}
+                                          onChange={(e) => setNewBankAccount((f) => ({ ...f, bank_name: e.target.value }))}
+                                        />
+                                      </FormGroup>
+                                      <FormGroup>
+                                        <Label>Branch (optional)</Label>
+                                        <Input
+                                          value={newBankAccount.branch}
+                                          onChange={(e) => setNewBankAccount((f) => ({ ...f, branch: e.target.value }))}
+                                        />
+                                      </FormGroup>
+                                      <FormGroup>
+                                        <Label>Account holder name</Label>
+                                        <Input
+                                          value={newBankAccount.account_name}
+                                          onChange={(e) => setNewBankAccount((f) => ({ ...f, account_name: e.target.value }))}
+                                        />
+                                      </FormGroup>
+                                      <FormGroup>
+                                        <Label>Account number</Label>
+                                        <Input
+                                          value={newBankAccount.account_number}
+                                          onChange={(e) => setNewBankAccount((f) => ({ ...f, account_number: e.target.value }))}
+                                        />
+                                      </FormGroup>
+                                    </div>
+                                    {bankAccountError && <ErrorText>{bankAccountError}</ErrorText>}
+                                    <div className="flex justify-end gap-2 mt-3">
+                                      <Button size="sm" onClick={() => setShowAddBankAccount(false)}>
+                                        Cancel
+                                      </Button>
+                                      <Button size="sm" variant="primary" onClick={() => addBankAccount(expandedDetail.id)}>
+                                        Save account
+                                      </Button>
+                                    </div>
                                   </div>
-                                </div>
-                              )}
-                            </div>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </Td>
                       </tr>
@@ -1042,136 +1372,253 @@ export default function ViewCustomersPage() {
         </Card>
       )}
 
+      {/* ================= RECORD PAYMENT WIZARD ================= */}
       {payingCustomer && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
-            <div className="p-5 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-base font-semibold text-gray-900">Record payment — {payingCustomer.name}</h2>
-              <button onClick={() => setPayingCustomer(null)} className="text-gray-400 hover:text-gray-600">
+          <div className="bg-white rounded-2xl w-[880px] h-[640px] shadow-2xl flex flex-col overflow-hidden">
+            <div className="px-6 py-3.5 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+              <div className="flex items-center gap-3 min-w-0">
+                {paymentStep === 2 && (
+                  <button
+                    onClick={() => setPaymentStep(1)}
+                    className="text-gray-400 hover:text-gray-700 flex-shrink-0"
+                    title="Back to method"
+                  >
+                    <ArrowLeft size={18} />
+                  </button>
+                )}
+                <h2 className="text-base font-semibold text-gray-900 flex-shrink-0">
+                  {paymentStep === 1 ? "Record payment" : "Payment details"}
+                </h2>
+                <p className="text-xs text-gray-400 truncate">
+                  {payingCustomer.name} · owes{" "}
+                  <span className="text-gray-600 font-medium">
+                    Rs. {payingCustomer.balance_due.toLocaleString()}
+                  </span>
+                </p>
+              </div>
+              <button
+                onClick={() => setPayingCustomer(null)}
+                className="text-gray-400 hover:text-gray-600 flex-shrink-0 ml-3"
+              >
                 <X size={18} />
               </button>
             </div>
-            <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <p className="text-xs text-gray-400 mb-3">
-                  Currently owes Rs. {payingCustomer.balance_due.toLocaleString()}. A payment is applied to their oldest unpaid sales
-                  first.
-                </p>
-                {paymentMethod !== "cheque" && (
-                  <FormGroup>
-                    <Label>Amount received (Rs.)</Label>
-                    <Input type="number" min="0" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} />
-                  </FormGroup>
-                )}
-                <FormGroup>
-                  <Label>Method</Label>
-                  <Dropdown
-                    value={paymentMethod}
-                    onChange={(v) => setPaymentMethod(v as typeof paymentMethod)}
-                    options={[
-                      { value: "cash", label: "Cash" },
-                      { value: "bank_transfer", label: "Bank transfer" },
-                      { value: "cheque", label: "Cheque" },
-                      { value: "other", label: "Other" },
-                    ]}
-                  />
-                </FormGroup>
 
-                {paymentMethod === "cheque" && (
-                  <div className="border border-gray-200 rounded-xl p-3 mb-3">
-                    <p className="text-xs text-gray-400 mb-2">
-                      A cheque isn't real cash yet — sales are marked paid now, but nothing hits the Cash Book until it clears (tracked
-                      on the Cheques page). Add one or more cheques below — they're summed and applied together.
-                    </p>
-                    <div className="grid grid-cols-2 gap-2 mb-2">
-                      <Input placeholder="Cheque number" value={chequeNumber} onChange={(e) => setChequeNumber(e.target.value)} />
-                      <Input placeholder="Bank name" value={chequeBankName} onChange={(e) => setChequeBankName(e.target.value)} />
-                      <Input
-                        type="number"
-                        min="0"
-                        placeholder="Amount"
-                        value={chequeAmount}
-                        onChange={(e) => setChequeAmount(e.target.value)}
-                      />
-                      <DatePicker value={chequeDate || null} onChange={setChequeDate} placeholder="Cheque date" />
-                    </div>
-                    {chequeListError && <ErrorText>{chequeListError}</ErrorText>}
-                    <Button onClick={addCheque}>Add this cheque</Button>
+            <div className="flex-1 min-h-0 overflow-hidden">
+              {paymentStep === 1 ? (
+                <div className="h-full flex flex-col items-center justify-center px-6">
+                  <p className="text-sm text-gray-700 mb-5">How was this payment made?</p>
+                  <div className="grid grid-cols-4 gap-4 w-full max-w-2xl">
+                    <button
+                      onClick={() => chooseMethod("cash")}
+                      className="flex flex-col items-center justify-center gap-2 py-6 rounded-xl border border-gray-200 hover:border-gray-900 hover:bg-gray-50 transition"
+                    >
+                      <Wallet size={24} className="text-gray-700" />
+                      <span className="text-sm font-medium text-gray-900">Cash</span>
+                    </button>
+                    <button
+                      onClick={() => chooseMethod("bank_transfer")}
+                      className="flex flex-col items-center justify-center gap-2 py-6 rounded-xl border border-gray-200 hover:border-gray-900 hover:bg-gray-50 transition"
+                    >
+                      <Building2 size={24} className="text-gray-700" />
+                      <span className="text-sm font-medium text-gray-900">Bank transfer</span>
+                    </button>
+                    <button
+                      onClick={() => chooseMethod("cheque")}
+                      className="flex flex-col items-center justify-center gap-2 py-6 rounded-xl border border-gray-200 hover:border-gray-900 hover:bg-gray-50 transition"
+                    >
+                      <FileText size={24} className="text-gray-700" />
+                      <span className="text-sm font-medium text-gray-900">Cheque</span>
+                    </button>
+                    <button
+                      onClick={() => chooseMethod("other")}
+                      className="flex flex-col items-center justify-center gap-2 py-6 rounded-xl border border-gray-200 hover:border-gray-900 hover:bg-gray-50 transition"
+                    >
+                      <MoreHorizontal size={24} className="text-gray-700" />
+                      <span className="text-sm font-medium text-gray-900">Other</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-5 h-full">
+                  <div className="col-span-3 px-6 py-5 space-y-4 border-r border-gray-100 overflow-y-auto">
+                    {paymentMethod !== "cheque" ? (
+                      <>
+                        <div>
+                          <Label>Amount received (Rs.)</Label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={paymentAmount}
+                            onChange={(e) => setPaymentAmount(e.target.value)}
+                            placeholder="0"
+                            autoFocus
+                            className="w-full mt-1 px-3 py-3 border border-gray-200 rounded-lg text-2xl font-medium tabular-nums focus:outline-none focus:border-gray-400"
+                          />
+                        </div>
 
-                    {chequeList.length > 0 && (
-                      <div className="mt-3 space-y-1.5">
-                        {chequeList.map((c, i) => (
-                          <div key={i} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2 text-sm">
-                            <div>
-                              <span className="font-medium text-gray-900">
-                                #{c.cheque_number} — {c.bank_name}
-                              </span>
-                              <div className="text-xs text-gray-500">Rs. {c.amount.toLocaleString()}</div>
-                            </div>
-                            <button onClick={() => removeCheque(i)} className="text-gray-400 hover:text-red-500 text-xs">
-                              Remove
-                            </button>
+                        <FormGroup>
+                          <Label>Notes (optional)</Label>
+                          <Input
+                            value={paymentNotes}
+                            onChange={(e) => setPaymentNotes(e.target.value)}
+                            placeholder="Reference, remarks, etc."
+                          />
+                        </FormGroup>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-baseline justify-between">
+                          <h3 className="text-sm font-semibold text-gray-900">Add cheque</h3>
+                          <span className="text-[11px] text-gray-400">Clears later</span>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <Input
+                            placeholder="Cheque #"
+                            value={chequeNumber}
+                            onChange={(e) => setChequeNumber(e.target.value)}
+                          />
+                          <Input
+                            placeholder="Bank"
+                            value={chequeBankName}
+                            onChange={(e) => setChequeBankName(e.target.value)}
+                          />
+                          <div className="col-span-2">
+                            <Input
+                              placeholder="Payee name (as written on the cheque)"
+                              value={chequePayeeName}
+                              onChange={(e) => setChequePayeeName(e.target.value)}
+                            />
                           </div>
-                        ))}
-                        <div className="flex justify-between text-sm font-medium px-3 pt-1">
-                          <span>Total</span>
-                          <span>Rs. {chequeListTotal.toLocaleString()}</span>
+                          <div>
+                            <label className="block text-[10px] text-gray-400 mb-1 pl-1">Amount</label>
+                            <Input
+                              type="number"
+                              min="0"
+                              placeholder="Amount"
+                              value={chequeAmount}
+                              onChange={(e) => setChequeAmount(e.target.value)}
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] text-gray-400 mb-1 pl-1">Cheque date</label>
+                            <DatePicker
+                              value={chequeDate || null}
+                              onChange={setChequeDate}
+                              placeholder="Date on cheque"
+                              min={todayIso()}
+                            />
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={addCheque}
+                          className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-lg border border-dashed border-gray-300 text-sm font-medium text-gray-600 hover:border-gray-900 hover:text-gray-900 hover:bg-gray-50 transition"
+                        >
+                          <Plus size={14} />
+                          Add cheque to list
+                        </button>
+
+                        {chequeListError && <ErrorText>{chequeListError}</ErrorText>}
+
+                        <FormGroup>
+                          <Label>Notes (optional)</Label>
+                          <Input
+                            value={paymentNotes}
+                            onChange={(e) => setPaymentNotes(e.target.value)}
+                            placeholder="Reference, remarks, etc."
+                          />
+                        </FormGroup>
+                      </>
+                    )}
+
+                    {paymentError && <ErrorText>{paymentError}</ErrorText>}
+                  </div>
+
+                  <div className="col-span-2 px-5 py-5 bg-gray-50/50 overflow-y-auto space-y-4">
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-900 mb-3">Will apply to</h3>
+                      <PaymentPreviewPane
+                        amount={paymentMethod === "cheque" ? chequeListTotal : parseFloat(paymentAmount) || 0}
+                        loading={previewLoading}
+                        preview={paymentPreview}
+                        currentBalance={payingCustomer.balance_due}
+                      />
+                    </div>
+
+                    {paymentMethod === "cheque" && (
+                      <div className="border border-gray-200 rounded-lg bg-white flex flex-col">
+                        <div className="flex items-baseline justify-between px-3 py-2 border-b border-gray-200">
+                          <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">
+                            Cheques ({chequeList.length})
+                          </p>
+                          {chequeList.length > 0 && (
+                            <p className="text-[11px] text-gray-500">
+                              Total <span className="text-gray-900 font-semibold tabular-nums">Rs. {chequeListTotal.toLocaleString()}</span>
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="px-2 py-2 space-y-2 max-h-[240px] overflow-y-auto">
+                          {chequeList.length === 0 ? (
+                            <p className="text-xs text-gray-400 px-1 py-2 leading-relaxed">
+                              No cheques yet. Fill the fields on the left and click "Add cheque to list".
+                            </p>
+                          ) : (
+                            chequeList.map((c, i) => (
+                              <div
+                                key={i}
+                                className="bg-white rounded-lg border border-gray-200 px-3 py-2.5 hover:border-gray-300 transition"
+                              >
+                                <div className="flex items-baseline justify-between gap-3">
+                                  <p className="text-sm font-medium text-gray-900 truncate">
+                                    {c.payee_name}
+                                  </p>
+                                  <p className="text-sm font-semibold text-gray-900 tabular-nums flex-shrink-0">
+                                    {c.amount.toLocaleString()}/-
+                                  </p>
+                                </div>
+
+                                <div className="flex items-center justify-between gap-3 mt-1.5">
+                                  <div className="flex items-center gap-2 text-[11px] text-gray-500 truncate min-w-0">
+                                    <span className="truncate">#{c.cheque_number}</span>
+                                    <span className="text-gray-300">·</span>
+                                    <span className="truncate">{c.bank_name}</span>
+                                    <span className="text-gray-300">·</span>
+                                    <span className="tabular-nums">{c.cheque_date.slice(0, 10)}</span>
+                                  </div>
+                                  <button
+                                    onClick={() => removeCheque(i)}
+                                    className="text-[11px] text-gray-400 hover:text-red-500 flex-shrink-0"
+                                  >
+                                    Remove
+                                  </button>
+                                </div>
+                              </div>
+                            ))
+                          )}
                         </div>
                       </div>
                     )}
                   </div>
-                )}
-
-                <FormGroup>
-                  <Label>Notes (optional)</Label>
-                  <Input value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} />
-                </FormGroup>
-
-                {paymentError && <ErrorText>{paymentError}</ErrorText>}
-                <div className="flex gap-2 mt-2">
-                  <Button variant="primary" onClick={handleRecordPayment} disabled={paymentSubmitting}>
-                    {paymentSubmitting ? "Recording..." : "Confirm payment"}
-                  </Button>
-                  <Button onClick={() => setPayingCustomer(null)}>Cancel</Button>
                 </div>
-              </div>
+              )}
+            </div>
 
-              <div>
-                <p className="text-xs font-medium text-gray-500 mb-2">How this will apply</p>
-                {previewLoading && <p className="text-xs text-gray-400">Calculating...</p>}
-                {!previewLoading && (!paymentPreview || paymentPreview.allocations.length === 0) && (
-                  <p className="text-xs text-gray-400">Enter an amount to see how it covers their outstanding sales.</p>
-                )}
-                {paymentPreview && paymentPreview.allocations.length > 0 && (
-                  <div className="border border-gray-200 rounded-xl overflow-hidden">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="bg-gray-50">
-                          <th className="text-left px-2.5 py-1.5 font-medium text-gray-400">Invoice</th>
-                          <th className="text-left px-2.5 py-1.5 font-medium text-gray-400">Owed</th>
-                          <th className="text-left px-2.5 py-1.5 font-medium text-gray-400">Applied</th>
-                          <th className="text-left px-2.5 py-1.5 font-medium text-gray-400">New status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {paymentPreview.allocations.map((a) => (
-                          <tr key={a.sale_id} className="border-t border-gray-100">
-                            <td className="px-2.5 py-1.5">{a.invoice}</td>
-                            <td className="px-2.5 py-1.5">Rs. {a.owed_before.toLocaleString()}</td>
-                            <td className="px-2.5 py-1.5">Rs. {a.applied.toLocaleString()}</td>
-                            <td className="px-2.5 py-1.5 capitalize">{a.new_status}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    {paymentPreview.unapplied > 0 && (
-                      <p className="text-xs text-gray-400 px-2.5 py-1.5 border-t border-gray-100">
-                        Rs. {paymentPreview.unapplied.toLocaleString()} left over after covering everything outstanding.
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
+            <div className="px-6 py-3 border-t border-gray-100 flex justify-end gap-2 flex-shrink-0 bg-white">
+              <Button onClick={() => setPayingCustomer(null)}>Cancel</Button>
+              {paymentStep === 2 && (
+                <Button
+                  variant="primary"
+                  onClick={handleRecordPayment}
+                  disabled={paymentSubmitting}
+                >
+                  {paymentSubmitting ? "Recording..." : "Confirm payment"}
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -1186,27 +1633,25 @@ export default function ViewCustomersPage() {
             <div className="p-5">
               <p className="text-xs text-gray-400 mb-3">Send a receipt to {receiptAfterPayment.name}? Review it before sending.</p>
               <p className="text-sm text-gray-700 bg-gray-50 rounded-xl p-3 mb-4 whitespace-pre-wrap">{receiptAfterPayment.message}</p>
-              <div className="flex gap-2">
-                {receiptAfterPayment.phone ? (
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => setReceiptAfterPayment(null)}
+                  className="border border-gray-200 rounded-xl py-2.5 px-4 text-sm font-medium hover:bg-gray-50 transition"
+                >
+                  Skip
+                </button>
+                {receiptAfterPayment.phone && (
                   <a
                     href={whatsappMessageLink(receiptAfterPayment.phone, receiptAfterPayment.message)}
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={() => setReceiptAfterPayment(null)}
-                    className="flex-1 bg-black text-white rounded-xl py-2.5 text-sm font-medium hover:bg-gray-800 transition text-center inline-flex items-center justify-center gap-1.5"
+                    className="bg-black text-white rounded-xl py-2.5 px-4 text-sm font-medium hover:bg-gray-800 transition inline-flex items-center justify-center gap-1.5"
                   >
                     <MessageCircle size={15} />
                     Open in WhatsApp
                   </a>
-                ) : (
-                  <p className="text-xs text-gray-400 flex-1">No phone number on file for this customer.</p>
                 )}
-                <button
-                  onClick={() => setReceiptAfterPayment(null)}
-                  className="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-medium hover:bg-gray-50 transition"
-                >
-                  Skip
-                </button>
               </div>
             </div>
           </div>
@@ -1232,11 +1677,11 @@ export default function ViewCustomersPage() {
                 <Input value={suspendReason} onChange={(e) => setSuspendReason(e.target.value)} placeholder="Why are they being suspended?" />
               </FormGroup>
               {suspendError && <ErrorText>{suspendError}</ErrorText>}
-              <div className="flex gap-2 mt-2">
+              <div className="flex justify-end gap-2 mt-2">
+                <Button onClick={() => setSuspendTarget(null)}>Cancel</Button>
                 <Button variant="primary" onClick={handleSuspend} disabled={suspendSubmitting}>
                   {suspendSubmitting ? "Suspending..." : "Suspend"}
                 </Button>
-                <Button onClick={() => setSuspendTarget(null)}>Cancel</Button>
               </div>
             </div>
           </div>
@@ -1262,11 +1707,11 @@ export default function ViewCustomersPage() {
                 />
               </FormGroup>
               {reactivateError && <ErrorText>{reactivateError}</ErrorText>}
-              <div className="flex gap-2 mt-2">
+              <div className="flex justify-end gap-2 mt-2">
+                <Button onClick={() => setReactivateTarget(null)}>Cancel</Button>
                 <Button variant="primary" onClick={handleReactivate} disabled={reactivateSubmitting}>
                   {reactivateSubmitting ? "Reactivating..." : "Reactivate"}
                 </Button>
-                <Button onClick={() => setReactivateTarget(null)}>Cancel</Button>
               </div>
             </div>
           </div>
@@ -1300,10 +1745,7 @@ export default function ViewCustomersPage() {
                 </p>
               )}
               {deleteError && <ErrorText>{deleteError}</ErrorText>}
-              <div className="flex gap-2">
-                <Button variant="danger" onClick={() => handleDelete(deleteWarning !== null)} disabled={deleteSubmitting}>
-                  {deleteSubmitting ? "Deleting..." : deleteWarning ? "Delete permanently anyway" : "Delete"}
-                </Button>
+              <div className="flex justify-end gap-2">
                 <Button
                   onClick={() => {
                     setDeleteTarget(null);
@@ -1311,6 +1753,9 @@ export default function ViewCustomersPage() {
                   }}
                 >
                   Cancel
+                </Button>
+                <Button variant="danger" onClick={() => handleDelete(deleteWarning !== null)} disabled={deleteSubmitting}>
+                  {deleteSubmitting ? "Deleting..." : deleteWarning ? "Delete permanently anyway" : "Delete"}
                 </Button>
               </div>
             </div>

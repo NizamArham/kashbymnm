@@ -30,7 +30,7 @@ const productInput = z.object({
   image_path: z.string().optional(),
   is_public: z.boolean().optional(),
   allow_returns: z.boolean().optional(),
-  product_type: z.enum(["FO", "OG", "OR", "OP"]).default("OG"),
+  product_type: z.enum(["FO", "OG", "OR", "OP", "IM"]).default("OG"),
 });
 
 // qty = live count of this product's available inventory rows
@@ -194,36 +194,45 @@ productsRouter.put(
 productsRouter.delete(
   "/:id",
   asyncHandler(async (req, res) => {
-    const existing = db.prepare(`SELECT * FROM products WHERE id = ?`).get(req.params.id);
-    if (!existing) throw new ApiError(404, "Product not found");
+    const product = db.prepare(`SELECT * FROM products WHERE id = ?`).get(req.params.id) as any;
+    if (!product) throw new ApiError(404, "Product not found");
 
-    const hasInventory = db
-      .prepare(`SELECT COUNT(*) as cnt FROM inventory WHERE product_id = ?`)
-      .get(req.params.id) as { cnt: number };
+    // A confirmed, deliberate hard delete — the owner's own explicit
+    // instruction: inventory and sales history no longer block this.
+    // Purchase history is kept (never deleted), but detached via a
+    // snapshot so it survives the product itself being gone. This is
+    // NOT the same as the customer-deletion "warn then confirm" flow —
+    // here the caller has already made the call, so this goes straight
+    // through in one transaction.
+    const runDelete = db.transaction(() => {
+      // Snapshot this product's info onto every purchase_items row that
+      // references it — real purchase/spend history, explicitly kept
+      // per the owner's instruction, just no longer linked to a live
+      // product row once this is done.
+      const snapshot = `${product.product_title}${product.brand ? ` (${product.brand})` : ""}`;
+      db.prepare(`UPDATE purchase_items SET product_snapshot = ? WHERE product_id = ?`).run(snapshot, req.params.id);
+      db.prepare(`UPDATE purchase_items SET product_id = NULL WHERE product_id = ?`).run(req.params.id);
 
-    if (hasInventory.cnt > 0) {
-      throw new ApiError(
-        409,
-        "Cannot delete a product that has inventory units. Remove or reassign inventory first."
-      );
-    }
+      // Every inventory unit under this product — for any that were
+      // ever sold, snapshot enough onto the sale_item first (with its
+      // actual size/color, since a sale can span several variants of
+      // the same product) so the original receipt still reads
+      // correctly once the unit itself is gone.
+      const units = db.prepare(`SELECT * FROM inventory WHERE product_id = ?`).all(req.params.id) as any[];
+      for (const unit of units) {
+        const variantSnapshot = `${product.product_title}${unit.color || unit.size ? ` — ${[unit.color, unit.size].filter(Boolean).join(" / ")}` : ""}`;
+        db.prepare(`UPDATE sale_items SET product_snapshot = ? WHERE inventory_id = ?`).run(variantSnapshot, unit.id);
+      }
 
-    // Also require zero purchase history — a product could have no
-    // CURRENT inventory (units all sold/removed) but still have real
-    // purchase_items rows, which is genuine business history, not a
-    // clean mistake safe to erase.
-    const hasPurchaseHistory = db
-      .prepare(`SELECT COUNT(*) as cnt FROM purchase_items WHERE product_id = ?`)
-      .get(req.params.id) as { cnt: number };
+      // Now safe to delete every unit — sale_items.inventory_id cascades
+      // to NULL automatically (ON DELETE SET NULL), same for any
+      // return/exchange records still pointing at these units.
+      db.prepare(`DELETE FROM inventory WHERE product_id = ?`).run(req.params.id);
 
-    if (hasPurchaseHistory.cnt > 0) {
-      throw new ApiError(
-        409,
-        "Cannot delete a product with purchase history. Only a product that was never restocked or sold can be deleted."
-      );
-    }
+      db.prepare(`DELETE FROM products WHERE id = ?`).run(req.params.id);
+    });
 
-    db.prepare(`DELETE FROM products WHERE id = ?`).run(req.params.id);
+    runDelete();
     res.status(204).send();
   })
 );

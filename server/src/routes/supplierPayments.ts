@@ -182,8 +182,26 @@ supplierPaymentsRouter.get(
     if (!supplier) throw new ApiError(404, "Supplier not found");
 
     const purchases = db
-      .prepare(`SELECT id, purchase_code, purchase_date, total_cost FROM purchases WHERE supplier_id = ? ORDER BY purchase_date`)
+      .prepare(`SELECT id, purchase_code, purchase_date, total_cost, amount_paid FROM purchases WHERE supplier_id = ? ORDER BY purchase_date`)
       .all(req.params.supplierId) as any[];
+    // For each purchase, how much of its amount_paid is ALREADY
+    // reflected in a separate supplier_payments row tied to it — since
+    // amount_paid is kept as a running SUM of exactly those rows
+    // whenever a payment is linked to a purchase (see the payment
+    // recording endpoint above). Only the REMAINDER — money that was
+    // set directly on the purchase with no linked payment row at all,
+    // e.g. opening stock's amount_paid = total_cost at import — should
+    // be netted into the purchase's own ledger entry. Otherwise a
+    // linked payment would be counted twice: once folded into the
+    // purchase, and again as its own line further down.
+    const linkedPaymentTotals = db
+      .prepare(
+        `SELECT purchase_id, COALESCE(SUM(amount), 0) as total FROM supplier_payments
+         WHERE purchase_id IN (SELECT id FROM purchases WHERE supplier_id = ?)
+         GROUP BY purchase_id`
+      )
+      .all(req.params.supplierId) as { purchase_id: number; total: number }[];
+    const linkedPaymentByPurchase = new Map(linkedPaymentTotals.map((row) => [row.purchase_id, row.total]));
     const payments = db
       .prepare(`SELECT id, payment_date, amount, method, purchase_id FROM supplier_payments WHERE supplier_id = ? ORDER BY payment_date`)
       .all(req.params.supplierId) as any[];
@@ -192,19 +210,45 @@ supplierPaymentsRouter.get(
         `SELECT id, created_at, amount, reason, notes FROM supplier_credit_transactions WHERE supplier_id = ? ORDER BY created_at`
       )
       .all(req.params.supplierId) as any[];
+    // Shown purely as a record of what happened — never double-counted
+    // toward the balance, since a cash_refund never touches what's
+    // owed (it's a straight cash-in-hand transaction, recorded only in
+    // the cash book) and a supplier_credit resolution is already
+    // reflected above via its own supplier_credit_transactions row.
+    const returns = db
+      .prepare(
+        `SELECT id, created_at, total_amount, resolution, reason FROM purchase_returns WHERE supplier_id = ? ORDER BY created_at`
+      )
+      .all(req.params.supplierId) as any[];
 
     // Merge all three into one timeline, each entry tagged with its type
     // and the amount's effect on balance (+owed for a purchase, -owed
-    // for a payment or credit).
-    type LedgerEntry = { date: string; type: "purchase" | "payment" | "credit"; label: string; amount: number; effect: number };
+    // for a payment; a credit's effect is its own signed amount, since
+    // a grant reduces what's owed and a spend-down against a purchase
+    // increases it back — mirroring the exact real balance formula used
+    // everywhere else (purchases - payments - credit_transactions), so
+    // this ledger's running balance always reconciles with it.
+    type LedgerEntry = { date: string; type: "purchase" | "payment" | "credit" | "return"; label: string; amount: number; effect: number };
     const entries: LedgerEntry[] = [
-      ...purchases.map((p) => ({
-        date: p.purchase_date,
-        type: "purchase" as const,
-        label: `Purchase ${p.purchase_code}`,
-        amount: p.total_cost,
-        effect: p.total_cost,
-      })),
+      ...purchases.map((p) => {
+        // Only the portion of amount_paid NOT already covered by a
+        // linked supplier_payments row belongs on the purchase's own
+        // line — that linked portion gets its own entry further down
+        // (in the payments list) and must not be counted here too.
+        const linkedAlready = linkedPaymentByPurchase.get(p.id) ?? 0;
+        const unlinkedPaid = Math.max(0, (p.amount_paid || 0) - linkedAlready);
+        const netOwed = p.total_cost - unlinkedPaid;
+        const wasPrepaid = unlinkedPaid > 0;
+        return {
+          date: p.purchase_date,
+          type: "purchase" as const,
+          label: `Purchase ${p.purchase_code}${
+            wasPrepaid ? (netOwed <= 0 ? " (paid in full at purchase)" : ` (Rs. ${unlinkedPaid.toLocaleString()} paid at purchase)`) : ""
+          }`,
+          amount: Math.abs(netOwed),
+          effect: netOwed,
+        };
+      }),
       ...payments.map((p) => ({
         date: p.payment_date,
         type: "payment" as const,
@@ -212,15 +256,27 @@ supplierPaymentsRouter.get(
         amount: p.amount,
         effect: -p.amount,
       })),
-      ...credits
-        .filter((c) => c.amount > 0) // only show credit GRANTS here, not the internal "applied to purchase" spend-down entries
-        .map((c) => ({
-          date: c.created_at,
-          type: "credit" as const,
-          label: c.notes || "Credit from return",
-          amount: c.amount,
-          effect: -c.amount,
-        })),
+      ...credits.map((c) => ({
+        date: c.created_at,
+        type: "credit" as const,
+        label:
+          c.amount > 0
+            ? c.notes || "Credit from return"
+            : `Credit applied${c.notes ? ` — ${c.notes}` : ""}`,
+        amount: Math.abs(c.amount),
+        effect: -c.amount,
+      })),
+      ...returns.map((r) => ({
+        date: r.created_at,
+        type: "return" as const,
+        label: `Return (${r.resolution === "cash_refund" ? "cash refund" : "credited"})${r.reason ? ` — ${r.reason}` : ""}`,
+        amount: r.total_amount,
+        // Zero effect — never double-counted. A cash_refund is settled
+        // straight to the cash book, outside the supplier balance
+        // entirely; a supplier_credit resolution already appears as
+        // its own "credit" entry above.
+        effect: 0,
+      })),
     ].sort((a, b) => a.date.localeCompare(b.date));
 
     let runningBalance = 0;

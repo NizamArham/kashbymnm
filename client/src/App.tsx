@@ -9,6 +9,10 @@ import InventoryPage from "./pages/InventoryPage";
 import AddProductPage from "./pages/AddProductPage";
 import ManageProductsPage from "./pages/ManageProductsPage";
 import AddCustomerPage from "./pages/AddCustomerPage";
+import CustomerOrderHistoryPage from "./pages/CustomerOrderHistoryPage";
+import CustomerPaymentHistoryPage from "./pages/CustomerPaymentHistoryPage";
+import WaybillGeneratorPage from "./pages/WaybillGeneratorPage";
+import SupplierPaymentHistoryPage from "./pages/SupplierPaymentHistoryPage";
 import ViewCustomersPage from "./pages/ViewCustomersPage";
 import PosPage from "./pages/PosPage";
 import SaleHistoryPage from "./pages/SaleHistoryPage";
@@ -21,6 +25,7 @@ import CashBookPage from "./pages/CashBookPage";
 import ProfilePage from "./pages/ProfilePage";
 import AttendancePage from "./pages/AttendancePage";
 import StaffPage from "./pages/StaffPage";
+import AddStaffPage from "./pages/AddStaffPage";
 import SupplierPaymentsPage from "./pages/SupplierPaymentsPage";
 import ChequesPage from "./pages/ChequesPage";
 import CouriersPage from "./pages/CourierReconciliationPage";
@@ -68,12 +73,22 @@ export default function App() {
         />
 
         <Route path="/customers/add" element={<AddCustomerPage />} />
+        <Route path="/customers/:id/orders" element={<CustomerOrderHistoryPage />} />
+        <Route path="/customers/:id/payment-history" element={<CustomerPaymentHistoryPage />} />
         <Route path="/customers" element={<ViewCustomersPage />} />
         <Route
           path="/staff"
           element={
             <ProtectedRoute adminOnly>
               <StaffPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/staff/add"
+          element={
+            <ProtectedRoute adminOnly>
+              <AddStaffPage />
             </ProtectedRoute>
           }
         />
@@ -86,6 +101,14 @@ export default function App() {
           element={
             <ProtectedRoute adminOnly>
               <SuppliersPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/suppliers/:id/payment-history"
+          element={
+            <ProtectedRoute adminOnly>
+              <SupplierPaymentHistoryPage />
             </ProtectedRoute>
           }
         />
@@ -122,6 +145,7 @@ export default function App() {
           }
         />
         <Route path="/deliveries" element={<DeliveriesPage />} />
+        <Route path="/waybill-generator" element={<WaybillGeneratorPage />} />
         <Route
           path="/couriers"
           element={

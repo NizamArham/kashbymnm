@@ -34,14 +34,15 @@ const decisionInput = z.object({
 const REQUEST_SELECT = `
   SELECT return_requests.*, sale_items.sale_id, sale_items.unit_price, sale_items.quantity as item_quantity,
          sales.invoice, sales.customer_id, sales.deleted_customer_snapshot, customers.name as customer_name,
-         inventory.sku, products.product_title, products.allow_returns,
+         inventory.sku, COALESCE(products.product_title, sale_items.product_snapshot) as product_title,
+         COALESCE(products.allow_returns, 0) as allow_returns,
          requester.name as requested_by_name, decider.name as decided_by_name
   FROM return_requests
   JOIN sale_items ON sale_items.id = return_requests.sale_item_id
   JOIN sales ON sales.id = sale_items.sale_id
   LEFT JOIN customers ON customers.id = sales.customer_id
-  JOIN inventory ON inventory.id = sale_items.inventory_id
-  JOIN products ON products.id = inventory.product_id
+  LEFT JOIN inventory ON inventory.id = sale_items.inventory_id
+  LEFT JOIN products ON products.id = inventory.product_id
   LEFT JOIN users requester ON requester.id = return_requests.requested_by
   LEFT JOIN users decider ON decider.id = return_requests.decided_by
 `;
@@ -85,6 +86,13 @@ returnsRouter.post(
       )
       .get(data.sale_item_id) as any;
 
+    // A deliberately unmodified inner join: if the product behind this
+    // sale item has since been deleted, there's no live product to
+    // return the unit to and no allow_returns to check — this correctly
+    // falls through to "Sale item not found" below rather than letting
+    // a new return request get submitted against something that no
+    // longer exists. Existing/historical return records are unaffected
+    // (see REQUEST_SELECT above, which uses LEFT JOIN for display).
     if (!saleItem) throw new ApiError(404, "Sale item not found");
 
     const alreadyHandled = db

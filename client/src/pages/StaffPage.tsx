@@ -1,6 +1,6 @@
 import { useState, useEffect, FormEvent, Fragment, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { BriefcaseBusiness, CalendarDays, DollarSign, Landmark, Pencil, Phone, Plus, Search, ShieldCheck, UserRound } from "lucide-react";
+import { Pencil, Plus, Search } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { api, ApiRequestError } from "../lib/api";
 import { StaffMember } from "../lib/types";
@@ -32,24 +32,6 @@ export default function StaffPage() {
   const [editForm, setEditForm] = useState<Record<string, string>>({});
   const [editError, setEditError] = useState<string | null>(null);
   const [editSuccess, setEditSuccess] = useState<string | null>(null);
-
-  const [showCreate, setShowCreate] = useState(false);
-  const [newUsername, setNewUsername] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [newName, setNewName] = useState("");
-  const [newRole, setNewRole] = useState<"admin" | "staff">("staff");
-  const [newJobTitle, setNewJobTitle] = useState("");
-  const [newJoinedDate, setNewJoinedDate] = useState("");
-  const [newNic, setNewNic] = useState("");
-  const [newPhone, setNewPhone] = useState("");
-  const [newAddress, setNewAddress] = useState("");
-  const [newSalary, setNewSalary] = useState("");
-  const [newBankName, setNewBankName] = useState("");
-  const [newBankAccountNo, setNewBankAccountNo] = useState("");
-  const [newBankAccountName, setNewBankAccountName] = useState("");
-  const [newReportsTo, setNewReportsTo] = useState("");
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [createSuccess, setCreateSuccess] = useState<string | null>(null);
 
   async function load() {
     try {
@@ -135,54 +117,6 @@ export default function StaffPage() {
     }
   }
 
-  async function handleCreateUser(e: FormEvent) {
-    e.preventDefault();
-    setCreateError(null);
-    setCreateSuccess(null);
-
-    if (newUsername.length < 3 || newPassword.length < 6) {
-      setCreateError("Username needs 3+ characters and password needs 6+ characters");
-      return;
-    }
-
-    try {
-      await api.post("/auth/users", {
-        username: newUsername.trim(),
-        password: newPassword,
-        role: newRole,
-        name: newName.trim() || undefined,
-        job_title: newJobTitle || undefined,
-        joined_date: newJoinedDate || undefined,
-        nic: newNic.trim() || undefined,
-        phone: newPhone.trim() || undefined,
-        address: newAddress.trim() || undefined,
-        salary: newSalary ? parseFloat(newSalary) : undefined,
-        bank_name: newBankName.trim() || undefined,
-        bank_account_no: newBankAccountNo.trim() || undefined,
-        bank_account_name: newBankAccountName.trim() || undefined,
-        reports_to: newReportsTo ? parseInt(newReportsTo, 10) : undefined,
-      });
-      setCreateSuccess(`Account "${newUsername}" created.`);
-      setNewUsername("");
-      setNewPassword("");
-      setNewName("");
-      setNewJobTitle("");
-      setNewJoinedDate("");
-      setNewNic("");
-      setNewPhone("");
-      setNewAddress("");
-      setNewSalary("");
-      setNewBankName("");
-      setNewBankAccountNo("");
-      setNewBankAccountName("");
-      setNewReportsTo("");
-      setShowCreate(false);
-      load();
-    } catch (err) {
-      setCreateError(err instanceof ApiRequestError ? err.message : "Failed to create account");
-    }
-  }
-
   return (
     <div>
       <PageHeader
@@ -195,140 +129,6 @@ export default function StaffPage() {
           </Button>
         }
       />
-
-      {showCreate && <div className="grid grid-cols-1 lg:grid-cols-[1.5fr_1fr] gap-5 mb-5">
-        <Card>
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h2 className="text-base font-semibold text-gray-900">Staff & HR</h2>
-            <p className="text-xs text-gray-400">Create logins, assign roles, and manage employment details.</p>
-          </div>
-        </div>
-
-        {showCreate && (
-          <form onSubmit={handleCreateUser} className="border border-gray-200 rounded-xl p-4 mb-4">
-            <div className="grid grid-cols-2 gap-3">
-              <FormGroup>
-                <Label>Username</Label>
-                <Input value={newUsername} onChange={(e) => setNewUsername(e.target.value)} />
-              </FormGroup>
-              <FormGroup>
-                <Label>Password</Label>
-                <Input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
-              </FormGroup>
-              <FormGroup>
-                <Label>Display name</Label>
-                <Input value={newName} onChange={(e) => setNewName(e.target.value)} />
-              </FormGroup>
-              <FormGroup>
-                <Label>System role (permissions)</Label>
-                <Dropdown
-                  value={newRole}
-                  onChange={(value) => setNewRole(value as "admin" | "staff")}
-                  options={[{ value: "staff", label: "Staff" }, { value: "admin", label: "Admin" }]}
-                />
-              </FormGroup>
-              <FormGroup>
-                <Label>Job title</Label>
-                <Dropdown value={newJobTitle} onChange={setNewJobTitle} placeholder="— Select —" options={JOB_TITLES.map((t) => ({ value: t, label: t }))} />
-              </FormGroup>
-              <FormGroup>
-                <Label>Joined date</Label>
-                <DatePicker value={newJoinedDate} onChange={setNewJoinedDate} />
-              </FormGroup>
-              <FormGroup>
-                <Label>NIC</Label>
-                <Input value={newNic} onChange={(e) => setNewNic(e.target.value)} />
-              </FormGroup>
-              <FormGroup>
-                <Label>Phone</Label>
-                <Input value={newPhone} onChange={(e) => setNewPhone(e.target.value)} />
-              </FormGroup>
-              <FormGroup>
-                <Label>Reports to</Label>
-                <Dropdown
-                  value={newReportsTo}
-                  onChange={setNewReportsTo}
-                  placeholder="— None —"
-                  options={staffList.filter((s) => s.id !== user?.id).map((s) => ({ value: String(s.id), label: s.name ?? s.username }))}
-                />
-              </FormGroup>
-              <FormGroup>
-                <Label>Salary (Rs.)</Label>
-                <Input type="number" min="0" value={newSalary} onChange={(e) => setNewSalary(e.target.value)} />
-              </FormGroup>
-            </div>
-            <FormGroup>
-              <Label>Address</Label>
-              <Input value={newAddress} onChange={(e) => setNewAddress(e.target.value)} />
-            </FormGroup>
-            <div className="grid grid-cols-3 gap-3">
-              <FormGroup>
-                <Label>Bank name</Label>
-                <Input value={newBankName} onChange={(e) => setNewBankName(e.target.value)} />
-              </FormGroup>
-              <FormGroup>
-                <Label>Account number</Label>
-                <Input value={newBankAccountNo} onChange={(e) => setNewBankAccountNo(e.target.value)} />
-              </FormGroup>
-              <FormGroup>
-                <Label>Account name</Label>
-                <Input value={newBankAccountName} onChange={(e) => setNewBankAccountName(e.target.value)} />
-              </FormGroup>
-            </div>
-            {createError && <ErrorText>{createError}</ErrorText>}
-            {createSuccess && <SuccessText>{createSuccess}</SuccessText>}
-            <div className="flex gap-2 mt-2">
-              <Button type="submit" variant="primary">
-                Create login
-              </Button>
-            </div>
-          </form>
-        )}
-
-        </Card>
-
-        <Card className="h-fit lg:sticky lg:top-6">
-          <h2 className="text-base font-semibold text-gray-900 mb-4 flex items-center gap-2">
-            <UserRound size={18} className="text-gray-600" />
-            Staff Preview
-          </h2>
-          <div className="mb-4 pb-4 border-b border-gray-100">
-            <p className="text-lg font-semibold text-gray-900">{newName.trim() || "New staff member"}</p>
-            <p className="text-xs text-gray-400 mt-1">Preview updates as you type</p>
-          </div>
-          <div className="space-y-3 text-sm">
-            <div className="flex items-center gap-2">
-              <UserRound size={15} className="text-gray-400" />
-              <span className="text-gray-700">@{newUsername.trim() || "username"}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <ShieldCheck size={15} className="text-gray-400" />
-              <span className="text-gray-700 capitalize">{newRole} account</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <BriefcaseBusiness size={15} className="text-gray-400" />
-              <span className="text-gray-700">{newJobTitle || "No job title selected"}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Phone size={15} className="text-gray-400" />
-              <span className="text-gray-700">{newPhone.trim() || "No phone added"}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <CalendarDays size={15} className="text-gray-400" />
-              <span className="text-gray-700">{newJoinedDate || "No joining date"}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <DollarSign size={15} className="text-gray-400" />
-              <span className="text-gray-700">{newSalary ? `Rs. ${parseFloat(newSalary).toLocaleString()}` : "No salary added"}</span>
-            </div>
-            <div className="flex items-start gap-2">
-              <Landmark size={15} className="text-gray-400 mt-0.5" />
-              <span className="text-gray-700">{newBankName.trim() || "No bank details added"}</span>
-            </div>
-          </div>
-        </Card>
-      </div>}
 
       <Card className="p-0 overflow-hidden">
         <div className="border-b border-gray-100 p-3">

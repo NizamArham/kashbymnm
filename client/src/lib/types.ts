@@ -94,7 +94,7 @@ export interface Product {
   image_path: string | null;
   is_public: number;
   allow_returns: number;
-  product_type: "FO" | "OG" | "OR" | "OP";
+  product_type: "FO" | "OG" | "OR" | "OP" | "IM";
   qty: number;
   created_at: string;
 }
@@ -390,7 +390,7 @@ export interface PendingPurchaseLine {
   fulfilled_quantity: number;
   is_fulfilled: number;
   fulfilled_purchase_item_id: number | null;
-  product_type: "FO" | "OG" | "OR" | "OP";
+  product_type: "FO" | "OG" | "OR" | "OP" | "IM";
 }
 
 export interface PurchaseExpense {

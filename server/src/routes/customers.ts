@@ -445,11 +445,99 @@ customersRouter.get(
   })
 );
 
-// GET /api/customers/:id/credit-breakdown — the individual usable
-// credit grants behind a customer's store_credit_balance, each with its
-// TRUE remaining amount and its own expiry (or none, for permanent
-// overpayment credit). Used for the detailed "+1000, +490 (expires in
-// 12 days)" display rather than the flat total shown in the list.
+// GET /api/customers/:id/payment-history — a single customer's full
+// running ledger: every sale (increases what they owe), every payment
+// received (cash/bank/other via cash_book, or a cheque via
+// cheque_receipts — never both for the same event, since a cheque never
+// creates a cash_book entry until it clears), and every store credit
+// grant/spend — merged into one chronological timeline with a running
+// balance, mirroring the supplier ledger's design exactly.
+//
+// IMPORTANT: a sale's own line always shows its FULL total as new debt,
+// never netted against its current amount_paid — amount_paid is a live,
+// mutable field that later payments update directly (see
+// computeFifoAllocation), so netting it into the sale's own line would
+// double-count every payment that ever reduced it: once folded into the
+// sale, and again as that payment's own separate line below. This is
+// the exact bug the supplier ledger had — fixed there by never treating
+// a mutable running total as if it were a fixed value at creation time.
+customersRouter.get(
+  "/:id/payment-history",
+  asyncHandler(async (req, res) => {
+    const customer = db.prepare(`SELECT * FROM customers WHERE id = ?`).get(req.params.id) as any;
+    if (!customer) throw new ApiError(404, "Customer not found");
+
+    const sales = db
+      .prepare(`SELECT id, invoice, date, total FROM sales WHERE customer_id = ? AND is_voided = 0 ORDER BY date`)
+      .all(req.params.id) as any[];
+    const payments = db
+      .prepare(
+        `SELECT id, entry_date, amount, payment_method, notes FROM cash_book
+         WHERE category = 'customer_payment' AND reference_id = ? ORDER BY entry_date`
+      )
+      .all(req.params.id) as any[];
+    const cheques = db
+      .prepare(
+        `SELECT id, date_received, amount, cheque_number, bank_name, status FROM cheque_receipts
+         WHERE customer_id = ? ORDER BY date_received`
+      )
+      .all(req.params.id) as any[];
+    const credits = db
+      .prepare(
+        `SELECT id, created_at, amount, reason, notes FROM store_credit_transactions WHERE customer_id = ? ORDER BY created_at`
+      )
+      .all(req.params.id) as any[];
+
+    type LedgerEntry = { date: string; type: "sale" | "payment" | "cheque" | "credit"; label: string; amount: number; effect: number };
+    const entries: LedgerEntry[] = [
+      ...sales.map((s) => ({
+        date: s.date,
+        type: "sale" as const,
+        label: `Sale ${s.invoice}`,
+        amount: s.total,
+        effect: s.total,
+      })),
+      ...payments.map((p) => ({
+        date: p.entry_date,
+        type: "payment" as const,
+        label: `Payment${p.payment_method ? ` (${p.payment_method})` : ""}`,
+        amount: p.amount,
+        effect: -p.amount,
+      })),
+      // A cheque still in_hand or otherwise not yet cleared/bounced is
+      // shown as settling the balance right away — matching the app's
+      // own design (a received cheque marks the sale paid immediately,
+      // real cash_book impact happens later when it clears). A bounced
+      // cheque already reversed its own sale allocations elsewhere, so
+      // showing it here too would double-reverse — excluded entirely.
+      ...cheques
+        .filter((c) => c.status !== "bounced")
+        .map((c) => ({
+          date: c.date_received,
+          type: "cheque" as const,
+          label: `Cheque #${c.cheque_number} (${c.bank_name})`,
+          amount: c.amount,
+          effect: -c.amount,
+        })),
+      ...credits.map((c) => ({
+        date: c.created_at,
+        type: "credit" as const,
+        label: c.amount > 0 ? c.notes || "Store credit granted" : `Credit applied${c.notes ? ` — ${c.notes}` : ""}`,
+        amount: Math.abs(c.amount),
+        effect: -c.amount,
+      })),
+    ].sort((a, b) => a.date.localeCompare(b.date));
+
+    let runningBalance = 0;
+    const withBalance = entries.map((entry) => {
+      runningBalance += entry.effect;
+      return { ...entry, running_balance: runningBalance };
+    });
+
+    res.json({ customer, entries: withBalance, final_balance: runningBalance });
+  })
+);
+
 customersRouter.get(
   "/:id/credit-breakdown",
   asyncHandler(async (req, res) => {

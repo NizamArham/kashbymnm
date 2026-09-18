@@ -25,7 +25,7 @@ interface DraftLine {
   description: string;
   quantity: string;
   unit_cost: string;
-  product_type: "FO" | "OG" | "OR" | "OP";
+  product_type: "FO" | "OG" | "OR" | "OP" | "IM";
 }
 
 interface DraftExpense {
@@ -394,6 +394,7 @@ export default function PurchasesPage() {
                       { value: "OG", label: "OG — Original" },
                       { value: "OR", label: "OR — Overrun" },
                       { value: "OP", label: "OP — Own Production" },
+                      { value: "IM", label: "IM — Imported" },
                     ]}
                   />
                 </div>

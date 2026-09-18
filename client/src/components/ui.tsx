@@ -256,8 +256,8 @@ export function Table({ children }: { children: ReactNode }) {
   );
 }
 
-export function Th({ children }: { children: ReactNode }) {
-  return <th className="text-left px-3 py-2.5 text-xs font-medium text-gray-400 border-b border-gray-100">{children}</th>;
+export function Th({ children, className = "" }: { children: ReactNode; className?: string }) {
+  return <th className={`text-left px-3 py-2.5 text-xs font-medium text-gray-400 border-b border-gray-100 ${className}`}>{children}</th>;
 }
 
 export function Td({ children, colSpan, className = "" }: { children: ReactNode; colSpan?: number; className?: string }) {

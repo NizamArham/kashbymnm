@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useRef, Fragment } from "react";
-import { Search, Package, RefreshCw, Loader2, CheckCircle2, ChevronDown, ChevronRight } from "lucide-react";
+import { Search, Package, RefreshCw, Loader2, CheckCircle2, ChevronDown, ChevronRight, Filter } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { InventoryUnit } from "../lib/types";
 import { useAuth } from "../context/AuthContext";
@@ -143,6 +143,10 @@ export default function InventoryPage() {
       });
     }
 
+    // Size is the primary axis (small → large); color is the tiebreaker
+    // within each size, so all "M" rows cluster together regardless of
+    // color, in alphabetical color order. Matches how you'd physically
+    // scan a rack: one size at a time, all its colors together.
     return summaries.sort((a, b) => {
       const sizeCompare = compareSizes(a.size, b.size);
       if (sizeCompare !== 0) return sizeCompare;
@@ -234,61 +238,91 @@ export default function InventoryPage() {
         }
       />
 
-      <Card className="mb-6">
-        <div className="relative" ref={searchBoxRef}>
-          <div className="relative">
-            <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-              <Search size={16} className="text-gray-400" />
+      <Card className="mb-5">
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="relative flex-1 min-w-[240px]" ref={searchBoxRef}>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                <Search size={16} className="text-gray-400" />
+              </div>
+              <Input
+                className="pl-10"
+                placeholder="Scan a barcode, or type a SKU / product name..."
+                value={query}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setSuggestionsOpen(true);
+                }}
+                onFocus={() => query && setSuggestionsOpen(true)}
+                autoFocus
+              />
+              {query && (
+                <button onClick={clearSearch} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 hover:text-gray-600">
+                  Clear
+                </button>
+              )}
             </div>
-            <Input
-              className="pl-10"
-              placeholder="Scan a barcode, or type a SKU / product name to check availability..."
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                setSuggestionsOpen(true);
-              }}
-              onFocus={() => query && setSuggestionsOpen(true)}
-              autoFocus
-            />
-            {query && (
-              <button onClick={clearSearch} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 hover:text-gray-600">
-                Clear
-              </button>
+
+            {/* Floating suggestion dropdown — only for a text search still
+                narrowing toward a product, not shown once there's an exact
+                barcode/SKU match (that gets the dedicated card below instead). */}
+            {suggestionsOpen && !exactUnit && trimmedQuery && (
+              <div className="absolute z-20 mt-1.5 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-72 overflow-y-auto">
+                {liveMatches.length === 0 ? (
+                  <p className="text-xs text-gray-400 px-3.5 py-3">No matches yet for "{query}".</p>
+                ) : (
+                  <>
+                    {liveMatches.slice(0, 8).map((u) => (
+                      <button
+                        key={u.id}
+                        onClick={() => selectSuggestion(u)}
+                        className="w-full flex items-center justify-between gap-3 px-3.5 py-2.5 text-left hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-0"
+                      >
+                        <div>
+                          <span className="text-sm text-gray-900">{u.product_title}</span>
+                          <span className="text-xs text-gray-400 ml-2">
+                            {u.color ?? "—"} / {u.size ?? "—"} · {u.sku}
+                          </span>
+                        </div>
+                        <Badge label={u.status} tone={inventoryStatusTone(u.status)} />
+                      </button>
+                    ))}
+                    {liveMatches.length > 8 && (
+                      <div className="px-3.5 py-2 text-xs text-gray-400 bg-gray-50">+{liveMatches.length - 8} more — keep typing to narrow down</div>
+                    )}
+                  </>
+                )}
+              </div>
             )}
           </div>
 
-          {/* Floating suggestion dropdown — only for a text search still
-              narrowing toward a product, not shown once there's an exact
-              barcode/SKU match (that gets the dedicated card below instead). */}
-          {suggestionsOpen && !exactUnit && trimmedQuery && (
-            <div className="absolute z-20 mt-1.5 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-72 overflow-y-auto">
-              {liveMatches.length === 0 ? (
-                <p className="text-xs text-gray-400 px-3.5 py-3">No matches yet for "{query}".</p>
-              ) : (
-                <>
-                  {liveMatches.slice(0, 8).map((u) => (
-                    <button
-                      key={u.id}
-                      onClick={() => selectSuggestion(u)}
-                      className="w-full flex items-center justify-between gap-3 px-3.5 py-2.5 text-left hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-0"
-                    >
-                      <div>
-                        <span className="text-sm text-gray-900">{u.product_title}</span>
-                        <span className="text-xs text-gray-400 ml-2">
-                          {u.color ?? "—"} / {u.size ?? "—"} · {u.sku}
-                        </span>
-                      </div>
-                      <Badge label={u.status} tone={inventoryStatusTone(u.status)} />
-                    </button>
-                  ))}
-                  {liveMatches.length > 8 && (
-                    <div className="px-3.5 py-2 text-xs text-gray-400 bg-gray-50">+{liveMatches.length - 8} more — keep typing to narrow down</div>
-                  )}
-                </>
-              )}
-            </div>
-          )}
+          <Filter size={15} className="text-gray-400 flex-shrink-0" />
+          <div className="w-40">
+            <Dropdown
+              value={categoryFilter}
+              onChange={(v) => {
+                setCategoryFilter(v);
+                setSubCategoryFilter("");
+              }}
+              placeholder="All categories"
+              options={realCategories.map((c) => ({ value: c, label: c }))}
+            />
+          </div>
+          <div className="w-40">
+            <Dropdown
+              value={subCategoryFilter}
+              onChange={setSubCategoryFilter}
+              placeholder={
+                !categoryFilter
+                  ? "Sub-category"
+                  : realSubCategories.length === 0
+                  ? "None available"
+                  : "All sub-categories"
+              }
+              disabled={!categoryFilter}
+              options={realSubCategories.map((s) => ({ value: s, label: s }))}
+            />
+          </div>
         </div>
 
         {exactUnit && (
@@ -303,38 +337,6 @@ export default function InventoryPage() {
             <Badge label={exactUnit.status} tone={inventoryStatusTone(exactUnit.status)} />
           </div>
         )}
-      </Card>
-
-      <Card className="mb-5">
-        <p className="text-xs font-medium text-gray-500 mb-2">Filter by category</p>
-        <div className="flex gap-3 flex-wrap">
-          <div className="w-48">
-            <Dropdown
-              value={categoryFilter}
-              onChange={(v) => {
-                setCategoryFilter(v);
-                setSubCategoryFilter("");
-              }}
-              placeholder="All categories"
-              options={realCategories.map((c) => ({ value: c, label: c }))}
-            />
-          </div>
-          <div className="w-48">
-            <Dropdown
-              value={subCategoryFilter}
-              onChange={setSubCategoryFilter}
-              placeholder={
-                !categoryFilter
-                  ? "Pick a category first"
-                  : realSubCategories.length === 0
-                  ? "No sub-categories for this one"
-                  : "All sub-categories"
-              }
-              disabled={!categoryFilter}
-              options={realSubCategories.map((s) => ({ value: s, label: s }))}
-            />
-          </div>
-        </div>
       </Card>
 
       {error && <ErrorText>{error}</ErrorText>}
@@ -355,20 +357,24 @@ export default function InventoryPage() {
                 <Th>Product title</Th>
                 <Th>Brand</Th>
                 <Th>Category</Th>
+                <Th>Total qty</Th>
                 <Th>Selling price</Th>
               </tr>
             </thead>
             <tbody>
-              {groups.map((group) => {
+              {groups.map((group, index) => {
                 const isFocused = group.product_id === focusedProductId;
                 const isExpanded = expandedRowId === group.product_id;
                 const groupCategory = group.units[0]?.category ?? null;
+                const totalQty = group.units.length;
 
                 return (
                   <Fragment key={group.product_id}>
                     <tr
                       onClick={() => setExpandedRowId(isExpanded ? null : group.product_id)}
-                      className={`cursor-pointer ${isFocused ? "bg-green-50/60 hover:bg-green-50" : "hover:bg-gray-50"}`}
+                      className={`cursor-pointer ${
+                        isFocused ? "bg-green-50/60 hover:bg-green-50" : index % 2 === 1 ? "bg-gray-50/60 hover:bg-gray-100" : "hover:bg-gray-100"
+                      }`}
                     >
                       <Td className="w-8">
                         {isExpanded ? <ChevronDown size={15} className="text-gray-400" /> : <ChevronRight size={15} className="text-gray-400" />}
@@ -376,37 +382,47 @@ export default function InventoryPage() {
                       <Td className="font-medium">{group.product_title}</Td>
                       <Td>{group.brand ?? "—"}</Td>
                       <Td>{groupCategory ?? "—"}</Td>
+                      <Td>{totalQty}</Td>
                       <Td>Rs. {group.selling_price?.toLocaleString() ?? "—"}</Td>
                     </tr>
                     {isExpanded && (
                       <tr>
-                        <Td colSpan={5} className="bg-gray-50">
-                          <div className="py-2">
+                        <Td colSpan={6} className="bg-gray-50/70 !py-3 !px-4">
+                          <div className="bg-white rounded-xl overflow-hidden shadow-sm">
                             <table className="w-full text-sm">
                               <thead>
-                                <tr>
-                                  <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Color</th>
-                                  <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Size</th>
-                                  <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Qty</th>
-                                  <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">SKU</th>
-                                  <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Barcode</th>
-                                  <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Supplier</th>
-                                  <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Status</th>
+                                <tr className="bg-gray-50">
+                                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Size</th>
+                                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Color</th>
+                                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Qty</th>
+                                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">SKU</th>
+                                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Barcode</th>
+                                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Supplier</th>
+                                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
                                 </tr>
                               </thead>
-                              <tbody>
-                                {summarizeVariants(group.units).map((row) => {
+                              <tbody className="divide-y divide-gray-100">
+                                {summarizeVariants(group.units).map((row, i) => {
                                   const isExactVariant =
                                     exactUnit && exactUnit.color === row.color && exactUnit.size === row.size && exactUnit.status === row.status;
                                   return (
-                                    <tr key={`${row.color}-${row.size}-${row.status}`} className={isExactVariant ? "bg-green-50/60" : ""}>
-                                      <td className="px-3 py-1.5">{row.color}</td>
-                                      <td className="px-3 py-1.5 font-medium">{row.size}</td>
-                                      <td className="px-3 py-1.5">{row.count}</td>
-                                      <td className="px-3 py-1.5">{row.count > 1 ? `${row.skuSample} (+${row.count - 1} more)` : row.skuSample}</td>
-                                      <td className="px-3 py-1.5 font-mono text-xs">{row.barcodeRange}</td>
-                                      <td className="px-3 py-1.5 text-gray-500">{row.batchSupplierCode ?? "—"}</td>
-                                      <td className="px-3 py-1.5">
+                                    <tr
+                                      key={`${row.color}-${row.size}-${row.status}`}
+                                      className={
+                                        isExactVariant
+                                          ? "bg-green-50/70"
+                                          : i % 2 === 1
+                                          ? "bg-gray-50/50 hover:bg-gray-100/70"
+                                          : "hover:bg-gray-50"
+                                      }
+                                    >
+                                      <td className="px-4 py-2 font-medium text-gray-900">{row.size}</td>
+                                      <td className="px-4 py-2 text-gray-600">{row.color}</td>
+                                      <td className="px-4 py-2 text-gray-600">{row.count}</td>
+                                      <td className="px-4 py-2 text-gray-600">{row.count > 1 ? `${row.skuSample} (+${row.count - 1} more)` : row.skuSample}</td>
+                                      <td className="px-4 py-2 font-mono text-xs text-gray-500">{row.barcodeRange}</td>
+                                      <td className="px-4 py-2 text-gray-500">{row.batchSupplierCode ?? "—"}</td>
+                                      <td className="px-4 py-2">
                                         <Badge label={row.status} tone={inventoryStatusTone(row.status)} />
                                       </td>
                                     </tr>

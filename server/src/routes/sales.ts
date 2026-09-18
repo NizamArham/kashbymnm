@@ -72,10 +72,20 @@ function calculateDeliveryFee(weightKg: number | undefined, isFree: boolean): nu
   return 450 + extraKg * 100;
 }
 
-// GET /api/sales — list all, with customer name
+// GET /api/sales — list all, with customer name. Optionally
+// ?customer_id=N to scope to just one customer's order history — used
+// by the customer order history page, so it doesn't have to fetch
+// every sale in the system just to filter client-side.
 salesRouter.get(
   "/",
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
+    const conditions: string[] = [];
+    const params: any[] = [];
+    if (req.query.customer_id) {
+      conditions.push("sales.customer_id = ?");
+      params.push(req.query.customer_id);
+    }
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     const rows = db
       .prepare(
         `SELECT sales.*, customers.name as customer_name, customers.customer_code,
@@ -83,9 +93,10 @@ salesRouter.get(
          FROM sales
          LEFT JOIN customers ON customers.id = sales.customer_id
          LEFT JOIN deliveries ON deliveries.sale_id = sales.id
+         ${where}
          ORDER BY sales.id DESC`
       )
-      .all();
+      .all(...params);
     res.json(rows);
   })
 );
@@ -109,11 +120,12 @@ salesRouter.get(
       .prepare(
         `SELECT sale_items.*, inventory.sku, inventory.size, inventory.color, inventory.barcode,
                 inventory.selling_price AS original_selling_price,
-                products.product_title, products.brand,
+                COALESCE(products.product_title, sale_items.product_snapshot) as product_title,
+                products.brand,
                 (SELECT COUNT(*) FROM returns WHERE returns.sale_item_id = sale_items.id) as is_returned
          FROM sale_items
-         JOIN inventory ON inventory.id = sale_items.inventory_id
-         JOIN products ON products.id = inventory.product_id
+         LEFT JOIN inventory ON inventory.id = sale_items.inventory_id
+         LEFT JOIN products ON products.id = inventory.product_id
          WHERE sale_items.sale_id = ?`
       )
       .all(req.params.id);
