@@ -56,6 +56,32 @@ inventoryRouter.get(
 );
 
 // GET /api/inventory/:id
+// POST /api/inventory/check-status — given a list of unit ids, returns
+// each one's CURRENT status. Used by POS to detect a stale cart after
+// navigating away and back: a unit that was available when added to
+// the cart may have since been sold, returned, or removed by someone
+// else, and the cart needs to reflect that rather than silently letting
+// checkout proceed against a unit that's no longer really there.
+inventoryRouter.post(
+  "/check-status",
+  asyncHandler(async (req, res) => {
+    const ids = z.array(z.number().int().positive()).parse(req.body.ids ?? []);
+    if (ids.length === 0) return res.json([]);
+
+    const placeholders = ids.map(() => "?").join(",");
+    const rows = db.prepare(`SELECT id, status FROM inventory WHERE id IN (${placeholders})`).all(...ids) as {
+      id: number;
+      status: string;
+    }[];
+
+    // Any id that no longer exists at all (hard-deleted, e.g. via a
+    // product deletion) is reported as "removed" — genuinely gone,
+    // same practical meaning for the cart as any other unavailable status.
+    const found = new Map(rows.map((r) => [r.id, r.status]));
+    res.json(ids.map((id) => ({ id, status: found.get(id) ?? "removed" })));
+  })
+);
+
 inventoryRouter.get(
   "/:id",
   asyncHandler(async (req, res) => {

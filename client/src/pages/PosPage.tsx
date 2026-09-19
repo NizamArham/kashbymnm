@@ -22,6 +22,7 @@ import { Input, Label, FormGroup, ErrorText, SuccessText, Button, Dropdown } fro
 import { CityPicker } from "../components/CityPicker";
 import { useAuth } from "../context/AuthContext";
 import { DELIVERY_PARTNERS, DeliveryPartner, calculateDeliveryFee, calculateCodAmount } from "../lib/delivery";
+import { saveDraftSale, loadDraftSale, clearDraftSale, PosDraftSale } from "../lib/posDraft";
 
 // A cart line represents one or more physical units that share the same
 // product + color + size — merged into one row with a quantity, rather
@@ -42,6 +43,13 @@ export default function PosPage() {
 
   const [saleType, setSaleType] = useState<SaleType>("in_store");
   const [cart, setCart] = useState<CartLine[]>([]);
+  // Unit ids from a restored cart that turned out to no longer be
+  // available (sold, returned, or removed by someone else while this
+  // page was closed) — struck through in the cart display rather than
+  // silently dropped, so it's obvious something changed instead of the
+  // line just vanishing.
+  const [staleUnitIds, setStaleUnitIds] = useState<Set<number>>(new Set());
+  const [restoredDraftNotice, setRestoredDraftNotice] = useState(false);
 
   // Admin-only credit sale — lets a trusted customer take items now and
   // settle later. Reuses the existing amount_paid < total mechanism (the
@@ -223,6 +231,95 @@ export default function PosPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  // Restore an in-progress sale left over from before navigating away
+  // (or an accidental refresh) — runs once, on mount. Every cart unit
+  // is then checked against its real current status, since time may
+  // have passed and another sale could have taken one of them; anything
+  // no longer available is struck through rather than silently dropped.
+  useEffect(() => {
+    const draft = loadDraftSale();
+    if (!draft) return;
+
+    setSaleType(draft.saleType);
+    setCart(draft.cart);
+    setSelectedCustomer(draft.selectedCustomer);
+    setIsCreditSale(draft.isCreditSale);
+    setCreditAmountPaid(draft.creditAmountPaid);
+    setCreditPaymentMethod(draft.creditPaymentMethod);
+    setDeliveryPartner(draft.deliveryPartner as DeliveryPartner | "");
+    setPackageWeight(draft.packageWeight);
+    setIsFreeDelivery(draft.isFreeDelivery);
+    setAdvancePaid(draft.advancePaid);
+    setAdvancePaymentMethod(draft.advancePaymentMethod);
+    setDiscountType(draft.discountType);
+    setDiscountValue(draft.discountValue);
+    setCouponCode(draft.couponCode);
+    setAppliedCoupon(draft.appliedCoupon);
+    setUseStoreCredit(draft.useStoreCredit);
+    setPaymentMethod(draft.paymentMethod);
+
+    if (draft.cart.length > 0) {
+      setRestoredDraftNotice(true);
+      const allIds = draft.cart.flatMap((line) => line.units.map((u) => u.id));
+      api
+        .post<{ id: number; status: string }[]>("/inventory/check-status", { ids: allIds })
+        .then((results) => {
+          const stale = new Set(results.filter((r) => r.status !== "available").map((r) => r.id));
+          if (stale.size > 0) setStaleUnitIds(stale);
+        })
+        .catch(() => {
+          // if the check itself fails, the restored cart is still shown
+          // as-is — checkout's own real validation is the final backstop
+        });
+    }
+  }, []);
+
+  // Save the in-progress sale on every relevant change, so leaving the
+  // page (deliberately or by accident) never loses it. Deliberately
+  // excludes ephemeral UI state (search boxes, which line is mid-edit,
+  // the add-customer modal) — only the "resume this exact sale" fields.
+  useEffect(() => {
+    const draft: PosDraftSale = {
+      saleType,
+      cart,
+      selectedCustomer,
+      isCreditSale,
+      creditAmountPaid,
+      creditPaymentMethod,
+      deliveryPartner,
+      packageWeight,
+      isFreeDelivery,
+      advancePaid,
+      advancePaymentMethod,
+      discountType,
+      discountValue,
+      couponCode,
+      appliedCoupon,
+      useStoreCredit,
+      paymentMethod,
+    };
+    saveDraftSale(draft);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    saleType,
+    cart,
+    selectedCustomer,
+    isCreditSale,
+    creditAmountPaid,
+    creditPaymentMethod,
+    deliveryPartner,
+    packageWeight,
+    isFreeDelivery,
+    advancePaid,
+    advancePaymentMethod,
+    discountType,
+    discountValue,
+    couponCode,
+    appliedCoupon,
+    useStoreCredit,
+    paymentMethod,
+  ]);
+
   async function ensureUnitsLoaded() {
     if (allAvailableUnits) return allAvailableUnits;
     const units = await api.get<InventoryUnit[]>("/inventory?status=available");
@@ -301,9 +398,18 @@ export default function PosPage() {
       // confirmation, unlike reducing 3 units down to 2.
       if (!confirm(`Remove ${line.units[0].product_title} from the cart?`)) return;
     }
-    setCart((c) =>
-      c.map((l) => (cartLineKey(l.units[0]) === lineKey ? { ...l, units: l.units.slice(0, -1) } : l)).filter((l) => l.units.length > 0)
-    );
+    setCart((c) => {
+      const removedUnitId = c.find((l) => cartLineKey(l.units[0]) === lineKey)?.units.slice(-1)[0]?.id;
+      if (removedUnitId != null) {
+        setStaleUnitIds((prev) => {
+          if (!prev.has(removedUnitId)) return prev;
+          const next = new Set(prev);
+          next.delete(removedUnitId);
+          return next;
+        });
+      }
+      return c.map((l) => (cartLineKey(l.units[0]) === lineKey ? { ...l, units: l.units.slice(0, -1) } : l)).filter((l) => l.units.length > 0);
+    });
   }
 
   async function ensureCustomersLoaded() {
@@ -534,6 +640,10 @@ export default function PosPage() {
       setCheckoutError("Cart is empty");
       return;
     }
+    if (cart.some((line) => line.units.some((u) => staleUnitIds.has(u.id)))) {
+      setCheckoutError("One or more items in the cart are no longer in stock — remove them before checking out.");
+      return;
+    }
     if (saleType === "online" && !selectedCustomer) {
       setCheckoutError("Select or add a customer before completing an online order — delivery needs their address.");
       setShowCheckoutModal(false);
@@ -629,6 +739,8 @@ export default function PosPage() {
       });
 
       setCheckoutSuccess(`Sale complete — ${sale.invoice}${saleType === "online" ? ". A pending delivery was created automatically." : "."}`);
+      clearDraftSale();
+      setStaleUnitIds(new Set());
       setCart([]);
       setSelectedCustomer(null);
       setCustomerQuery("");
@@ -750,6 +862,15 @@ export default function PosPage() {
             {productSearchError && <ErrorText>{productSearchError}</ErrorText>}
           </div>
 
+          {restoredDraftNotice && cart.length > 0 && (
+            <div className="mx-4 mt-3 flex items-center justify-between gap-3 bg-blue-50 border border-blue-200 rounded-xl px-3.5 py-2">
+              <p className="text-xs text-blue-700">Resumed your in-progress sale from before.</p>
+              <button onClick={() => setRestoredDraftNotice(false)} className="text-blue-400 hover:text-blue-600 flex-shrink-0">
+                <X size={14} />
+              </button>
+            </div>
+          )}
+
           {cart.length === 0 ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center min-h-0">
               <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mb-3">
@@ -776,16 +897,26 @@ export default function PosPage() {
                   const isDiscounted = line.unit_price !== originalPrice;
                   const isEditing = editingLineKey === lineKey;
                   const qty = line.units.length;
+                  const hasStaleUnit = line.units.some((u) => staleUnitIds.has(u.id));
                   return (
                     <div
                       key={lineKey}
-                      className="grid grid-cols-12 gap-3 items-center px-4 py-2.5 bg-white border border-gray-100 rounded-xl hover:shadow-sm transition"
+                      className={`grid grid-cols-12 gap-3 items-center px-4 py-2.5 border rounded-xl transition ${
+                        hasStaleUnit
+                          ? "bg-red-50/50 border-red-200"
+                          : "bg-white border-gray-100 hover:shadow-sm"
+                      }`}
                     >
                       <div className="col-span-5 min-w-0">
-                        <p className="font-medium text-gray-900 text-sm truncate">{sample.product_title}</p>
-                        <p className="text-xs text-gray-500 mt-0.5 truncate">
+                        <p className={`font-medium text-sm truncate ${hasStaleUnit ? "text-gray-400 line-through" : "text-gray-900"}`}>
+                          {sample.product_title}
+                        </p>
+                        <p className={`text-xs mt-0.5 truncate ${hasStaleUnit ? "text-gray-400 line-through" : "text-gray-500"}`}>
                           {sample.color ?? "—"} / {sample.size ?? "—"} | SKU: {sample.sku}
                         </p>
+                        {hasStaleUnit && (
+                          <p className="text-xs text-red-600 mt-0.5 font-medium">No longer in stock — remove before checkout</p>
+                        )}
                       </div>
                       <div className="col-span-1 text-center">
                         <span className="inline-flex items-center justify-center w-6 h-6 bg-gray-100 rounded-full text-xs font-semibold text-gray-700">

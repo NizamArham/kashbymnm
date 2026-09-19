@@ -21,9 +21,14 @@ import { couponsRouter } from "./routes/coupons";
 
 const app = express();
 const PORT = process.env.PORT || 4000;
+const HOST = "0.0.0.0";
 
 app.use(cors()); // fine to leave open — this only ever runs on your own machine
 app.use(express.json());
+
+
+
+
 
 // Simple health check — useful to confirm the server is actually running
 app.get("/api/health", (_req, res) => {
@@ -50,7 +55,7 @@ app.use("/api/coupons", couponsRouter);
 // Must be registered last — Express error-handling middleware.
 app.use(errorHandler);
 
-app.listen(PORT, () => {
+app.listen(PORT, HOST, () => {
   console.log(`M&M Clothing server running at http://localhost:${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/api/health`);
 });
