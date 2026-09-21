@@ -388,7 +388,7 @@ chequesRouter.put(
     const data = clearInput.parse(req.body);
 
     const runClear = db.transaction(() => {
-      db.prepare(`UPDATE cheque_receipts SET status = 'cleared', cleared_at = datetime('now') WHERE id = ?`).run(req.params.id);
+      db.prepare(`UPDATE cheque_receipts SET status = 'cleared', cleared_at = datetime('now', '+330 minutes') WHERE id = ?`).run(req.params.id);
 
       if (transfer) {
         db.prepare(
@@ -457,7 +457,7 @@ chequesRouter.put(
       }
 
       db.prepare(
-        `UPDATE cheque_receipts SET status = 'bounced', bounced_at = datetime('now'), bounced_reason = ? WHERE id = ?`
+        `UPDATE cheque_receipts SET status = 'bounced', bounced_at = datetime('now', '+330 minutes'), bounced_reason = ? WHERE id = ?`
       ).run(data.reason, req.params.id);
     });
 
@@ -646,10 +646,13 @@ chequesRouter.delete(
     }
 
     const runDelete = db.transaction(() => {
+      // cheques_issued.supplier_payment_id references supplier_payments —
+      // the referencING row must go first, or the FK constraint on the
+      // still-pointing cheques_issued row blocks deleting the payment.
+      db.prepare(`DELETE FROM cheques_issued WHERE id = ?`).run(req.params.id);
       if (issued.supplier_payment_id) {
         db.prepare(`DELETE FROM supplier_payments WHERE id = ?`).run(issued.supplier_payment_id);
       }
-      db.prepare(`DELETE FROM cheques_issued WHERE id = ?`).run(req.params.id);
     });
 
     runDelete();
@@ -668,7 +671,7 @@ chequesRouter.put(
     if (issued.status !== "pending") throw new ApiError(409, `This cheque is already ${issued.status}`);
 
     const runClear = db.transaction(() => {
-      db.prepare(`UPDATE cheques_issued SET status = 'cleared', cleared_at = datetime('now') WHERE id = ?`).run(req.params.id);
+      db.prepare(`UPDATE cheques_issued SET status = 'cleared', cleared_at = datetime('now', '+330 minutes') WHERE id = ?`).run(req.params.id);
       db.prepare(
         `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
          VALUES ('expense', 'supplier_payment', 'cheque', ?, ?, ?)`
@@ -704,7 +707,7 @@ chequesRouter.put(
         db.prepare(`DELETE FROM supplier_payments WHERE id = ?`).run(issued.supplier_payment_id);
       }
       db.prepare(
-        `UPDATE cheques_issued SET status = 'bounced', bounced_at = datetime('now'), bounced_reason = ? WHERE id = ?`
+        `UPDATE cheques_issued SET status = 'bounced', bounced_at = datetime('now', '+330 minutes'), bounced_reason = ? WHERE id = ?`
       ).run(data.reason, req.params.id);
     });
 

@@ -121,7 +121,7 @@ salesRouter.get(
         `SELECT sale_items.*, inventory.sku, inventory.size, inventory.color, inventory.barcode,
                 inventory.selling_price AS original_selling_price,
                 COALESCE(products.product_title, sale_items.product_snapshot) as product_title,
-                products.brand,
+                products.brand, COALESCE(products.allow_returns, 1) as allow_returns,
                 (SELECT COUNT(*) FROM returns WHERE returns.sale_item_id = sale_items.id) as is_returned
          FROM sale_items
          LEFT JOIN inventory ON inventory.id = sale_items.inventory_id
@@ -234,19 +234,11 @@ salesRouter.post(
       const balanceRow = db
         .prepare(
           `SELECT COALESCE(SUM(amount), 0) as balance FROM store_credit_transactions
-           WHERE customer_id = ? AND (expires_at IS NULL OR expires_at > datetime('now') OR amount < 0)`
+           WHERE customer_id = ? AND (expires_at IS NULL OR expires_at > datetime('now', '+330 minutes') OR amount < 0)`
         )
         .get(data.customer_id) as { balance: number };
       storeCreditApplied = Math.min(data.store_credit_applied, balanceRow.balance, total);
     }
-
-    // Effective amount paid now includes whatever store credit was
-    // applied, on top of whatever was actually handed over/transferred.
-    const effectiveAmountPaid = data.amount_paid + storeCreditApplied;
-
-    let payment_status: "paid" | "partial" | "unpaid" = "unpaid";
-    if (effectiveAmountPaid >= total && total > 0) payment_status = "paid";
-    else if (effectiveAmountPaid > 0) payment_status = "partial";
 
     // Cash tendered above the total is either change handed back (the
     // default) or, if explicitly chosen at checkout, kept as store
@@ -256,6 +248,22 @@ salesRouter.post(
         ? data.amount_received - total
         : 0;
     const change_due = cashExtra > 0 && !data.keep_cash_overpayment_as_credit ? cashExtra : 0;
+
+    // Effective amount paid includes whatever store credit was applied,
+    // on top of whatever was actually handed over/transferred — MINUS
+    // any of that cash that immediately left the register again as
+    // change. Change given back was never really "paid toward" this
+    // sale; counting it would push amount_paid above total and make the
+    // customer's balance_due (total - amount_paid, summed account-wide)
+    // go negative — showing as phantom store credit they were never
+    // actually granted. When the extra is kept as credit instead,
+    // change_due is 0 here, so amount_paid correctly stays above total
+    // and overpaid_amount below tracks the real credit granted.
+    const effectiveAmountPaid = data.amount_paid - change_due + storeCreditApplied;
+
+    let payment_status: "paid" | "partial" | "unpaid" = "unpaid";
+    if (effectiveAmountPaid >= total && total > 0) payment_status = "paid";
+    else if (effectiveAmountPaid > 0) payment_status = "partial";
 
     // Overpayment tracked for store credit — either a non-cash payment
     // that came in above the total, or a cash payment where the extra
@@ -358,12 +366,15 @@ salesRouter.post(
         db.prepare(`UPDATE inventory SET status = 'sold' WHERE id = ?`).run(item.inventory_id);
       }
 
-      // Mirror the sale into the cash book as an income entry.
-      if (data.amount_paid > 0) {
+      // Mirror the sale into the cash book as an income entry — net of
+      // any change handed back, since that cash left the register again
+      // in the same transaction and was never actually retained.
+      const netCashPaid = data.amount_paid - change_due;
+      if (netCashPaid > 0) {
         db.prepare(
           `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
            VALUES ('income', 'sale', ?, ?, ?, ?)`
-        ).run(data.payment_method ?? null, saleId, data.amount_paid, `Payment for invoice ${invoice}`);
+        ).run(data.payment_method ?? null, saleId, netCashPaid, `Payment for invoice ${invoice}`);
       }
 
       // Online sales need to ship — auto-create a pending delivery using
@@ -600,12 +611,24 @@ salesRouter.put(
       }
 
       // Reverse the income entry, so cash-on-hand and reports reflect
-      // that this money was never actually kept.
-      if (sale.amount_paid > 0) {
+      // that this money was never actually kept. sale.amount_paid also
+      // includes any store credit redeemed toward this sale (see the
+      // effectiveAmountPaid calc on create) — that portion was never real
+      // cash/bank money and was never added to the cash book as income in
+      // the first place, so it must be excluded here too or this reversal
+      // overstates the expense and fabricates a cash shortfall.
+      const creditRedeemed = db
+        .prepare(
+          `SELECT COALESCE(SUM(-amount), 0) as total FROM store_credit_transactions
+           WHERE reference_id = ? AND reason = 'redemption'`
+        )
+        .get(sale.id) as { total: number };
+      const cashPortionPaid = sale.amount_paid - creditRedeemed.total;
+      if (cashPortionPaid > 0) {
         db.prepare(
           `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
            VALUES ('expense', 'sale_void', ?, ?, ?, ?)`
-        ).run(sale.payment_method ?? null, sale.id, sale.amount_paid, `Reversal of voided invoice ${sale.invoice}`);
+        ).run(sale.payment_method ?? null, sale.id, cashPortionPaid, `Reversal of voided invoice ${sale.invoice}`);
       }
 
       // Cancel any delivery tied to this sale rather than leaving it
@@ -636,7 +659,7 @@ salesRouter.put(
       }
 
       db.prepare(
-        `UPDATE sales SET is_voided = 1, voided_at = datetime('now'), void_reason = ? WHERE id = ?`
+        `UPDATE sales SET is_voided = 1, voided_at = datetime('now', '+330 minutes'), void_reason = ? WHERE id = ?`
       ).run(reasonInput.reason ?? null, req.params.id);
     });
 

@@ -7,6 +7,11 @@ import { ApiError, asyncHandler } from "../lib/errors";
 
 export const authRouter = Router();
 
+// The very first account ever created for this shop (Nizam Arham) — the
+// actual owner's login. Hardcoded so it can never be demoted or deleted
+// through the app, no matter who else becomes an admin later.
+const PROTECTED_ADMIN_ID = 1;
+
 const loginInput = z.object({
   username: z.string().min(1),
   password: z.string().min(1),
@@ -30,7 +35,9 @@ const createUserInput = z.object({
 });
 
 // Same fields, all optional — used for editing an existing profile.
-const updateUserInput = createUserInput.partial().omit({ username: true, password: true });
+// Username is editable here (unlike at creation, it's not required) so an
+// admin can fix or rename a login the same way they'd reset its password.
+const updateUserInput = createUserInput.partial().omit({ password: true });
 
 // Basic HR fields any staff member can see about themself or a colleague
 // — no salary, no bank details. Admins get the full row via a separate
@@ -87,7 +94,7 @@ authRouter.post(
     const { login_activity_id } = bodySchema.parse(req.body);
 
     if (login_activity_id) {
-      db.prepare(`UPDATE login_activity SET logout_at = datetime('now') WHERE id = ? AND user_id = ?`).run(
+      db.prepare(`UPDATE login_activity SET logout_at = datetime('now', '+330 minutes') WHERE id = ? AND user_id = ?`).run(
         login_activity_id,
         req.user!.id
       );
@@ -96,7 +103,7 @@ authRouter.post(
       // in case the frontend didn't have the id handy (e.g. after a
       // page reload wiped in-memory state).
       db.prepare(
-        `UPDATE login_activity SET logout_at = datetime('now')
+        `UPDATE login_activity SET logout_at = datetime('now', '+330 minutes')
          WHERE user_id = ? AND logout_at IS NULL
          ORDER BY id DESC LIMIT 1`
       ).run(req.user!.id);
@@ -230,12 +237,22 @@ authRouter.put(
       throw new ApiError(400, "A user cannot report to themself");
     }
 
+    if (Number(req.params.id) === PROTECTED_ADMIN_ID && merged.role !== "admin") {
+      throw new ApiError(400, "The primary admin account's role can't be changed");
+    }
+
+    if (data.username && data.username !== existing.username) {
+      const usernameTaken = db.prepare(`SELECT id FROM users WHERE username = ? AND id != ?`).get(data.username, req.params.id);
+      if (usernameTaken) throw new ApiError(409, "That username is already taken");
+    }
+
     db.prepare(
       `UPDATE users SET
-         name = ?, job_title = ?, joined_date = ?, nic = ?, phone = ?, address = ?,
+         username = ?, name = ?, job_title = ?, joined_date = ?, nic = ?, phone = ?, address = ?,
          salary = ?, bank_name = ?, bank_account_no = ?, bank_account_name = ?, reports_to = ?, role = ?
        WHERE id = ?`
     ).run(
+      merged.username,
       merged.name,
       merged.job_title,
       merged.joined_date,
@@ -256,6 +273,26 @@ authRouter.put(
   })
 );
 
+// PUT /api/auth/users/:id/password — admin-only: set a new password for
+// a login, no old password required. This is the "staff forgot their
+// password" recovery path — an admin can always reset it, since staff
+// have no self-service password change of their own.
+authRouter.put(
+  "/users/:id/password",
+  requireAuth,
+  requireRole("admin"),
+  asyncHandler(async (req, res) => {
+    const existing = db.prepare(`SELECT id FROM users WHERE id = ?`).get(req.params.id);
+    if (!existing) throw new ApiError(404, "User not found");
+
+    const { password } = z.object({ password: z.string().min(6) }).parse(req.body);
+    const password_hash = bcrypt.hashSync(password, 10);
+
+    db.prepare(`UPDATE users SET password_hash = ? WHERE id = ?`).run(password_hash, req.params.id);
+    res.status(204).send();
+  })
+);
+
 // DELETE /api/auth/users/:id — admin-only: remove a login
 authRouter.delete(
   "/users/:id",
@@ -265,6 +302,28 @@ authRouter.delete(
     const existing = db.prepare(`SELECT * FROM users WHERE id = ?`).get(req.params.id);
     if (!existing) throw new ApiError(404, "User not found");
 
+    if (Number(req.params.id) === PROTECTED_ADMIN_ID) {
+      throw new ApiError(403, "The primary admin account can't be removed");
+    }
+
+    // Attendance is real payroll history, not disposable — unlike
+    // login_activity below, it's never safe to silently delete just
+    // because the account is going away.
+    const attendanceCount = db.prepare(`SELECT COUNT(*) as cnt FROM attendance WHERE user_id = ?`).get(req.params.id) as {
+      cnt: number;
+    };
+    if (attendanceCount.cnt > 0) {
+      throw new ApiError(
+        409,
+        `This staff member has ${attendanceCount.cnt} attendance record(s) on file. Removing their login would leave that history pointing at nobody, so it can't be done while it exists.`
+      );
+    }
+
+    // login_activity is only ever read back through this same user's own
+    // profile page — once the account is gone there's nothing left to
+    // view it against, so it's safe (and necessary) to clear before the
+    // FK on user_id would otherwise block the delete below.
+    db.prepare(`DELETE FROM login_activity WHERE user_id = ?`).run(req.params.id);
     db.prepare(`DELETE FROM users WHERE id = ?`).run(req.params.id);
     res.status(204).send();
   })
