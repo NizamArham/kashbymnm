@@ -1,12 +1,14 @@
 import { useState, useRef, useEffect, RefObject } from "react";
-import { Printer, Download } from "lucide-react";
-import html2canvas from "html2canvas";
-import jsPDF from "jspdf";
+import { Printer, Download, User } from "lucide-react";
 import JsBarcode from "jsbarcode";
 import { WaybillLabel, WaybillLabelData } from "../components/WaybillLabel";
-import { DELIVERY_PARTNERS, DeliveryPartner, waybillShopCode } from "../lib/delivery";
+import { generateWaybillLabelPdf } from "../lib/waybillLabelPdf";
+import { DELIVERY_PARTNERS } from "../lib/delivery";
 import { PageHeader, Card, Input, Label, FormGroup, ErrorText, Dropdown, TabToggle } from "../components/ui";
 import { CityPicker } from "../components/CityPicker";
+import { api } from "../lib/api";
+import { Customer, BusinessInfo } from "../lib/types";
+import { applyBusinessInfoToReturnAddress } from "../lib/businessInfo";
 
 function formatLabelDate(d: Date): string {
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -25,7 +27,31 @@ export default function WaybillGeneratorPage() {
   const [city, setCity] = useState("");
   const [phone1, setPhone1] = useState("");
   const [phone2, setPhone2] = useState("");
-  const [deliveryPartner, setDeliveryPartner] = useState<DeliveryPartner>("D2D");
+
+  // The shop code shown in the label's "[ ... ]" header — picked by
+  // tapping directly on that part of the preview, rather than a separate
+  // form field, since it's really just a property of the label itself.
+  const [shopCode, setShopCode] = useState(DELIVERY_PARTNERS.find((p) => p.value === "D2D")?.waybillCode ?? "MNM");
+  const [shopCodePickerOpen, setShopCodePickerOpen] = useState(false);
+  const [customShopCodeInput, setCustomShopCodeInput] = useState("");
+  const shopCodePickerRef = useRef<HTMLDivElement>(null);
+
+  // Typing a name into the Customer Name field doubles as a search over
+  // existing customers — picking a match autofills the fields below. It's
+  // just a shortcut for manual entry, not a link that's saved anywhere,
+  // since a waybill generated here isn't tied back to a customer record.
+  const [allCustomers, setAllCustomers] = useState<Customer[] | null>(null);
+  const [customerResults, setCustomerResults] = useState<Customer[]>([]);
+  const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
+  const [customerNoAddressNotice, setCustomerNoAddressNotice] = useState(false);
+  const customerBoxRef = useRef<HTMLDivElement>(null);
+
+  // Typing a phone number that matches an existing customer doesn't
+  // autofill silently — manual waybills are usually made precisely
+  // because this shipment needs a different address than what's on file,
+  // so we ask before overwriting anything the person already typed.
+  const [phoneMatchCustomer, setPhoneMatchCustomer] = useState<Customer | null>(null);
+  const [dismissedPhoneMatch, setDismissedPhoneMatch] = useState<string | null>(null);
 
   const [orderRef, setOrderRef] = useState("");
   const [pcs, setPcs] = useState("1");
@@ -53,15 +79,17 @@ export default function WaybillGeneratorPage() {
   // (e.g. "Colombo 1") legitimately contain a number of their own that
   // a naive "first digit" split would wrongly cut off too.
   const cityParts = city.trim().split(" ");
-  const cityName =
-    cityParts.length > 1 && /^\d+$/.test(cityParts[cityParts.length - 1]) ? cityParts.slice(0, -1).join(" ") : city;
+  const cityHasPostalCode = cityParts.length > 1 && /^\d+$/.test(cityParts[cityParts.length - 1]);
+  const cityName = cityHasPostalCode ? cityParts.slice(0, -1).join(" ") : city;
+  const cityPostalCode = cityHasPostalCode ? cityParts[cityParts.length - 1] : "";
 
   const labelData: WaybillLabelData = {
-    shopCode: waybillShopCode(deliveryPartner),
+    shopCode,
     date: formatLabelDate(new Date()),
     customerName,
     addressLines: [addr1, addr2, addr3].filter(Boolean),
     city: cityName,
+    cityPostalCode,
     phones: [phone1, phone2].filter(Boolean),
     orderRef,
     pcs: parseInt(pcs, 10) || 1,
@@ -91,6 +119,129 @@ export default function WaybillGeneratorPage() {
       // blank rather than blocking the person over it
     }
   }, [trackingNumber]);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (customerBoxRef.current && !customerBoxRef.current.contains(e.target as Node)) {
+        setCustomerSearchOpen(false);
+      }
+      if (shopCodePickerRef.current && !shopCodePickerRef.current.contains(e.target as Node)) {
+        setShopCodePickerOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    api
+      .get<BusinessInfo | null>("/business-info")
+      .then((info) => {
+        if (info) applyBusinessInfoToReturnAddress(info, setReturnBusinessName, setReturnAddress, setReturnPhone, setReturnWebsite);
+      })
+      .catch(() => {
+        // No business info saved yet (or the request failed) — the
+        // hardcoded defaults above stay as a reasonable fallback.
+      });
+  }, []);
+
+  function selectShopCode(code: string) {
+    setShopCode(code);
+    setShopCodePickerOpen(false);
+    setCustomShopCodeInput("");
+  }
+
+  function applyCustomShopCode() {
+    const trimmed = customShopCodeInput.trim();
+    if (!trimmed) return;
+    setShopCode(trimmed);
+    setShopCodePickerOpen(false);
+    setCustomShopCodeInput("");
+  }
+
+  async function ensureCustomersLoaded() {
+    if (allCustomers) return allCustomers;
+    const customers = await api.get<Customer[]>("/customers");
+    setAllCustomers(customers);
+    return customers;
+  }
+
+  async function handleCustomerNameChange(value: string) {
+    setCustomerName(value);
+    setCustomerSearchOpen(true);
+    const trimmed = value.trim().toLowerCase();
+    if (trimmed.length < 2) {
+      setCustomerResults([]);
+      return;
+    }
+    const customers = await ensureCustomersLoaded();
+    setCustomerResults(
+      customers.filter(
+        (c) =>
+          c.name.toLowerCase().includes(trimmed) ||
+          c.customer_code.toLowerCase().includes(trimmed) ||
+          c.phone?.toLowerCase().includes(trimmed) ||
+          c.phone2?.toLowerCase().includes(trimmed)
+      )
+    );
+  }
+
+  async function loadCustomerDetails(c: Customer) {
+    setCustomerNoAddressNotice(false);
+    setCustomerName(c.name);
+    setPhone1(c.phone ?? "");
+    setPhone2(c.phone2 ?? "");
+
+    try {
+      const full = await api.get<Customer>(`/customers/${c.id}`);
+      const addresses = full.addresses ?? [];
+      const defaultAddr = addresses.find((a) => a.is_default) ?? addresses[0];
+      if (defaultAddr) {
+        // A saved address is often just 1-2 free-text lines with commas
+        // packed inside (e.g. "101, Main Street") — split on every comma
+        // so each part lands in its own box instead of piling up in one.
+        const parts = [defaultAddr.address_line1, defaultAddr.address_line2]
+          .filter((v): v is string => !!v && v.trim() !== "")
+          .flatMap((line) => line.split(",").map((s) => s.trim()).filter(Boolean));
+        setAddr1(parts[0] ?? "");
+        setAddr2(parts[1] ?? "");
+        setAddr3(parts.slice(2).join(", "));
+        setCity(defaultAddr.city ?? "");
+      } else {
+        setCustomerNoAddressNotice(true);
+      }
+    } catch {
+      setCustomerNoAddressNotice(true);
+    }
+  }
+
+  async function pickCustomer(c: Customer) {
+    setCustomerResults([]);
+    setCustomerSearchOpen(false);
+    setPhoneMatchCustomer(null);
+    await loadCustomerDetails(c);
+  }
+
+  async function handlePhone1Blur() {
+    const trimmed = phone1.trim();
+    if (trimmed.length < 7 || trimmed === dismissedPhoneMatch) return;
+    const customers = await ensureCustomersLoaded();
+    const match = customers.find((c) => c.phone === trimmed || c.phone2 === trimmed);
+    if (match && match.name !== customerName) {
+      setPhoneMatchCustomer(match);
+    }
+  }
+
+  async function confirmLoadPhoneMatch() {
+    if (!phoneMatchCustomer) return;
+    await loadCustomerDetails(phoneMatchCustomer);
+    setPhoneMatchCustomer(null);
+  }
+
+  function dismissPhoneMatch() {
+    setDismissedPhoneMatch(phone1.trim());
+    setPhoneMatchCustomer(null);
+  }
 
   function validateStep1(): boolean {
     if (!customerName.trim()) {
@@ -134,35 +285,11 @@ export default function WaybillGeneratorPage() {
     return true;
   }
 
-  async function captureLabel(): Promise<HTMLCanvasElement> {
-    if (!labelRef.current) throw new Error("Label not ready");
-    return html2canvas(labelRef.current, { scale: 3, useCORS: true, backgroundColor: "#ffffff" });
-  }
-
   async function handleSavePdf() {
     if (!validateStep2()) return;
     setProcessing(true);
     try {
-      const canvas = await captureLabel();
-      const imgData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: [105, 148] });
-
-      const pageWidth = 105;
-      const pageHeight = 148;
-      const canvasRatio = canvas.width / canvas.height;
-      const pageRatio = pageWidth / pageHeight;
-
-      let drawWidth = pageWidth;
-      let drawHeight = pageHeight;
-      if (canvasRatio > pageRatio) {
-        drawHeight = pageWidth / canvasRatio;
-      } else {
-        drawWidth = pageHeight * canvasRatio;
-      }
-      const offsetX = (pageWidth - drawWidth) / 2;
-      const offsetY = (pageHeight - drawHeight) / 2;
-
-      pdf.addImage(imgData, "PNG", offsetX, offsetY, drawWidth, drawHeight);
+      const pdf = generateWaybillLabelPdf(labelData);
       pdf.save(`M&M_Waybill_${trackingNumber}.pdf`);
     } catch {
       setError("Failed to generate the PDF — try again");
@@ -175,18 +302,15 @@ export default function WaybillGeneratorPage() {
     if (!validateStep2()) return;
     setProcessing(true);
     try {
-      const canvas = await captureLabel();
-      const imgData = canvas.toDataURL("image/png");
-      const printWindow = window.open("", "_blank");
+      const pdf = generateWaybillLabelPdf(labelData);
+      pdf.autoPrint();
+      const blobUrl = pdf.output("bloburl");
+      const printWindow = window.open(blobUrl as unknown as string, "_blank");
       if (!printWindow) {
         setError("Pop-up blocked — allow pop-ups to print, or use Save as PDF instead");
         setProcessing(false);
         return;
       }
-      printWindow.document.write(
-        `<html><head><title>Waybill</title><style>@page{size:105mm 148mm;margin:0}body{margin:0;width:105mm;height:148mm}img{width:105mm;height:148mm;object-fit:contain;display:block}</style></head><body><img src="${imgData}" onload="window.print();window.close();" /></body></html>`
-      );
-      printWindow.document.close();
     } catch {
       setError("Failed to prepare printing — try again");
     } finally {
@@ -195,6 +319,7 @@ export default function WaybillGeneratorPage() {
   }
 
   function resetAll() {
+    if (!confirm("Start over? This clears everything you've entered on this waybill.")) return;
     setStep("receiver");
     setCustomerName("");
     setAddr1("");
@@ -203,7 +328,14 @@ export default function WaybillGeneratorPage() {
     setCity("");
     setPhone1("");
     setPhone2("");
-    setDeliveryPartner("D2D");
+    setShopCode(DELIVERY_PARTNERS.find((p) => p.value === "D2D")?.waybillCode ?? "MNM");
+    setShopCodePickerOpen(false);
+    setCustomShopCodeInput("");
+    setCustomerNoAddressNotice(false);
+    setCustomerResults([]);
+    setCustomerSearchOpen(false);
+    setPhoneMatchCustomer(null);
+    setDismissedPhoneMatch(null);
     setOrderRef("");
     setPcs("1");
     setWeight("");
@@ -219,7 +351,7 @@ export default function WaybillGeneratorPage() {
     <div>
       <PageHeader
         title="Waybill Generator"
-        subtitle="Type in the details manually to generate a courier waybill — for orders not yet in the system."
+        subtitle="Generate a courier waybill for an order not yet in the system."
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -242,7 +374,33 @@ export default function WaybillGeneratorPage() {
             <>
               <FormGroup>
                 <Label>Customer Name</Label>
-                <Input value={customerName} onChange={(e) => setCustomerName(e.target.value)} />
+                <div className="relative" ref={customerBoxRef}>
+                  <Input
+                    value={customerName}
+                    onChange={(e) => handleCustomerNameChange(e.target.value)}
+                    onFocus={() => customerName.trim().length >= 2 && setCustomerSearchOpen(true)}
+                    placeholder="Search customers..."
+                  />
+                  {customerSearchOpen && customerName.trim().length >= 2 && customerResults.length > 0 && (
+                    <div className="absolute z-20 top-full left-0 right-0 mt-1.5 bg-white border border-gray-200 rounded-xl shadow-lg max-h-56 overflow-y-auto">
+                      {customerResults.slice(0, 6).map((c) => (
+                        <button
+                          key={c.id}
+                          onClick={() => pickCustomer(c)}
+                          className="w-full flex items-center justify-between gap-3 px-3.5 py-2 text-left hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-0"
+                        >
+                          <div className="min-w-0">
+                            <p className="text-sm text-gray-900 truncate">{c.name}</p>
+                            <p className="text-xs text-gray-400">{c.phone ?? c.customer_code}</p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {customerNoAddressNotice && (
+                  <p className="text-xs text-amber-600 mt-1.5">This customer has no saved address — fill it in manually below.</p>
+                )}
               </FormGroup>
               <FormGroup>
                 <Label>Address Line 1</Label>
@@ -262,21 +420,44 @@ export default function WaybillGeneratorPage() {
               <div className="grid grid-cols-2 gap-3">
                 <FormGroup>
                   <Label>Contact No 1</Label>
-                  <Input value={phone1} onChange={(e) => setPhone1(e.target.value)} />
+                  <Input
+                    value={phone1}
+                    onChange={(e) => {
+                      setPhone1(e.target.value);
+                      setPhoneMatchCustomer(null);
+                    }}
+                    onBlur={handlePhone1Blur}
+                  />
                 </FormGroup>
                 <FormGroup>
                   <Label>Contact No 2 (optional)</Label>
                   <Input value={phone2} onChange={(e) => setPhone2(e.target.value)} />
                 </FormGroup>
               </div>
-              <FormGroup>
-                <Label>Delivery Partner (sets the shop code prefix)</Label>
-                <Dropdown
-                  value={deliveryPartner}
-                  onChange={(v) => setDeliveryPartner(v as DeliveryPartner)}
-                  options={DELIVERY_PARTNERS.map((p) => ({ value: p.value, label: `${p.label} — ${p.waybillCode}` }))}
-                />
-              </FormGroup>
+              {phoneMatchCustomer && (
+                <div className="bg-blue-50 border border-blue-200 rounded-xl px-3.5 py-2.5 flex items-start gap-2.5">
+                  <User size={15} className="text-blue-600 flex-shrink-0 mt-0.5" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm text-blue-900">
+                      This number matches an existing customer — <span className="font-medium">{phoneMatchCustomer.name}</span>. Load their saved name &amp; address?
+                    </p>
+                    <div className="flex gap-2 mt-2">
+                      <button
+                        onClick={confirmLoadPhoneMatch}
+                        className="px-3 py-1 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 transition"
+                      >
+                        Load saved details
+                      </button>
+                      <button
+                        onClick={dismissPhoneMatch}
+                        className="px-3 py-1 border border-blue-300 text-blue-700 rounded-lg text-xs font-medium hover:bg-blue-100 transition"
+                      >
+                        No, keep as is
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
               {stepError && <ErrorText>{stepError}</ErrorText>}
               <div className="flex justify-end mt-2">
                 <button
@@ -301,7 +482,7 @@ export default function WaybillGeneratorPage() {
               </div>
               <FormGroup>
                 <Label>Weight (kg)</Label>
-                <Input value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="e.g. 0.5" />
+                <Input value={weight} onChange={(e) => setWeight(e.target.value)} />
               </FormGroup>
               <div className="grid grid-cols-2 gap-3">
                 <FormGroup>
@@ -405,9 +586,72 @@ export default function WaybillGeneratorPage() {
           )}
         </Card>
 
-        <div className="flex justify-center">
-          <div style={{ transformOrigin: "top center" }}>
-            <WaybillLabel ref={labelRef} barcodeRef={barcodeRef as RefObject<SVGSVGElement>} data={labelData} />
+        {/* justify-start, not center: this label has a fixed real-world
+            print width, so once the column is narrower than that (e.g.
+            around 1024-1280px window widths, right where the sidebar
+            first switches on), centering would overflow evenly on BOTH
+            sides — clipping the start of every line with no way to
+            scroll back to it. Flush-left with overflow-x-auto always
+            keeps the readable left edge in view; only the less-critical
+            trailing content needs a scroll. */}
+        <div className="flex justify-start items-start overflow-x-auto">
+          <div ref={shopCodePickerRef} style={{ position: "relative", display: "inline-block" }}>
+            <div
+              style={{
+                display: "inline-block",
+                transformOrigin: "top center",
+                border: "1px solid #d1d5db",
+                borderRadius: 10,
+                overflow: "hidden",
+                boxShadow: "0 1px 4px rgba(0,0,0,0.1)",
+              }}
+            >
+              <WaybillLabel
+                ref={labelRef}
+                barcodeRef={barcodeRef as RefObject<SVGSVGElement>}
+                data={labelData}
+                onShopCodeClick={() => setShopCodePickerOpen((o) => !o)}
+              />
+            </div>
+
+            {shopCodePickerOpen && (
+              <div
+                className="bg-white border border-gray-200 rounded-xl shadow-lg"
+                style={{ position: "absolute", top: 40, left: 8, width: 280, zIndex: 30 }}
+              >
+                <p className="text-xs text-gray-400 px-3 pt-2.5 pb-1">Delivery partner</p>
+                {DELIVERY_PARTNERS.map((p) => (
+                  <button
+                    key={p.value}
+                    onClick={() => selectShopCode(p.waybillCode)}
+                    className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50 transition-colors ${
+                      shopCode === p.waybillCode ? "bg-gray-50 font-medium" : ""
+                    }`}
+                  >
+                    <span>{p.label}</span>
+                    <span className="text-xs text-gray-400">{p.waybillCode}</span>
+                  </button>
+                ))}
+                <div className="border-t border-gray-100 px-3 py-2">
+                  <p className="text-xs text-gray-400 mb-1.5">Custom</p>
+                  <div className="flex gap-1.5">
+                    <Input
+                      value={customShopCodeInput}
+                      onChange={(e) => setCustomShopCodeInput(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && applyCustomShopCode()}
+                      placeholder="Shop code"
+                      className="text-sm"
+                    />
+                    <button
+                      onClick={applyCustomShopCode}
+                      className="px-3 py-1.5 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition flex-shrink-0"
+                    >
+                      Use
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

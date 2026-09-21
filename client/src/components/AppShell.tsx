@@ -26,7 +26,7 @@ import {
   PackageCheck,
   Send,
 } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAuth } from "../context/AuthContext";
 
 interface MenuSubItem {
@@ -52,16 +52,18 @@ export default function AppShell() {
   const { user, logout } = useAuth();
   const isAdmin = user?.role === "admin";
 
-  const [openMenus, setOpenMenus] = useState<Record<string, boolean>>({
-    pos: false,
-    inventory: false,
-    directory: false,
-    purchases: false,
-    finance: false,
-    deliveries: false,
-    admin: false,
-  });
+  // Accordion — only one section's sub-items are ever open at a time.
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // The nav list scrolls on its own (flex-1 overflow-y-auto) — at common
+  // shorter window heights (e.g. 1024x768, right where the sidebar first
+  // switches on), the full item list plus an expanded section's sub-items
+  // can be taller than that scroll area. Without this, whichever section
+  // just opened can land entirely below the fold with no scrollbar shown
+  // and no hint it's there — General Settings under Admin was exactly
+  // this case. Scrolling the newly-opened section into view keeps it
+  // reachable without the user needing to discover the scroll on their own.
+  const menuItemRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const menu: MenuItem[] = [
     { id: "dashboard", label: "Dashboard", icon: Home, path: "/" },
@@ -111,7 +113,6 @@ export default function AppShell() {
       adminOnly: true,
       subItems: [
         { id: "purchases", label: "Purchases", path: "/purchases", icon: Package },
-        { id: "purchase-returns", label: "Purchase Returns", path: "/purchases/returns", icon: RotateCcw },
         { id: "supplier-payments", label: "Supplier Payments", path: "/supplier-payments", icon: CreditCard },
       ],
     },
@@ -161,23 +162,33 @@ export default function AppShell() {
     const isOnPos = path === "/pos" || path === "/sales";
     const isOnInventory = path === "/inventory" || path === "/products" || path === "/products/add";
     const isOnDirectory = path === "/customers" || path === "/customers/add" || path === "/staff" || path === "/suppliers";
-    const isOnPurchases = path === "/purchases" || path === "/purchases/returns" || path === "/supplier-payments";
+    const isOnPurchases = path === "/purchases" || path === "/supplier-payments";
     const isOnFinance = path === "/cash-book" || path === "/cheques";
-    const isOnDeliveries = path === "/deliveries" || path === "/couriers" || path === "/waybill-generator";
+    const isOnDeliveries = path === "/deliveries" || path === "/couriers" || path === "/couriers/history" || path === "/waybill-generator";
     const isOnAdmin = path === "/attendance" || path === "/settings/general";
 
-    if (isOnPos) setOpenMenus((prev) => ({ ...prev, pos: true }));
-    if (isOnInventory) setOpenMenus((prev) => ({ ...prev, inventory: true }));
-    if (isOnDirectory) setOpenMenus((prev) => ({ ...prev, directory: true }));
-    if (isOnPurchases) setOpenMenus((prev) => ({ ...prev, purchases: true }));
-    if (isOnFinance) setOpenMenus((prev) => ({ ...prev, finance: true }));
-    if (isOnDeliveries) setOpenMenus((prev) => ({ ...prev, deliveries: true }));
-    if (isOnAdmin) setOpenMenus((prev) => ({ ...prev, admin: true }));
+    if (isOnPos) setOpenMenuId("pos");
+    else if (isOnInventory) setOpenMenuId("inventory");
+    else if (isOnDirectory) setOpenMenuId("directory");
+    else if (isOnPurchases) setOpenMenuId("purchases");
+    else if (isOnFinance) setOpenMenuId("finance");
+    else if (isOnDeliveries) setOpenMenuId("deliveries");
+    else if (isOnAdmin) setOpenMenuId("admin");
   }, [location.pathname]);
 
   function toggleMenu(id: string) {
-    setOpenMenus((prev) => ({ ...prev, [id]: !prev[id] }));
+    setOpenMenuId((prev) => (prev === id ? null : id));
   }
+
+  useEffect(() => {
+    if (!openMenuId) return;
+    // Wait a tick so the sub-items have actually rendered (and the
+    // container has its real expanded height) before measuring/scrolling.
+    const id = requestAnimationFrame(() => {
+      menuItemRefs.current[openMenuId]?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [openMenuId]);
 
   function handleLinkClick() {
     if (window.innerWidth < 1024) setSidebarOpen(false);
@@ -238,11 +249,11 @@ export default function AppShell() {
           {visibleMenu.map((item) => {
             const Icon = item.icon;
             const active = isParentActive(item);
-            const isOpen = openMenus[item.id];
+            const isOpen = openMenuId === item.id;
             const visibleSubItems = item.subItems?.filter(itemVisible) ?? [];
 
             return (
-              <div key={item.id} className="space-y-1">
+              <div key={item.id} ref={(el) => (menuItemRefs.current[item.id] = el)} className="space-y-1">
                 {item.subItems ? (
                   <button
                     onClick={() => toggleMenu(item.id)}
@@ -319,7 +330,7 @@ export default function AppShell() {
         </div>
       </div>
 
-      <div className="flex-1 lg:ml-64 min-h-screen bg-gray-50">
+      <div className="flex-1 min-w-0 lg:ml-64 min-h-screen bg-gray-50">
         <div className="sticky top-0 z-30 bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-3 lg:hidden">
           <button
             onClick={() => setSidebarOpen(true)}
