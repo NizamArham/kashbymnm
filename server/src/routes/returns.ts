@@ -34,9 +34,11 @@ const decisionInput = z.object({
 const REQUEST_SELECT = `
   SELECT return_requests.*, sale_items.sale_id, sale_items.unit_price, sale_items.quantity as item_quantity,
          sales.invoice, sales.customer_id, sales.deleted_customer_snapshot, customers.name as customer_name,
-         inventory.sku, COALESCE(products.product_title, sale_items.product_snapshot) as product_title,
+         inventory.sku, inventory.color, inventory.size,
+         COALESCE(products.product_title, sale_items.product_snapshot) as product_title,
          COALESCE(products.allow_returns, 0) as allow_returns,
-         requester.name as requested_by_name, decider.name as decided_by_name
+         requester.name as requested_by_name, decider.name as decided_by_name,
+         returns.refund_amount
   FROM return_requests
   JOIN sale_items ON sale_items.id = return_requests.sale_item_id
   JOIN sales ON sales.id = sale_items.sale_id
@@ -45,6 +47,7 @@ const REQUEST_SELECT = `
   LEFT JOIN products ON products.id = inventory.product_id
   LEFT JOIN users requester ON requester.id = return_requests.requested_by
   LEFT JOIN users decider ON decider.id = return_requests.decided_by
+  LEFT JOIN returns ON returns.id = return_requests.return_id
 `;
 
 // GET /api/returns/requests — full history, most recent first. Frontend
@@ -155,7 +158,7 @@ returnsRouter.put(
 
     const saleItem = db
       .prepare(
-        `SELECT sale_items.*, sales.invoice, sales.customer_id, sales.loyalty_points_earned, sales.total
+        `SELECT sale_items.*, sales.invoice, sales.customer_id, sales.loyalty_points_earned, sales.total, sales.amount_paid
          FROM sale_items JOIN sales ON sales.id = sale_items.sale_id
          WHERE sale_items.id = ?`
       )
@@ -185,7 +188,26 @@ returnsRouter.put(
       if (!account) throw new ApiError(400, "That bank account isn't on file for this customer");
     }
 
-    const refund_amount = request.resolution === "refund" ? saleItem.unit_price : 0;
+    // A "refund" only ever gives back money that was actually collected —
+    // sales.amount_paid also counts store credit redeemed toward the sale,
+    // which was never real cash either (same distinction as the void
+    // handler), so that's excluded here too. Whatever fraction of the
+    // sale was never actually paid for is written off the customer's
+    // balance instead (see the sales.total adjustment below) rather than
+    // manufacturing a cash_book expense for money that was never received
+    // — this is exactly what a credit (unpaid) sale needs: the return
+    // reduces what they owe, it doesn't touch cash on hand at all.
+    const creditRedeemedRow = db
+      .prepare(
+        `SELECT COALESCE(SUM(-amount), 0) as total FROM store_credit_transactions
+         WHERE reference_id = ? AND reason = 'redemption'`
+      )
+      .get(saleItem.sale_id) as { total: number };
+    const realCashPaid = Math.max(0, saleItem.amount_paid - creditRedeemedRow.total);
+    const paidFraction = saleItem.total > 0 ? Math.min(1, realCashPaid / saleItem.total) : 0;
+
+    const refund_amount = request.resolution === "refund" ? Math.round(saleItem.unit_price * paidFraction) : 0;
+    const ledgerWriteOff = request.resolution === "refund" ? saleItem.unit_price - refund_amount : 0;
     const pointsToReverse =
       request.resolution === "refund" && saleItem.total > 0
         ? Math.floor((saleItem.unit_price / saleItem.total) * saleItem.loyalty_points_earned)
@@ -211,10 +233,28 @@ returnsRouter.put(
       db.prepare(`UPDATE inventory SET status = ? WHERE id = ?`).run(newStatus, saleItem.inventory_id);
 
       if (request.resolution === "refund") {
-        db.prepare(
-          `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
-           VALUES ('expense', 'return_refund', ?, ?, ?, ?)`
-        ).run(refundMethod, returnId, refund_amount, `Refund for invoice ${saleItem.invoice}`);
+        if (refund_amount > 0) {
+          db.prepare(
+            `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
+             VALUES ('expense', 'return_refund', ?, ?, ?, ?)`
+          ).run(refundMethod, returnId, refund_amount, `Refund for invoice ${saleItem.invoice}`);
+        }
+
+        // The part of this item that was never actually paid for comes
+        // off the sale's total instead — the customer no longer owes for
+        // an item they no longer have, without inventing a cash outflow
+        // that never happened. Recompute payment_status too, since
+        // shrinking total can turn an unpaid/partial sale fully paid.
+        if (ledgerWriteOff > 0) {
+          const newTotal = saleItem.total - ledgerWriteOff;
+          const newPaymentStatus =
+            newTotal <= 0 || saleItem.amount_paid >= newTotal ? "paid" : saleItem.amount_paid > 0 ? "partial" : "unpaid";
+          db.prepare(`UPDATE sales SET total = ?, payment_status = ? WHERE id = ?`).run(
+            newTotal,
+            newPaymentStatus,
+            saleItem.sale_id
+          );
+        }
 
         if (pointsToReverse > 0) {
           db.prepare(`UPDATE sales SET loyalty_points_earned = MAX(0, loyalty_points_earned - ?) WHERE id = ?`).run(
@@ -254,7 +294,7 @@ returnsRouter.put(
       }
 
       db.prepare(
-        `UPDATE return_requests SET status = 'approved', decided_by = ?, decided_at = datetime('now'), decision_reason = ?, return_id = ?
+        `UPDATE return_requests SET status = 'approved', decided_by = ?, decided_at = datetime('now', '+330 minutes'), decision_reason = ?, return_id = ?
          WHERE id = ?`
       ).run(req.user!.id, data.decision_reason ?? null, returnId, req.params.id);
 
@@ -280,7 +320,7 @@ returnsRouter.put(
     if (request.status !== "pending") throw new ApiError(409, `This request has already been ${request.status}.`);
 
     db.prepare(
-      `UPDATE return_requests SET status = 'declined', decided_by = ?, decided_at = datetime('now'), decision_reason = ? WHERE id = ?`
+      `UPDATE return_requests SET status = 'declined', decided_by = ?, decided_at = datetime('now', '+330 minutes'), decision_reason = ? WHERE id = ?`
     ).run(req.user!.id, data.decision_reason, req.params.id);
 
     const updated = db.prepare(`${REQUEST_SELECT} WHERE return_requests.id = ?`).get(req.params.id);

@@ -34,7 +34,7 @@ attendanceRouter.post(
        VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(user_id, attendance_date)
        DO UPDATE SET status = excluded.status, marked_by = excluded.marked_by,
-                     notes = excluded.notes, marked_at = datetime('now')`
+                     notes = excluded.notes, marked_at = datetime('now', '+330 minutes')`
     ).run(data.user_id, data.attendance_date, data.status, req.user!.id, data.notes ?? null);
 
     const saved = db

@@ -136,7 +136,7 @@ cashBookRouter.post(
     const result = db
       .prepare(
         `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes, entry_date)
-         VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))`
+         VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now', '+330 minutes')))`
       )
       .run(
         data.type,

@@ -182,6 +182,7 @@ export interface SaleItem {
   line_total: number;
   original_selling_price?: number;
   is_returned?: number;
+  allow_returns?: number;
   sku?: string;
   size?: string | null;
   color?: string | null;
@@ -276,8 +277,11 @@ export interface ReturnRequest {
   customer_id: number | null;
   customer_name: string | null;
   sku: string;
+  color?: string | null;
+  size?: string | null;
   product_title: string;
   allow_returns: number;
+  refund_amount?: number | null;
 }
 
 export type DeliveryStatus = "pending" | "packed" | "dispatched" | "delivered" | "returned" | "cancelled";
@@ -316,6 +320,7 @@ export interface Delivery {
   invoice?: string;
   sale_date?: string;
   sale_total?: number;
+  customer_id?: number | null;
   customer_name?: string;
   customer_phone?: string | null;
   address_line1?: string;
@@ -365,6 +370,7 @@ export interface BusinessInfo {
   city: string | null;
   phone: string | null;
   email: string | null;
+  website: string | null;
   bank_name: string | null;
   bank_account_no: string | null;
   bank_account_name: string | null;
@@ -448,4 +454,34 @@ export interface Purchase {
   description: string | null;
   lines?: PendingPurchaseLine[];
   expenses?: PurchaseExpense[];
+}
+
+export interface CourierReconciliationOrder {
+  id: number;
+  delivery_id: number;
+  courier_partner: string;
+  cod_amount: number;
+  courier_charge: number;
+  // Return-trip fee — only nonzero once the order was actually dispatched
+  // (the courier had it) and then came back.
+  return_charge: number;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  delivery_status: DeliveryStatus;
+  tracking_number: string | null;
+  waybill_number: string | null;
+  invoice: string;
+  sale_date: string;
+  customer_name: string | null;
+}
+
+export interface CourierSettlement {
+  id: number;
+  courier_partner: string;
+  week_start: string;
+  week_end: string;
+  amount_received: number;
+  received_date: string;
+  notes: string | null;
 }

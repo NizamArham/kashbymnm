@@ -21,6 +21,7 @@ import {
   Label,
   FormGroup,
   NewSupplierModal,
+  HelpHint,
 } from "../components/ui";
 
 const LOW_STOCK_THRESHOLD = 5;
@@ -180,11 +181,7 @@ function ComboPicker({
               setQuery("");
             }
           }}
-          placeholder={
-            existing.length
-              ? placeholder
-              : "No colors on record yet — type to add one"
-          }
+          placeholder={placeholder}
           className="w-full pl-3 pr-10 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-gray-400"
         />
         <button
@@ -535,7 +532,7 @@ export default function ManageProductsPage() {
     <div className="flex flex-col h-full min-h-0">
       {/* Fixed top section — never scrolls */}
       <div className="flex-shrink-0">
-        <PageHeader title="Manage products" subtitle="Click a product to view its stock, edit details, or restock." />
+        <PageHeader title="Manage products" subtitle="Click any product to manage it." />
 
         {error && <ErrorText>{error}</ErrorText>}
 
@@ -546,7 +543,7 @@ export default function ManageProductsPage() {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by product name, brand, or category..."
+              placeholder="Search products..."
               className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-gray-400"
             />
           </div>
@@ -726,7 +723,7 @@ export default function ManageProductsPage() {
                                                   </FormGroup>
                                                   <FormGroup>
                                                     <Label>Note (optional)</Label>
-                                                    <Input value={removeNote} onChange={(e) => setRemoveNote(e.target.value)} placeholder="Details..." />
+                                                    <Input value={removeNote} onChange={(e) => setRemoveNote(e.target.value)} />
                                                   </FormGroup>
                                                   <div className="ml-auto flex gap-2">
                                                     <Button size="sm" onClick={() => setRemoveOpenKey(null)}>
@@ -761,7 +758,7 @@ export default function ManageProductsPage() {
                                     <div className="grid grid-cols-2 gap-4 mb-4">
                                       <ComboPicker
                                         label="Colors"
-                                        placeholder="— Type to search or add a color —"
+                                        placeholder="Search or add..."
                                         existing={Array.from(
                                           new Set(units.map((u) => u.color).filter((c): c is string => !!c))
                                         ).sort()}
@@ -771,7 +768,7 @@ export default function ManageProductsPage() {
                                       />
                                       <ComboPicker
                                         label="Sizes"
-                                        placeholder="— Type to search or add a size —"
+                                        placeholder="Search or add..."
                                         existing={Array.from(
                                           new Set(units.map((u) => u.size).filter((s): s is string => !!s))
                                         ).sort()}
@@ -843,7 +840,10 @@ export default function ManageProductsPage() {
                                       if (openLines.length === 0) return null;
                                       return (
                                         <div className="mb-3 border border-gray-300 rounded-xl p-3">
-                                          <Label>Fulfilling a line from an existing pending purchase?</Label>
+                                          <Label>
+                                            Fulfilling a line from an existing pending purchase?
+                                            <HelpHint text="Linking this restock to a pending purchase line means the supplier cost/payment for that line are already recorded — this step just adds the actual product/variant details. Other lines on the same purchase can still be fulfilled separately later." />
+                                          </Label>
                                           <Dropdown
                                             value={fulfillsLineId}
                                             onChange={(v) => {
@@ -860,11 +860,6 @@ export default function ManageProductsPage() {
                                               label: `${purchase.purchase_code} — ${line.description} (${line.quantity} pcs @ Rs. ${line.unit_cost.toLocaleString()})`,
                                             }))}
                                           />
-                                          <p className="text-xs text-gray-500 mt-1">
-                                            Linking this restock to a pending purchase line means the supplier cost/payment for that line are
-                                            already recorded — this step just adds the actual product/variant details. Other lines on the same
-                                            purchase can still be fulfilled separately later.
-                                          </p>
                                         </div>
                                       );
                                     })()}
@@ -878,23 +873,25 @@ export default function ManageProductsPage() {
                                           placeholder="— Select —"
                                           searchable
                                           onCreateNew={() => setShowNewSupplierModal(true)}
-                                          createNewLabel="+ New supplier"
+                                          createNewLabel="New supplier"
                                           options={suppliers.map((s) => ({ value: String(s.id), label: s.name, sublabel: s.supplier_code }))}
                                         />
                                       </FormGroup>
                                       <FormGroup>
-                                        <Label>Cost for this batch (Rs.)</Label>
+                                        <Label>
+                                          Cost for this batch (Rs.)
+                                          <HelpHint text="Older stock keeps its own cost — this only applies to the new units you're adding now." />
+                                        </Label>
                                         <Input type="number" min="0" value={restockCost} onChange={(e) => setRestockCost(e.target.value)} />
                                       </FormGroup>
                                       <FormGroup>
-                                        <Label>Selling price for this batch (Rs.)</Label>
+                                        <Label>
+                                          Selling price for this batch (Rs.)
+                                          <HelpHint text="Older stock keeps its own price — this same price applies to every variant row above." />
+                                        </Label>
                                         <Input type="number" min="0" value={restockSellingPrice} onChange={(e) => setRestockSellingPrice(e.target.value)} />
                                       </FormGroup>
                                     </div>
-                                    <p className="text-xs text-gray-400 mt-1">
-                                      Older stock keeps its own cost/price — this only applies to the new units you're adding now. This same
-                                      cost/price applies to every variant row above.
-                                    </p>
                                     {restockError && <ErrorText>{restockError}</ErrorText>}
                                     {restockSuccess && <SuccessText>{restockSuccess}</SuccessText>}
                                     <div className="flex justify-end gap-2 mt-3">

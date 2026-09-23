@@ -175,22 +175,23 @@ export function Dropdown({
             </div>
           )}
           <div className="max-h-72 overflow-y-auto py-1">
-            {onCreateNew && (
-              <button
-                type="button"
-                onClick={() => {
-                  setOpen(false);
-                  setQuery("");
-                  onCreateNew();
-                }}
-                className="w-full flex items-center gap-1.5 px-3.5 py-2.5 text-sm text-left text-gray-900 font-medium hover:bg-gray-50 transition-colors border-b border-gray-100"
-              >
-                <Plus size={14} />
-                {createNewLabel}
-              </button>
-            )}
             {filteredOptions.length === 0 ? (
-              <div className="px-3.5 py-2.5 text-sm text-gray-400">No matches</div>
+              onCreateNew ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpen(false);
+                    setQuery("");
+                    onCreateNew();
+                  }}
+                  className="w-full flex items-center gap-1.5 px-3.5 py-2.5 text-sm text-left text-gray-900 font-medium hover:bg-gray-50 transition-colors"
+                >
+                  <Plus size={14} />
+                  {query.trim() ? `${createNewLabel} "${query.trim()}"` : createNewLabel}
+                </button>
+              ) : (
+                <div className="px-3.5 py-2.5 text-sm text-gray-400">No matches</div>
+              )
             ) : (
               filteredOptions.map((opt) => (
                 <button
@@ -218,8 +219,152 @@ export function Dropdown({
   );
 }
 
+// Tap a common reason instead of typing one from scratch every time —
+// "Other" reveals a free-text field for anything that doesn't fit the
+// presets. `value` is always the final reason string (a preset's own
+// text, or whatever was typed under "Other"), so callers don't need to
+// know which mode produced it.
+export function ReasonPicker({
+  value,
+  onChange,
+  presets,
+  placeholder = "Type reason...",
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  presets: string[];
+  placeholder?: string;
+}) {
+  const [customMode, setCustomMode] = useState(() => value !== "" && !presets.includes(value));
+
+  return (
+    <div>
+      <div className="flex flex-wrap gap-1.5">
+        {presets.map((p) => (
+          <button
+            key={p}
+            type="button"
+            onClick={() => {
+              setCustomMode(false);
+              onChange(p);
+            }}
+            className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${
+              !customMode && value === p
+                ? "bg-black text-white border-black"
+                : "border-gray-200 text-gray-600 hover:border-gray-400"
+            }`}
+          >
+            {p}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => {
+            setCustomMode(true);
+            onChange("");
+          }}
+          className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${
+            customMode ? "bg-black text-white border-black" : "border-gray-200 text-gray-600 hover:border-gray-400"
+          }`}
+        >
+          Other
+        </button>
+      </div>
+      {customMode && (
+        <Input className="mt-2" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} autoFocus />
+      )}
+    </div>
+  );
+}
+
+const REASON_OTHER = "__other__";
+
+// Same idea as ReasonPicker (tap a common reason, or type your own) but
+// as one compact dropdown row instead of a block of wrapping chips —
+// for tight spaces like an inline row-expansion where every extra line
+// of height is felt.
+export function ReasonDropdown({
+  value,
+  onChange,
+  presets,
+  placeholder = "Type reason...",
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  presets: string[];
+  placeholder?: string;
+}) {
+  const [customMode, setCustomMode] = useState(() => value !== "" && !presets.includes(value));
+
+  return (
+    <div>
+      <Dropdown
+        value={customMode ? REASON_OTHER : value}
+        onChange={(v) => {
+          if (v === REASON_OTHER) {
+            setCustomMode(true);
+            onChange("");
+          } else {
+            setCustomMode(false);
+            onChange(v);
+          }
+        }}
+        placeholder="Select a reason"
+        options={[...presets.map((p) => ({ value: p, label: p })), { value: REASON_OTHER, label: "Other — type your own" }]}
+      />
+      {customMode && (
+        <Input className="mt-2" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} autoFocus />
+      )}
+    </div>
+  );
+}
+
 export function Label({ children }: { children: ReactNode }) {
   return <label className="block text-xs font-medium text-gray-500 mb-1.5">{children}</label>;
+}
+
+// A small muted "?" — sits inline next to a label/heading, wherever a
+// longer explanation would otherwise sit as permanent on-page text. Shows
+// its tip on hover (desktop) and tap (touch, since hover never fires
+// there); tapping elsewhere closes it.
+export function HelpHint({ text, className = "" }: { text: string; className?: string }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  return (
+    <span className={`relative inline-flex align-middle ml-1 ${className}`} ref={ref}>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((o) => !o);
+        }}
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        className="w-3.5 h-3.5 flex items-center justify-center rounded-full bg-gray-200 text-gray-500 text-[9px] font-bold leading-none hover:bg-gray-300 hover:text-gray-700 transition-colors"
+        aria-label="More info"
+      >
+        ?
+      </button>
+      {open && (
+        <div
+          role="tooltip"
+          className="absolute z-30 left-1/2 -translate-x-1/2 top-full mt-1.5 w-72 max-w-[85vw] bg-gray-900 text-white text-xs leading-relaxed rounded-lg px-3.5 py-2.5 shadow-lg"
+        >
+          {text}
+        </div>
+      )}
+    </span>
+  );
 }
 
 export function FormGroup({ children }: { children: ReactNode }) {
@@ -268,6 +413,45 @@ export function Td({ children, colSpan, className = "" }: { children: ReactNode;
   );
 }
 
+// Mobile replacement for a table row — used below `lg` where a wide table
+// with 5+ columns stops being readable. One RowCard per record; put the
+// most important 1-2 fields up top and secondary numbers in the stat strip.
+export function RowCard({
+  children,
+  onClick,
+  className = "",
+}: {
+  children: ReactNode;
+  onClick?: () => void;
+  className?: string;
+}) {
+  return (
+    <div
+      onClick={onClick}
+      className={`bg-white border border-gray-200 rounded-xl p-3.5 ${
+        onClick ? "cursor-pointer active:bg-gray-50 transition-colors" : ""
+      } ${className}`}
+    >
+      {children}
+    </div>
+  );
+}
+
+// A row of small label/value stats inside a RowCard (qty, price, totals,
+// etc.) — labels are uppercase and muted, values are the emphasis.
+export function RowCardStats({ children }: { children: ReactNode }) {
+  return <div className="flex items-center gap-5 mt-2.5 pt-2.5 border-t border-gray-100">{children}</div>;
+}
+
+export function RowCardStat({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div>
+      <p className="text-[10px] text-gray-400 uppercase tracking-wide">{label}</p>
+      <p className="text-sm font-semibold text-gray-900 mt-0.5">{value}</p>
+    </div>
+  );
+}
+
 export function Badge({ label, tone }: { label: string; tone: "success" | "warning" | "danger" | "neutral" }) {
   const tones = {
     success: "bg-green-50 text-green-600",
@@ -307,7 +491,7 @@ export function TabToggle<T extends string>({
   options: { value: T; label: string }[];
 }) {
   return (
-    <div className="inline-flex bg-gray-100 rounded-xl p-1 gap-1">
+    <div className="inline-flex flex-wrap bg-gray-100 rounded-xl p-1 gap-1">
       {options.map((opt) => (
         <button
           key={opt.value}

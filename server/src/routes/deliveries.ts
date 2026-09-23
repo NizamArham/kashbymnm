@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "../db/connection";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth, requireRole } from "../lib/auth";
+import { applyReturnCharge } from "./courierReconciliation";
 
 export const deliveriesRouter = Router();
 
@@ -40,6 +41,7 @@ deliveriesRouter.get(
     const rows = db
       .prepare(
         `SELECT deliveries.*, sales.invoice, sales.date as sale_date, sales.total as sale_total,
+                sales.customer_id as customer_id,
                 customers.name as customer_name, customers.phone as customer_phone,
                 customer_addresses.address_line1, customer_addresses.address_line2, customer_addresses.city
          FROM deliveries
@@ -61,6 +63,7 @@ deliveriesRouter.get(
     const row = db
       .prepare(
         `SELECT deliveries.*, sales.invoice, sales.date as sale_date, sales.total as sale_total,
+                sales.customer_id as customer_id,
                 customers.name as customer_name, customers.phone as customer_phone,
                 customer_addresses.address_line1, customer_addresses.address_line2, customer_addresses.city
          FROM deliveries
@@ -122,28 +125,43 @@ deliveriesRouter.post(
   })
 );
 
-// PUT /api/deliveries/:id/confirm-address — marks the delivery address as
-// verified (typically after calling/messaging the customer). Required
-// before packing, so a bad address is caught as a phone call rather than
-// an expensive return after shipping.
+// PUT /api/deliveries/:id/address — switches this order to a different one
+// of the customer's saved addresses. Needed because the address on a
+// delivery is fixed at order time (whichever one was picked at checkout),
+// so a customer with 2+ saved addresses — or one whose attached address
+// turns out to be missing/incomplete — otherwise has no way to be
+// corrected here before confirming.
 deliveriesRouter.put(
-  "/:id/confirm-address",
+  "/:id/address",
   asyncHandler(async (req, res) => {
-    const existing = db.prepare(`SELECT * FROM deliveries WHERE id = ?`).get(req.params.id) as any;
-    if (!existing) throw new ApiError(404, "Delivery not found");
-    if (existing.delivery_status !== "pending") {
-      throw new ApiError(409, "Only pending orders need address confirmation.");
-    }
+    const { address_id } = z.object({ address_id: z.number().int().positive() }).parse(req.body);
 
-    db.prepare(`UPDATE deliveries SET address_confirmed = 1, address_confirmed_at = datetime('now') WHERE id = ?`).run(req.params.id);
-    const updated = db.prepare(`SELECT * FROM deliveries WHERE id = ?`).get(req.params.id);
+    const delivery = db
+      .prepare(`SELECT deliveries.id, sales.customer_id FROM deliveries JOIN sales ON sales.id = deliveries.sale_id WHERE deliveries.id = ?`)
+      .get(req.params.id) as { id: number; customer_id: number | null } | undefined;
+    if (!delivery) throw new ApiError(404, "Delivery not found");
+
+    const address = db.prepare(`SELECT id FROM customer_addresses WHERE id = ? AND customer_id = ?`).get(address_id, delivery.customer_id);
+    if (!address) throw new ApiError(400, "That address doesn't belong to this order's customer");
+
+    db.prepare(`UPDATE deliveries SET address_id = ? WHERE id = ?`).run(address_id, req.params.id);
+    const updated = db
+      .prepare(
+        `SELECT deliveries.*, customer_addresses.address_line1, customer_addresses.address_line2, customer_addresses.city
+         FROM deliveries
+         LEFT JOIN customer_addresses ON customer_addresses.id = deliveries.address_id
+         WHERE deliveries.id = ?`
+      )
+      .get(req.params.id);
     res.json(updated);
   })
 );
 
 // PUT /api/deliveries/:id/pack — Pending -> Packed, generates the waybill
 // number. This is the "Generate Waybill" action from the Pending tab.
-// Hard-gated on address_confirmed — no waybill without a verified address.
+// The address is reviewable (and switchable, to another of the
+// customer's saved ones) right there in the same modal before packing,
+// so there's no separate "confirm address" gate to pass first.
 deliveriesRouter.put(
   "/:id/pack",
   asyncHandler(async (req, res) => {
@@ -153,14 +171,12 @@ deliveriesRouter.put(
     if (existing.delivery_status !== "pending") {
       throw new ApiError(409, `This order is already ${existing.delivery_status} — only pending orders can be packed.`);
     }
-    if (!existing.address_confirmed) {
-      throw new ApiError(409, "Confirm the delivery address with the customer before packing this order.");
-    }
 
     const waybill_number = nextWaybillNumber();
     db.prepare(
       `UPDATE deliveries
-       SET delivery_status = 'packed', waybill_number = ?, packed_at = datetime('now'),
+       SET delivery_status = 'packed', waybill_number = ?, packed_at = datetime('now', '+330 minutes'),
+           address_confirmed = 1, address_confirmed_at = datetime('now', '+330 minutes'),
            courier_name = COALESCE(?, courier_name), tracking_number = COALESCE(?, tracking_number)
        WHERE id = ?`
     ).run(waybill_number, data.courier_name ?? null, data.tracking_number ?? null, req.params.id);
@@ -180,7 +196,7 @@ deliveriesRouter.put(
       throw new ApiError(409, "Only packed orders (with a waybill) can be dispatched.");
     }
 
-    db.prepare(`UPDATE deliveries SET delivery_status = 'dispatched', dispatched_at = datetime('now') WHERE id = ?`).run(req.params.id);
+    db.prepare(`UPDATE deliveries SET delivery_status = 'dispatched', dispatched_at = datetime('now', '+330 minutes') WHERE id = ?`).run(req.params.id);
     const updated = db.prepare(`SELECT * FROM deliveries WHERE id = ?`).get(req.params.id);
     res.json(updated);
   })
@@ -196,7 +212,7 @@ deliveriesRouter.put(
       throw new ApiError(409, "Only dispatched orders can be marked delivered.");
     }
 
-    db.prepare(`UPDATE deliveries SET delivery_status = 'delivered', delivery_date = datetime('now') WHERE id = ?`).run(req.params.id);
+    db.prepare(`UPDATE deliveries SET delivery_status = 'delivered', delivery_date = datetime('now', '+330 minutes') WHERE id = ?`).run(req.params.id);
     const updated = db.prepare(`SELECT * FROM deliveries WHERE id = ?`).get(req.params.id);
     res.json(updated);
   })
@@ -218,6 +234,14 @@ deliveriesRouter.put(
       data.notes ?? null,
       req.params.id
     );
+
+    // Only a delivery the courier actually had (dispatched) incurs a
+    // return-trip fee — one that never left "packed" was never picked up,
+    // so there's no return leg for the courier to charge for.
+    if (existing.delivery_status === "dispatched") {
+      applyReturnCharge(existing);
+    }
+
     const updated = db.prepare(`SELECT * FROM deliveries WHERE id = ?`).get(req.params.id);
     res.json(updated);
   })

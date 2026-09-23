@@ -160,6 +160,7 @@ supplierPaymentsRouter.get(
            COALESCE((SELECT SUM(amount) FROM supplier_credit_transactions WHERE supplier_id = suppliers.id), 0) as credit_balance,
            COALESCE((SELECT SUM(total_cost) FROM purchases WHERE supplier_id = suppliers.id), 0) -
            COALESCE((SELECT SUM(amount_paid) FROM purchases WHERE supplier_id = suppliers.id), 0) -
+           COALESCE((SELECT SUM(amount) FROM supplier_payments WHERE supplier_id = suppliers.id AND purchase_id IS NULL), 0) -
            COALESCE((SELECT SUM(amount) FROM supplier_credit_transactions WHERE supplier_id = suppliers.id), 0) as balance_owed
          FROM suppliers
          ORDER BY suppliers.name ASC`

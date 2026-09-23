@@ -30,10 +30,24 @@ const bankAccountInput = z.object({
 // to cover as a future discount rather than an immediate cash refund).
 // credit_balance is shown separately so it's clear WHY the owed amount
 // is lower than raw purchases-minus-payments would suggest.
+//
+// A payment tied to a specific purchase (purchase_id set) is already
+// mirrored into that purchase's own amount_paid — see the payment
+// recording endpoints — so it's covered by the first SUM(amount_paid)
+// term below. A GENERAL payment (purchase_id left null, e.g. a lump-sum
+// cheque against the whole running balance rather than one invoice —
+// the default, and probably the more common real case) never touches
+// any purchase's amount_paid at all, so it has to be subtracted here
+// separately, or it would be fully paid in supplier_payments yet have
+// zero effect on the balance this figure shows everywhere (supplier
+// list, dashboard, the payment modal itself) — a real payment the
+// business could easily end up paying a second time.
 const BALANCE_SUBQUERY = `
   COALESCE((SELECT SUM(total_cost) FROM purchases WHERE supplier_id = suppliers.id), 0)
   -
   COALESCE((SELECT SUM(amount_paid) FROM purchases WHERE supplier_id = suppliers.id), 0)
+  -
+  COALESCE((SELECT SUM(amount) FROM supplier_payments WHERE supplier_id = suppliers.id AND purchase_id IS NULL), 0)
   -
   COALESCE((SELECT SUM(amount) FROM supplier_credit_transactions WHERE supplier_id = suppliers.id), 0)
   AS balance_owed,

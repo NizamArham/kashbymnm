@@ -1,6 +1,6 @@
 import { useState, useEffect, FormEvent, Fragment, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Pencil, Plus, Search } from "lucide-react";
+import { Pencil, Plus, Search, KeyRound, X } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { api, ApiRequestError } from "../lib/api";
 import { StaffMember } from "../lib/types";
@@ -18,6 +18,7 @@ import {
   Td,
   Dropdown,
   DatePicker,
+  HelpHint,
 } from "../components/ui";
 
 const JOB_TITLES = ["Cashier", "Sales Assistant", "Store Manager", "Inventory Assistant", "Delivery Coordinator"];
@@ -32,6 +33,13 @@ export default function StaffPage() {
   const [editForm, setEditForm] = useState<Record<string, string>>({});
   const [editError, setEditError] = useState<string | null>(null);
   const [editSuccess, setEditSuccess] = useState<string | null>(null);
+
+  // Admin-only password reset — no old password needed, since the whole
+  // point is covering the case where a staff member has forgotten theirs.
+  const [resettingUser, setResettingUser] = useState<StaffMember | null>(null);
+  const [newPassword, setNewPassword] = useState("");
+  const [resetError, setResetError] = useState<string | null>(null);
+  const [resetSubmitting, setResetSubmitting] = useState(false);
 
   async function load() {
     try {
@@ -63,6 +71,7 @@ export default function StaffPage() {
     setExpandedId(s.id);
     setIsEditing(false);
     setEditForm({
+      username: s.username,
       name: s.name ?? "",
       job_title: s.job_title ?? "",
       joined_date: s.joined_date ?? "",
@@ -85,6 +94,7 @@ export default function StaffPage() {
     setEditSuccess(null);
     try {
       await api.put(`/auth/users/${id}`, {
+        username: editForm.username || undefined,
         name: editForm.name || undefined,
         job_title: editForm.job_title || undefined,
         joined_date: editForm.joined_date || undefined,
@@ -117,6 +127,30 @@ export default function StaffPage() {
     }
   }
 
+  function openResetPassword(s: StaffMember) {
+    setResettingUser(s);
+    setNewPassword("");
+    setResetError(null);
+  }
+
+  async function submitResetPassword() {
+    if (!resettingUser) return;
+    setResetError(null);
+    if (newPassword.length < 6) {
+      setResetError("Password must be at least 6 characters.");
+      return;
+    }
+    setResetSubmitting(true);
+    try {
+      await api.put(`/auth/users/${resettingUser.id}/password`, { password: newPassword });
+      setResettingUser(null);
+    } catch (err) {
+      setResetError(err instanceof ApiRequestError ? err.message : "Failed to reset password");
+    } finally {
+      setResetSubmitting(false);
+    }
+  }
+
   return (
     <div>
       <PageHeader
@@ -137,7 +171,7 @@ export default function StaffPage() {
             <Input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by ID, name, role, or job title..."
+              placeholder="Search staff..."
               className="pl-9 py-2 text-sm"
             />
           </div>
@@ -157,6 +191,10 @@ export default function StaffPage() {
           <tbody>
             {filteredStaff.map((s) => {
               const isExpanded = expandedId === s.id;
+              // The very first account (the shop owner's own login) — its
+              // role can't be changed and it can't be deleted, enforced
+              // server-side too so this is just the UI reflecting that.
+              const isProtected = s.id === 1;
               return (
                 <Fragment key={s.id}>
                   <tr onClick={() => toggleExpand(s)} className="cursor-pointer hover:bg-gray-50">
@@ -186,6 +224,10 @@ export default function StaffPage() {
                               <>
                                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                                   <FormGroup>
+                                    <Label>Username</Label>
+                                    <Input value={editForm.username} onChange={(e) => setEditForm((f) => ({ ...f, username: e.target.value }))} />
+                                  </FormGroup>
+                                  <FormGroup>
                                     <Label>Name</Label>
                                     <Input value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} />
                                   </FormGroup>
@@ -199,11 +241,15 @@ export default function StaffPage() {
                                     />
                                   </FormGroup>
                                   <FormGroup>
-                                    <Label>System role</Label>
+                                    <Label>
+                                      System role
+                                      {isProtected && <HelpHint text="This is the shop's primary admin account — its role is locked and can't be changed." />}
+                                    </Label>
                                     <Dropdown
                                       value={editForm.role}
                                       onChange={(value) => setEditForm((f) => ({ ...f, role: value }))}
                                       options={[{ value: "staff", label: "Staff" }, { value: "admin", label: "Admin" }]}
+                                      disabled={isProtected}
                                     />
                                   </FormGroup>
                                   <FormGroup>
@@ -265,7 +311,11 @@ export default function StaffPage() {
                                   <Button size="sm" onClick={() => setIsEditing(false)}>
                                     Cancel
                                   </Button>
-                                  {s.id !== user?.id && (
+                                  <Button size="sm" onClick={() => openResetPassword(s)} className="inline-flex items-center gap-1.5">
+                                    <KeyRound size={13} />
+                                    Reset password
+                                  </Button>
+                                  {s.id !== user?.id && !isProtected && (
                                     <Button variant="danger" size="sm" onClick={() => handleDeleteUser(s.id)}>
                                       Remove login
                                     </Button>
@@ -316,6 +366,42 @@ export default function StaffPage() {
         </Table>
         {filteredStaff.length === 0 && <p className="px-4 py-6 text-center text-sm text-gray-400">No staff members match your search.</p>}
       </Card>
+
+      {resettingUser && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl">
+            <div className="p-5 border-b border-gray-100 flex items-center justify-between">
+              <h2 className="text-base font-semibold text-gray-900">Reset password</h2>
+              <button onClick={() => setResettingUser(null)} className="text-gray-400 hover:text-gray-600">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-5">
+              <p className="text-xs text-gray-500 mb-3">
+                Sets a new password for <span className="font-medium text-gray-700">{resettingUser.name ?? resettingUser.username}</span> —
+                no need for their old one.
+              </p>
+              <FormGroup>
+                <Label>New password</Label>
+                <Input
+                  type="text"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="At least 6 characters"
+                  autoFocus
+                />
+              </FormGroup>
+              {resetError && <ErrorText>{resetError}</ErrorText>}
+              <div className="flex gap-2 mt-2">
+                <Button variant="primary" onClick={submitResetPassword} disabled={resetSubmitting}>
+                  {resetSubmitting ? "Saving..." : "Set new password"}
+                </Button>
+                <Button onClick={() => setResettingUser(null)}>Cancel</Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

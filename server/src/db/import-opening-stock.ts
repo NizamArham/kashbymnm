@@ -170,7 +170,7 @@ function main() {
 
     const insertPurchase = db.prepare(
       `INSERT INTO purchases (purchase_code, supplier_id, purchase_date, total_cost, amount_paid, payment_status, fulfillment_status, description)
-       VALUES (?, ?, datetime('now'), ?, ?, 'paid', 'fulfilled', ?)`
+       VALUES (?, ?, datetime('now', '+330 minutes'), ?, ?, 'paid', 'fulfilled', ?)`
     );
     const insertPurchaseItem = db.prepare(
       `INSERT INTO purchase_items (purchase_id, product_id, quantity, unit_cost, size, color) VALUES (?, ?, ?, ?, ?, ?)`

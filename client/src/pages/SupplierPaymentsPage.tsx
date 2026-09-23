@@ -10,10 +10,12 @@ import {
   CreditCard,
   ChevronDown,
   ChevronRight,
+  Download,
 } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { SupplierPayment, SupplierBalance, Supplier, Purchase, BankAccount } from "../lib/types";
-import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Table, Th, Td, Dropdown, EmptyState, DateRangePicker, DatePicker } from "../components/ui";
+import { downloadTabularReport, rangeLabelFor } from "../lib/reportPdf";
+import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Table, Th, Td, Dropdown, EmptyState, DateRangePicker, DatePicker, HelpHint } from "../components/ui";
 
 type ExpandedTab = "activity";
 
@@ -37,6 +39,8 @@ export default function SupplierPaymentsPage() {
   const [dateStart, setDateStart] = useState("");
   const [dateEnd, setDateEnd] = useState("");
   const paymentsPageSize = dateStart || dateEnd ? 50 : 5;
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   // Which supplier's row is expanded to show their full running ledger.
   const [expandedSupplierId, setExpandedSupplierId] = useState<number | null>(null);
@@ -114,6 +118,55 @@ export default function SupplierPaymentsPage() {
     loadPayments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paymentsPage, dateStart, dateEnd]);
+
+  const PAYMENTS_REPORT_CAP = 200;
+
+  // Downloads the full filtered range, not just the current page — the
+  // server caps a single page at 200 rows; if the range holds more, the
+  // report says so rather than silently only covering the first 200.
+  async function downloadPaymentsPdf() {
+    setDownloadError(null);
+    setDownloading(true);
+    try {
+      const params = new URLSearchParams({ page: "1", pageSize: String(PAYMENTS_REPORT_CAP) });
+      if (dateStart) params.set("start", dateStart);
+      if (dateEnd) params.set("end", dateEnd);
+      const result = await api.get<{ rows: SupplierPayment[]; total: number }>(`/supplier-payments?${params.toString()}`);
+      const truncated = result.total > result.rows.length;
+      const totalPaid = result.rows.reduce((sum, p) => sum + p.amount, 0);
+
+      downloadTabularReport({
+        headerLabel: "M&M Clothing — Supplier Payments Report",
+        title: "Supplier Payments",
+        rangeLabel: rangeLabelFor(dateStart || null, dateEnd || null),
+        columns: [
+          { label: "Date", width: 90 },
+          { label: "Supplier", width: 140 },
+          { label: "Amount", width: 90, align: "right" },
+          { label: "Method", width: 90 },
+          { label: "Notes", width: 105 },
+        ],
+        rows: result.rows.map((p) => ({
+          cells: [
+            p.payment_date.slice(0, 16).replace("T", " "),
+            p.supplier_name,
+            `Rs. ${p.amount.toLocaleString()}`,
+            p.method ? p.method.replace("_", " ") : "—",
+            p.notes ?? "—",
+          ],
+        })),
+        summaryLines: [
+          ...(truncated ? [{ text: `Showing the latest ${result.rows.length} of ${result.total} payments — narrow the date range for a complete report.` }] : []),
+          { text: `Total paid in this range: Rs. ${totalPaid.toLocaleString()}`, bold: true },
+        ],
+        filename: `supplier-payments-${dateStart || "all"}-to-${dateEnd || "now"}.pdf`,
+      });
+    } catch (err) {
+      setDownloadError(err instanceof ApiRequestError ? err.message : "Failed to generate report");
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   useEffect(() => {
     load();
@@ -463,7 +516,16 @@ export default function SupplierPaymentsPage() {
                     ) : (
                       <>
                         <div className="flex items-baseline justify-between">
-                          <h3 className="text-sm font-semibold text-gray-900">Add cheque</h3>
+                          <h3 className="text-sm font-semibold text-gray-900">
+                            Add cheque
+                            <HelpHint
+                              text={
+                                chequeKind === "in_hand"
+                                  ? "Add one or more cheques already received from customers, currently in hand."
+                                  : "Write one or more new cheques from your own account."
+                              }
+                            />
+                          </h3>
                           <span className="text-[11px] text-gray-400">Clears later</span>
                         </div>
 
@@ -490,7 +552,6 @@ export default function SupplierPaymentsPage() {
 
                         {chequeKind === "in_hand" ? (
                           <>
-                            <p className="text-xs text-gray-400">Add one or more cheques already received from customers, currently in hand.</p>
                             <div className="flex gap-2">
                               <Input
                                 placeholder="Cheque number"
@@ -504,7 +565,6 @@ export default function SupplierPaymentsPage() {
                           </>
                         ) : (
                           <>
-                            <p className="text-xs text-gray-400">Write one or more new cheques from your own account.</p>
                             <div className="grid grid-cols-2 gap-2">
                               <Input placeholder="Cheque number" value={ownChequeNumber} onChange={(e) => setOwnChequeNumber(e.target.value)} />
                               <Input placeholder="Bank name" value={ownChequeBankName} onChange={(e) => setOwnChequeBankName(e.target.value)} />
@@ -567,7 +627,7 @@ export default function SupplierPaymentsPage() {
 
                     <FormGroup>
                       <Label>Notes (optional)</Label>
-                      <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Reference, remarks, etc." />
+                      <Input value={notes} onChange={(e) => setNotes(e.target.value)} />
                     </FormGroup>
 
                     {formError && <ErrorText>{formError}</ErrorText>}
@@ -784,18 +844,25 @@ export default function SupplierPaymentsPage() {
             </Table>
           </Card>
 
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
             <h2 className="text-base font-semibold text-gray-900">Payment log</h2>
-            <DateRangePicker
-              startDate={dateStart || null}
-              endDate={dateEnd || null}
-              onChange={(s, e) => {
-                setDateStart(s ?? "");
-                setDateEnd(e ?? "");
-                setPaymentsPage(1);
-              }}
-            />
+            <div className="flex items-center gap-2">
+              <DateRangePicker
+                startDate={dateStart || null}
+                endDate={dateEnd || null}
+                onChange={(s, e) => {
+                  setDateStart(s ?? "");
+                  setDateEnd(e ?? "");
+                  setPaymentsPage(1);
+                }}
+              />
+              <Button onClick={downloadPaymentsPdf} disabled={downloading || payments.length === 0} className="inline-flex items-center gap-1.5">
+                <Download size={14} />
+                {downloading ? "Preparing..." : "Download PDF"}
+              </Button>
+            </div>
           </div>
+          {downloadError && <ErrorText>{downloadError}</ErrorText>}
 
           {paymentsLoading ? (
             <p className="text-sm text-gray-400">Loading...</p>

@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { Package, Clock, Trash2, RotateCcw } from "lucide-react";
+import { Package, Clock, Trash2, Download } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
-import { Supplier, Purchase } from "../lib/types";
+import { Supplier, Purchase, AvailableUnit } from "../lib/types";
+import { downloadTabularReport, rangeLabelFor } from "../lib/reportPdf";
 import {
   PageHeader,
   Card,
@@ -19,7 +19,14 @@ import {
   EmptyState,
   DateRangePicker,
   DatePicker,
+  TabToggle,
+  RowCard,
+  RowCardStats,
+  RowCardStat,
+  HelpHint,
 } from "../components/ui";
+
+type PurchasesTab = "record" | "pending" | "history" | "returns";
 
 interface DraftLine {
   description: string;
@@ -43,7 +50,6 @@ function isWithinEditWindow(dateStr: string): boolean {
 }
 
 export default function PurchasesPage() {
-  const navigate = useNavigate();
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [pending, setPending] = useState<Purchase[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -62,7 +68,7 @@ export default function PurchasesPage() {
   const [editError, setEditError] = useState<string | null>(null);
   const [editSubmitting, setEditSubmitting] = useState(false);
 
-  const [showRecord, setShowRecord] = useState(false);
+  const [activeTab, setActiveTab] = useState<PurchasesTab>("pending");
   const [supplierId, setSupplierId] = useState("");
   const [lines, setLines] = useState<DraftLine[]>([{ description: "", quantity: "", unit_cost: "", product_type: "OG" }]);
   const [amountPaid, setAmountPaid] = useState("");
@@ -87,17 +93,43 @@ export default function PurchasesPage() {
   const [historyStart, setHistoryStart] = useState<string | null>(null);
   const [historyEnd, setHistoryEnd] = useState<string | null>(null);
 
+  // Returns tab — folded in from what used to be its own page, since
+  // it's really just another view of the same purchases data.
+  const [returnsHistory, setReturnsHistory] = useState<any[]>([]);
+  const [returnsDateStart, setReturnsDateStart] = useState<string | null>(null);
+  const [returnsDateEnd, setReturnsDateEnd] = useState<string | null>(null);
+
+  const [returnPurchaseCode, setReturnPurchaseCode] = useState("");
+  const [returnPurchase, setReturnPurchase] = useState<any>(null);
+  const [returnLookupError, setReturnLookupError] = useState<string | null>(null);
+  const [returnScenario, setReturnScenario] = useState<"pending_line" | "in_stock" | null>(null);
+
+  const [returnLineId, setReturnLineId] = useState("");
+  const [returnLineQty, setReturnLineQty] = useState("");
+
+  const [availableUnits, setAvailableUnits] = useState<AvailableUnit[]>([]);
+  const [selectedUnitIds, setSelectedUnitIds] = useState<Set<number>>(new Set());
+
+  const [returnReason, setReturnReason] = useState("");
+  const [returnResolution, setReturnResolution] = useState<"cash_refund" | "supplier_credit">("cash_refund");
+  const [returnNotes, setReturnNotes] = useState("");
+  const [returnFormError, setReturnFormError] = useState<string | null>(null);
+  const [returnFormSuccess, setReturnFormSuccess] = useState<string | null>(null);
+  const [returnSubmitting, setReturnSubmitting] = useState(false);
+
   async function load() {
     setLoading(true);
     try {
-      const [p, pend, s] = await Promise.all([
+      const [p, pend, s, ret] = await Promise.all([
         api.get<Purchase[]>("/purchases"),
         api.get<Purchase[]>("/purchases/pending"),
         api.get<Supplier[]>("/suppliers"),
+        api.get<any[]>("/purchases/returns"),
       ]);
       setPurchases(p.filter((x) => x.fulfillment_status === "fulfilled"));
       setPending(pend);
       setSuppliers(s);
+      setReturnsHistory(ret);
     } catch (err) {
       setError(err instanceof ApiRequestError ? err.message : "Failed to load purchases");
     } finally {
@@ -223,7 +255,6 @@ export default function PurchasesPage() {
       setOwnChequeDate("");
       setExpenses([]);
       setNotes("");
-      setShowRecord(false);
       load();
     } catch (err) {
       setFormError(err instanceof ApiRequestError ? err.message : "Failed to record this purchase");
@@ -316,35 +347,172 @@ export default function PurchasesPage() {
     return d >= historyStart && d <= historyEnd;
   });
 
+  function downloadPurchasesPdf() {
+    const totalCost = filteredPurchases.reduce((sum, p) => sum + p.total_cost, 0);
+    const totalPaid = filteredPurchases.reduce((sum, p) => sum + p.amount_paid, 0);
+
+    downloadTabularReport({
+      headerLabel: "M&M Clothing — Purchases Report",
+      title: "Purchases",
+      rangeLabel: rangeLabelFor(historyStart, historyEnd),
+      columns: [
+        { label: "Code", width: 90 },
+        { label: "Date", width: 80 },
+        { label: "Supplier", width: 150 },
+        { label: "Total cost", width: 95, align: "right" },
+        { label: "Paid", width: 95, align: "right" },
+        { label: "Status", width: 65 },
+      ],
+      rows: filteredPurchases.map((p) => ({
+        cells: [
+          p.purchase_code,
+          p.purchase_date.slice(0, 10),
+          p.supplier_name,
+          `Rs. ${p.total_cost.toLocaleString()}`,
+          `Rs. ${p.amount_paid.toLocaleString()}`,
+          p.payment_status,
+        ],
+      })),
+      summaryLines: [
+        { text: `Total cost: Rs. ${totalCost.toLocaleString()}  ·  Total paid: Rs. ${totalPaid.toLocaleString()}`, bold: true },
+      ],
+      filename: `purchases-${historyStart || "all"}-to-${historyEnd || "now"}.pdf`,
+    });
+  }
+
+  async function handleReturnLookup() {
+    setReturnLookupError(null);
+    setReturnPurchase(null);
+    setReturnScenario(null);
+    setReturnLineId("");
+    setSelectedUnitIds(new Set());
+    const code = returnPurchaseCode.trim();
+    if (!code) return;
+    try {
+      const all = await api.get<Purchase[]>("/purchases");
+      const match = all.find((p) => p.purchase_code.toLowerCase() === code.toLowerCase());
+      if (!match) {
+        setReturnLookupError("No purchase found with that code");
+        return;
+      }
+      const full = await api.get<any>(`/purchases/${match.id}`);
+      setReturnPurchase(full);
+      const units = await api.get<AvailableUnit[]>(`/purchases/${match.id}/available-units`);
+      setAvailableUnits(units);
+    } catch (err) {
+      setReturnLookupError(err instanceof ApiRequestError ? err.message : "Lookup failed");
+    }
+  }
+
+  function toggleUnit(id: number) {
+    setSelectedUnitIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  const returnLine = returnPurchase?.lines?.find((l: any) => String(l.id) === returnLineId);
+  const returnLineQtyNum = parseInt(returnLineQty, 10) || 0;
+  const scenarioBAmount = returnLine ? Math.min(returnLineQtyNum, returnLine.quantity) * returnLine.unit_cost : 0;
+  const scenarioAAmount = availableUnits.filter((u) => selectedUnitIds.has(u.id)).reduce((sum, u) => sum + (u.cost_price ?? 0), 0);
+  const returnTotalAmount = returnScenario === "pending_line" ? scenarioBAmount : scenarioAAmount;
+
+  async function handleSubmitReturn() {
+    setReturnFormError(null);
+    setReturnFormSuccess(null);
+
+    if (!returnPurchase) {
+      setReturnFormError("Look up a purchase first");
+      return;
+    }
+    if (!returnReason.trim()) {
+      setReturnFormError("A reason is required");
+      return;
+    }
+
+    let items: { pending_line_id?: number; inventory_id?: number; quantity?: number }[] = [];
+    if (returnScenario === "pending_line") {
+      if (!returnLineId || returnLineQtyNum <= 0) {
+        setReturnFormError("Select a line and enter a quantity greater than 0");
+        return;
+      }
+      items = [{ pending_line_id: parseInt(returnLineId, 10), quantity: returnLineQtyNum }];
+    } else if (returnScenario === "in_stock") {
+      if (selectedUnitIds.size === 0) {
+        setReturnFormError("Select at least one unit to return");
+        return;
+      }
+      items = Array.from(selectedUnitIds).map((id) => ({ inventory_id: id }));
+    } else {
+      setReturnFormError("Choose whether this stock was already added to inventory or not");
+      return;
+    }
+
+    setReturnSubmitting(true);
+    try {
+      await api.post("/purchases/returns", {
+        purchase_id: returnPurchase.id,
+        items,
+        reason: returnReason.trim(),
+        resolution: returnResolution,
+        notes: returnNotes.trim() || undefined,
+      });
+      setReturnFormSuccess(
+        returnResolution === "cash_refund"
+          ? "Recorded — cash refund added to the cash book."
+          : "Recorded — credit added to this supplier's balance, applied automatically on their next purchase."
+      );
+      setReturnPurchaseCode("");
+      setReturnPurchase(null);
+      setReturnScenario(null);
+      setReturnLineId("");
+      setReturnLineQty("");
+      setSelectedUnitIds(new Set());
+      setReturnReason("");
+      setReturnNotes("");
+      load();
+    } catch (err) {
+      setReturnFormError(err instanceof ApiRequestError ? err.message : "Failed to record this return");
+    } finally {
+      setReturnSubmitting(false);
+    }
+  }
+
+  const filteredReturns = returnsHistory.filter((r) => {
+    if (!returnsDateStart || !returnsDateEnd) return true;
+    const d = r.created_at?.slice(0, 10);
+    return d >= returnsDateStart && d <= returnsDateEnd;
+  });
+
   return (
     <div>
       <PageHeader
         title="Purchases"
-        subtitle="Record goods as soon as they arrive and are paid for — sort them into real products/variants whenever you're ready."
-        action={
-          <div className="flex gap-2">
-            {!showRecord && (
-              <Button variant="primary" onClick={() => setShowRecord(true)}>
-                Record new purchase
-              </Button>
-            )}
-            <Button onClick={() => navigate("/purchases/returns")} className="inline-flex items-center gap-1.5">
-              <RotateCcw size={15} />
-              Record Returns
-            </Button>
-          </div>
-        }
+        subtitle="Record incoming goods, then sort them into stock."
       />
 
-      {error && <ErrorText>{error}</ErrorText>}
+      <TabToggle
+        value={activeTab}
+        onChange={setActiveTab}
+        options={[
+          { value: "record", label: "Record Purchase" },
+          { value: "pending", label: `Awaiting Sorting${pending.length > 0 ? ` (${pending.length})` : ""}` },
+          { value: "history", label: "History" },
+          { value: "returns", label: "Returns" },
+        ]}
+      />
+      <div className="mt-5">
+        {error && <ErrorText>{error}</ErrorText>}
+      </div>
 
-      {showRecord && (
+      {activeTab === "record" && (
         <Card className="max-w-2xl mb-5">
-          <h2 className="text-base font-semibold text-gray-900 mb-3">Goods just arrived</h2>
-          <p className="text-xs text-gray-400 mb-3">
-            Add one line per item in the delivery — you don't need to know the exact product/variant yet. Sort it into real stock later
-            from Add Product or Manage Products.
-          </p>
+          <h2 className="text-base font-semibold text-gray-900 mb-3">
+            Goods just arrived
+            <HelpHint text="Add one line per item in the delivery — you don't need to know the exact product/variant yet. Sort it into real stock later from Add Product or Manage Products." />
+          </h2>
           <FormGroup>
             <Label>Supplier</Label>
             <Dropdown
@@ -357,17 +525,20 @@ export default function PurchasesPage() {
           </FormGroup>
 
           <Label>Items in this delivery</Label>
-          <div className="space-y-2 mb-2">
+          <div className="space-y-3 lg:space-y-2 mb-2">
             {lines.map((line, i) => (
-              <div key={i} className="flex gap-2 items-start">
-                <div className="flex-[2]">
+              <div
+                key={i}
+                className="grid grid-cols-2 gap-2 lg:flex lg:gap-2 lg:items-start border border-gray-100 rounded-xl p-2.5 lg:p-0 lg:border-0"
+              >
+                <div className="col-span-2 lg:flex-[2]">
                   <Input
                     value={line.description}
                     onChange={(e) => updateLine(i, "description", e.target.value)}
-                    placeholder='e.g. "BR Business Casual Pants"'
+                    placeholder="Item description"
                   />
                 </div>
-                <div className="w-24">
+                <div className="lg:w-24">
                   <Input
                     type="number"
                     min="1"
@@ -376,7 +547,7 @@ export default function PurchasesPage() {
                     placeholder="Qty"
                   />
                 </div>
-                <div className="w-32">
+                <div className="lg:w-32">
                   <Input
                     type="number"
                     min="0"
@@ -385,7 +556,7 @@ export default function PurchasesPage() {
                     placeholder="Cost/pc"
                   />
                 </div>
-                <div className="w-40">
+                <div className="col-span-2 lg:w-40">
                   <Dropdown
                     value={line.product_type}
                     onChange={(v) => updateLine(i, "product_type", v)}
@@ -399,8 +570,12 @@ export default function PurchasesPage() {
                   />
                 </div>
                 {lines.length > 1 && (
-                  <button onClick={() => removeLine(i)} className="text-gray-400 hover:text-red-500 mt-2.5">
+                  <button
+                    onClick={() => removeLine(i)}
+                    className="col-span-2 lg:col-auto flex items-center justify-center lg:justify-start gap-1.5 text-gray-400 hover:text-red-500 lg:mt-2.5"
+                  >
                     <Trash2 size={16} />
+                    <span className="text-xs lg:hidden">Remove line</span>
                   </button>
                 )}
               </div>
@@ -424,7 +599,7 @@ export default function PurchasesPage() {
 
           <FormGroup>
             <Label>Amount paid to supplier now (Rs.)</Label>
-            <Input type="number" min="0" value={amountPaid} onChange={(e) => setAmountPaid(e.target.value)} placeholder="0 if fully on credit" />
+            <Input type="number" min="0" value={amountPaid} onChange={(e) => setAmountPaid(e.target.value)} placeholder="0" />
           </FormGroup>
 
           {parseFloat(amountPaid) > 0 && (
@@ -517,15 +692,15 @@ export default function PurchasesPage() {
           )}
 
           <div className="border-t border-gray-100 pt-3 mt-1">
-            <p className="text-xs text-gray-400 mb-2">
-              Transport, commission, loading, or any other cost — NOT owed to this supplier. Each becomes its own separate cash book
-              expense.
-            </p>
+            <Label>
+              Other expenses
+              <HelpHint text="Transport, commission, loading, or any other cost — NOT owed to this supplier. Each becomes its own separate cash book expense." />
+            </Label>
             <div className="space-y-2 mb-2">
               {expenses.map((exp, i) => (
                 <div key={i} className="flex gap-2 items-start">
                   <div className="flex-[2]">
-                    <Input value={exp.label} onChange={(e) => updateExpense(i, "label", e.target.value)} placeholder="e.g. Transport" />
+                    <Input value={exp.label} onChange={(e) => updateExpense(i, "label", e.target.value)} placeholder="Expense" />
                   </div>
                   <div className="w-32">
                     <Input
@@ -550,7 +725,7 @@ export default function PurchasesPage() {
 
           <FormGroup>
             <Label>Notes (optional)</Label>
-            <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Anything else about this delivery" />
+            <Input value={notes} onChange={(e) => setNotes(e.target.value)} />
           </FormGroup>
 
           {formError && <ErrorText>{formError}</ErrorText>}
@@ -559,92 +734,114 @@ export default function PurchasesPage() {
             <Button variant="primary" onClick={handleRecordPending} disabled={submitting}>
               {submitting ? "Recording..." : "Record purchase"}
             </Button>
-            <Button onClick={() => setShowRecord(false)}>Cancel</Button>
           </div>
         </Card>
       )}
 
       {loading ? (
         <p className="text-sm text-gray-400">Loading...</p>
-      ) : (
-        <>
-          <h2 className="text-base font-semibold text-gray-900 mb-3">Awaiting sorting</h2>
-          {pending.length === 0 ? (
-            <EmptyState icon={Clock} title="Nothing pending" subtitle="Goods you record as arrived but haven't fully sorted yet will show here." />
-          ) : (
-            <div className="space-y-3 mb-6">
-              {pending.map((p) => (
-                <Card key={p.id} className="bg-amber-50/40">
-                  <div className="flex items-start justify-between mb-2">
-                    <div>
-                      <p className="text-sm font-semibold text-gray-900">
-                        {p.purchase_code} — {p.supplier_name}
-                      </p>
-                      <p className="text-xs text-gray-400">{p.purchase_date.slice(0, 10)}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {statusBadge(p.payment_status)}
-                      <Button size="sm" variant="primary" onClick={() => handleMarkSorted(p)} disabled={markingSortedId === p.id}>
-                        {markingSortedId === p.id ? "Marking..." : "Mark fully sorted"}
-                      </Button>
-                      {isWithinEditWindow(p.purchase_date) && (
-                        <>
-                          <button onClick={() => openEdit(p)} className="text-gray-400 hover:text-black text-xs underline">
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => handleDeletePurchase(p)}
-                            disabled={deletingId === p.id}
-                            className="text-gray-400 hover:text-red-500 text-xs underline"
-                          >
-                            {deletingId === p.id ? "Deleting..." : "Delete"}
-                          </button>
-                        </>
+      ) : activeTab === "pending" ? (
+        pending.length === 0 ? (
+          <EmptyState icon={Clock} title="Nothing pending" subtitle="Goods you record as arrived but haven't fully sorted yet will show here." />
+        ) : (
+          <div className="space-y-3">
+            {pending.map((p) => (
+              <Card key={p.id} className="bg-amber-50/40">
+                <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-3 mb-2">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">
+                      {p.purchase_code} — {p.supplier_name}
+                    </p>
+                    <p className="text-xs text-gray-400">{p.purchase_date.slice(0, 10)}</p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {statusBadge(p.payment_status)}
+                    <Button size="sm" variant="primary" onClick={() => handleMarkSorted(p)} disabled={markingSortedId === p.id}>
+                      {markingSortedId === p.id ? "Marking..." : "Mark fully sorted"}
+                    </Button>
+                    {isWithinEditWindow(p.purchase_date) && (
+                      <>
+                        <button onClick={() => openEdit(p)} className="text-gray-400 hover:text-black text-xs underline">
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleDeletePurchase(p)}
+                          disabled={deletingId === p.id}
+                          className="text-gray-400 hover:text-red-500 text-xs underline"
+                        >
+                          {deletingId === p.id ? "Deleting..." : "Delete"}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+                {p.description && <p className="text-xs text-gray-500 mb-2">{p.description}</p>}
+
+                {/* Desktop: line-items table */}
+                <table className="w-full text-sm hidden lg:table">
+                  <thead>
+                    <tr>
+                      <Th>Line</Th>
+                      <Th>Qty</Th>
+                      <Th>Cost/pc</Th>
+                      <Th>Line total</Th>
+                      <Th>Status</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {p.lines?.map((line) => (
+                      <tr key={line.id} className={line.is_fulfilled ? "opacity-50" : ""}>
+                        <Td className={line.is_fulfilled ? "line-through" : ""}>{line.description}</Td>
+                        <Td>{line.quantity}</Td>
+                        <Td>Rs. {line.unit_cost.toLocaleString()}</Td>
+                        <Td>Rs. {(line.quantity * line.unit_cost).toLocaleString()}</Td>
+                        <Td>
+                          {line.is_fulfilled ? (
+                            <span className="text-xs font-medium border border-gray-300 rounded-full px-2.5 py-1">sorted</span>
+                          ) : (
+                            <span className="text-xs text-gray-500 border border-gray-200 rounded-full px-2.5 py-1">awaiting</span>
+                          )}
+                        </Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+                {/* Mobile: stacked line items */}
+                <div className="lg:hidden space-y-1.5">
+                  {p.lines?.map((line) => (
+                    <div
+                      key={line.id}
+                      className={`flex items-center justify-between gap-2 bg-white/70 rounded-lg px-3 py-2 ${line.is_fulfilled ? "opacity-50" : ""}`}
+                    >
+                      <div className={`min-w-0 ${line.is_fulfilled ? "line-through" : ""}`}>
+                        <p className="text-sm text-gray-900 truncate">{line.description}</p>
+                        <p className="text-xs text-gray-500">
+                          {line.quantity} × Rs. {line.unit_cost.toLocaleString()} = Rs. {(line.quantity * line.unit_cost).toLocaleString()}
+                        </p>
+                      </div>
+                      {line.is_fulfilled ? (
+                        <span className="flex-shrink-0 text-xs font-medium border border-gray-300 rounded-full px-2.5 py-1">sorted</span>
+                      ) : (
+                        <span className="flex-shrink-0 text-xs text-gray-500 border border-gray-200 rounded-full px-2.5 py-1">awaiting</span>
                       )}
                     </div>
-                  </div>
-                  {p.description && <p className="text-xs text-gray-500 mb-2">{p.description}</p>}
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr>
-                        <Th>Line</Th>
-                        <Th>Qty</Th>
-                        <Th>Cost/pc</Th>
-                        <Th>Line total</Th>
-                        <Th>Status</Th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {p.lines?.map((line) => (
-                        <tr key={line.id} className={line.is_fulfilled ? "opacity-50" : ""}>
-                          <Td className={line.is_fulfilled ? "line-through" : ""}>{line.description}</Td>
-                          <Td>{line.quantity}</Td>
-                          <Td>Rs. {line.unit_cost.toLocaleString()}</Td>
-                          <Td>Rs. {(line.quantity * line.unit_cost).toLocaleString()}</Td>
-                          <Td>
-                            {line.is_fulfilled ? (
-                              <span className="text-xs font-medium border border-gray-300 rounded-full px-2.5 py-1">sorted</span>
-                            ) : (
-                              <span className="text-xs text-gray-500 border border-gray-200 rounded-full px-2.5 py-1">awaiting</span>
-                            )}
-                          </Td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <div className="flex justify-between text-sm font-medium mt-2 pt-2 border-t border-amber-200">
-                    <span>Goods total / Paid</span>
-                    <span>
-                      Rs. {p.total_cost.toLocaleString()} / Rs. {p.amount_paid.toLocaleString()}
-                    </span>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          )}
+                  ))}
+                </div>
 
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-base font-semibold text-gray-900">History</h2>
+                <div className="flex justify-between text-sm font-medium mt-2 pt-2 border-t border-amber-200">
+                  <span>Goods total / Paid</span>
+                  <span>
+                    Rs. {p.total_cost.toLocaleString()} / Rs. {p.amount_paid.toLocaleString()}
+                  </span>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )
+      ) : activeTab === "history" ? (
+        <>
+          <div className="flex items-center justify-end gap-2 mb-3">
             <DateRangePicker
               startDate={historyStart}
               endDate={historyEnd}
@@ -653,56 +850,344 @@ export default function PurchasesPage() {
                 setHistoryEnd(e);
               }}
             />
+            <Button onClick={downloadPurchasesPdf} disabled={filteredPurchases.length === 0} className="inline-flex items-center gap-1.5">
+              <Download size={14} />
+              Download PDF
+            </Button>
           </div>
           {filteredPurchases.length === 0 ? (
             <EmptyState icon={Package} title="No purchases recorded in this range" />
           ) : (
-            <Card className="p-0 overflow-hidden">
-              <Table>
-                <thead>
-                  <tr>
-                    <Th>Code</Th>
-                    <Th>Date</Th>
-                    <Th>Supplier</Th>
-                    <Th>Total cost</Th>
-                    <Th>Paid</Th>
-                    <Th>Status</Th>
-                    <Th></Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredPurchases.map((p) => (
-                    <tr key={p.id}>
-                      <Td>{p.purchase_code}</Td>
-                      <Td>{p.purchase_date.slice(0, 10)}</Td>
-                      <Td>{p.supplier_name}</Td>
-                      <Td>Rs. {p.total_cost.toLocaleString()}</Td>
-                      <Td>Rs. {p.amount_paid.toLocaleString()}</Td>
-                      <Td>{statusBadge(p.payment_status)}</Td>
-                      <Td>
-                        {isWithinEditWindow(p.purchase_date) && (
-                          <div className="flex items-center gap-2">
-                            <button onClick={() => openEdit(p)} className="text-gray-400 hover:text-black text-xs underline">
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => handleDeletePurchase(p)}
-                              disabled={deletingId === p.id}
-                              className="text-gray-400 hover:text-red-500 text-xs underline"
-                            >
-                              {deletingId === p.id ? "Deleting..." : "Delete"}
-                            </button>
-                          </div>
-                        )}
-                      </Td>
+            <>
+              {/* Desktop / tablet-landscape */}
+              <Card className="p-0 overflow-hidden hidden lg:block">
+                <Table>
+                  <thead>
+                    <tr>
+                      <Th>Code</Th>
+                      <Th>Date</Th>
+                      <Th>Supplier</Th>
+                      <Th>Total cost</Th>
+                      <Th>Paid</Th>
+                      <Th>Status</Th>
+                      <Th></Th>
                     </tr>
-                  ))}
-                </tbody>
-              </Table>
-            </Card>
+                  </thead>
+                  <tbody>
+                    {filteredPurchases.map((p) => (
+                      <tr key={p.id}>
+                        <Td>{p.purchase_code}</Td>
+                        <Td>{p.purchase_date.slice(0, 10)}</Td>
+                        <Td>{p.supplier_name}</Td>
+                        <Td>Rs. {p.total_cost.toLocaleString()}</Td>
+                        <Td>Rs. {p.amount_paid.toLocaleString()}</Td>
+                        <Td>{statusBadge(p.payment_status)}</Td>
+                        <Td>
+                          {isWithinEditWindow(p.purchase_date) && (
+                            <div className="flex items-center gap-2">
+                              <button onClick={() => openEdit(p)} className="text-gray-400 hover:text-black text-xs underline">
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => handleDeletePurchase(p)}
+                                disabled={deletingId === p.id}
+                                className="text-gray-400 hover:text-red-500 text-xs underline"
+                              >
+                                {deletingId === p.id ? "Deleting..." : "Delete"}
+                              </button>
+                            </div>
+                          )}
+                        </Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+              </Card>
+
+              {/* Mobile / tablet-portrait */}
+              <div className="lg:hidden space-y-2.5">
+                {filteredPurchases.map((p) => (
+                  <RowCard key={p.id}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-medium text-gray-900">{p.purchase_code}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {p.supplier_name} · {p.purchase_date.slice(0, 10)}
+                        </p>
+                      </div>
+                      <div className="flex-shrink-0">{statusBadge(p.payment_status)}</div>
+                    </div>
+
+                    <RowCardStats>
+                      <RowCardStat label="Total cost" value={`Rs. ${p.total_cost.toLocaleString()}`} />
+                      <RowCardStat label="Paid" value={`Rs. ${p.amount_paid.toLocaleString()}`} />
+                    </RowCardStats>
+
+                    {isWithinEditWindow(p.purchase_date) && (
+                      <div className="flex items-center gap-3 mt-2.5 pt-2.5 border-t border-gray-100">
+                        <button onClick={() => openEdit(p)} className="text-gray-400 hover:text-black text-xs underline">
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleDeletePurchase(p)}
+                          disabled={deletingId === p.id}
+                          className="text-gray-400 hover:text-red-500 text-xs underline"
+                        >
+                          {deletingId === p.id ? "Deleting..." : "Delete"}
+                        </button>
+                      </div>
+                    )}
+                  </RowCard>
+                ))}
+              </div>
+            </>
           )}
         </>
-      )}
+      ) : activeTab === "returns" ? (
+        <>
+          <Card className="max-w-2xl mb-5">
+            <h2 className="text-base font-semibold text-gray-900 mb-3">
+              Return goods to a supplier
+              <HelpHint text="Whether it's still a pending line or already sitting in stock." />
+            </h2>
+            <div className="flex gap-2 mb-3">
+              <Input
+                placeholder="Purchase code"
+                value={returnPurchaseCode}
+                onChange={(e) => setReturnPurchaseCode(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleReturnLookup()}
+              />
+              <Button variant="primary" onClick={handleReturnLookup}>
+                Find
+              </Button>
+            </div>
+            {returnLookupError && <ErrorText>{returnLookupError}</ErrorText>}
+
+            {returnPurchase && (
+              <>
+                <FormGroup>
+                  <Label>Was this stock already added to inventory?</Label>
+                  <div className="flex flex-col lg:flex-row gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReturnScenario("pending_line");
+                        setSelectedUnitIds(new Set());
+                      }}
+                      className={`flex-1 border rounded-xl px-3 py-2.5 text-sm text-left ${
+                        returnScenario === "pending_line" ? "border-black bg-black text-white" : "border-gray-200 text-gray-700 hover:border-gray-400"
+                      }`}
+                    >
+                      Not yet in inventory
+                      <div className={`text-xs mt-0.5 ${returnScenario === "pending_line" ? "text-gray-300" : "text-gray-400"}`}>
+                        Still a pending purchase line
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReturnScenario("in_stock");
+                        setReturnLineId("");
+                        setReturnLineQty("");
+                      }}
+                      className={`flex-1 border rounded-xl px-3 py-2.5 text-sm text-left ${
+                        returnScenario === "in_stock" ? "border-black bg-black text-white" : "border-gray-200 text-gray-700 hover:border-gray-400"
+                      }`}
+                    >
+                      Already in inventory
+                      <div className={`text-xs mt-0.5 ${returnScenario === "in_stock" ? "text-gray-300" : "text-gray-400"}`}>
+                        Pick specific unsold units
+                      </div>
+                    </button>
+                  </div>
+                </FormGroup>
+
+                {returnScenario === "pending_line" && (
+                  <>
+                    <FormGroup>
+                      <Label>Which line?</Label>
+                      <Dropdown
+                        value={returnLineId}
+                        onChange={setReturnLineId}
+                        placeholder="— Select line —"
+                        options={(returnPurchase.lines ?? [])
+                          .filter((l: any) => l.quantity > 0)
+                          .map((l: any) => ({
+                            value: String(l.id),
+                            label: `${l.description} — ${l.quantity} pcs remaining @ Rs. ${l.unit_cost.toLocaleString()}`,
+                          }))}
+                      />
+                    </FormGroup>
+                    {returnLine && (
+                      <FormGroup>
+                        <Label>Quantity being returned (of {returnLine.quantity} remaining)</Label>
+                        <Input
+                          type="number"
+                          min="1"
+                          max={returnLine.quantity}
+                          value={returnLineQty}
+                          onChange={(e) => setReturnLineQty(e.target.value)}
+                        />
+                        {returnLineQtyNum > 0 && (
+                          <p className="text-xs text-gray-500 mt-1">
+                            {returnLineQtyNum} × Rs. {returnLine.unit_cost.toLocaleString()} = Rs. {scenarioBAmount.toLocaleString()}
+                          </p>
+                        )}
+                      </FormGroup>
+                    )}
+                  </>
+                )}
+
+                {returnScenario === "in_stock" && (
+                  <FormGroup>
+                    <Label>Select the specific units being returned</Label>
+                    {availableUnits.length === 0 ? (
+                      <p className="text-xs text-gray-400">No available (unsold) units found for this purchase.</p>
+                    ) : (
+                      <div className="border border-gray-200 rounded-xl divide-y divide-gray-100 max-h-64 overflow-y-auto">
+                        {availableUnits.map((u) => (
+                          <label key={u.id} className="flex items-center gap-3 px-3 py-2 text-sm cursor-pointer hover:bg-gray-50">
+                            <input type="checkbox" checked={selectedUnitIds.has(u.id)} onChange={() => toggleUnit(u.id)} className="rounded" />
+                            <span className="flex-1">
+                              {u.product_title} — {u.color ?? "—"} / {u.size ?? "—"} ({u.sku})
+                            </span>
+                            <span className="text-gray-500">Rs. {(u.cost_price ?? 0).toLocaleString()}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    {selectedUnitIds.size > 0 && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        {selectedUnitIds.size} unit(s) selected — Rs. {scenarioAAmount.toLocaleString()}
+                      </p>
+                    )}
+                  </FormGroup>
+                )}
+
+                {returnScenario && (
+                  <>
+                    <div className="flex justify-between text-sm font-semibold bg-gray-50 rounded-lg px-3 py-2 mb-3">
+                      <span>Total</span>
+                      <span>Rs. {returnTotalAmount.toLocaleString()}</span>
+                    </div>
+
+                    <FormGroup>
+                      <Label>Reason</Label>
+                      <Input value={returnReason} onChange={(e) => setReturnReason(e.target.value)} />
+                    </FormGroup>
+
+                    <FormGroup>
+                      <Label>How is this being resolved?</Label>
+                      <div className="flex flex-col lg:flex-row gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setReturnResolution("cash_refund")}
+                          className={`flex-1 border rounded-xl px-3 py-2.5 text-sm text-left ${
+                            returnResolution === "cash_refund" ? "border-black bg-black text-white" : "border-gray-200 text-gray-700 hover:border-gray-400"
+                          }`}
+                        >
+                          Cash refund now
+                          <div className={`text-xs mt-0.5 ${returnResolution === "cash_refund" ? "text-gray-300" : "text-gray-400"}`}>
+                            Supplier pays back immediately — nothing carried forward
+                          </div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setReturnResolution("supplier_credit")}
+                          className={`flex-1 border rounded-xl px-3 py-2.5 text-sm text-left ${
+                            returnResolution === "supplier_credit" ? "border-black bg-black text-white" : "border-gray-200 text-gray-700 hover:border-gray-400"
+                          }`}
+                        >
+                          Supplier credit
+                          <div className={`text-xs mt-0.5 ${returnResolution === "supplier_credit" ? "text-gray-300" : "text-gray-400"}`}>
+                            Reduces what you owe on their next purchase
+                          </div>
+                        </button>
+                      </div>
+                    </FormGroup>
+                    <FormGroup>
+                      <Label>Notes (optional)</Label>
+                      <Input value={returnNotes} onChange={(e) => setReturnNotes(e.target.value)} />
+                    </FormGroup>
+                    {returnFormError && <ErrorText>{returnFormError}</ErrorText>}
+                    {returnFormSuccess && <SuccessText>{returnFormSuccess}</SuccessText>}
+                    <Button variant="primary" onClick={handleSubmitReturn} disabled={returnSubmitting} className="mt-1">
+                      {returnSubmitting ? "Recording..." : "Record return"}
+                    </Button>
+                  </>
+                )}
+              </>
+            )}
+          </Card>
+
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-base font-semibold text-gray-900">Return history</h2>
+            <DateRangePicker
+              startDate={returnsDateStart}
+              endDate={returnsDateEnd}
+              onChange={(s, e) => {
+                setReturnsDateStart(s);
+                setReturnsDateEnd(e);
+              }}
+            />
+          </div>
+
+          {filteredReturns.length === 0 ? (
+            <EmptyState icon={Package} title="No returns recorded in this range" />
+          ) : (
+            <>
+              {/* Desktop / tablet-landscape */}
+              <Card className="p-0 overflow-hidden hidden lg:block">
+                <Table>
+                  <thead>
+                    <tr>
+                      <Th>Date</Th>
+                      <Th>Purchase</Th>
+                      <Th>Supplier</Th>
+                      <Th>Amount</Th>
+                      <Th>Reason</Th>
+                      <Th>Resolution</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredReturns.map((r) => (
+                      <tr key={r.id}>
+                        <Td>{r.created_at?.slice(0, 16).replace("T", " ")}</Td>
+                        <Td>{r.purchase_code}</Td>
+                        <Td>{r.supplier_name}</Td>
+                        <Td>Rs. {r.total_amount?.toLocaleString()}</Td>
+                        <Td>{r.reason}</Td>
+                        <Td className="capitalize">{r.resolution?.replace(/_/g, " ")}</Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+              </Card>
+
+              {/* Mobile / tablet-portrait */}
+              <div className="lg:hidden space-y-2.5">
+                {filteredReturns.map((r) => (
+                  <RowCard key={r.id}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-medium text-gray-900">{r.purchase_code}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {r.supplier_name} · {r.created_at?.slice(0, 16).replace("T", " ")}
+                        </p>
+                      </div>
+                      <p className="text-sm font-semibold text-gray-900 flex-shrink-0">Rs. {r.total_amount?.toLocaleString()}</p>
+                    </div>
+                    <div className="mt-2.5 pt-2.5 border-t border-gray-100 text-sm">
+                      <p className="text-gray-900">{r.reason}</p>
+                      <p className="text-xs text-gray-400 mt-0.5 capitalize">{r.resolution?.replace(/_/g, " ")}</p>
+                    </div>
+                  </RowCard>
+                ))}
+              </div>
+            </>
+          )}
+        </>
+      ) : null}
 
       {editingPurchase && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">

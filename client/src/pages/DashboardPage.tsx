@@ -1,10 +1,93 @@
-import { useEffect, useState } from "react";
-import { ArrowRight } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowRight, ShoppingBag, Truck, PackageCheck, RotateCcw, CheckCircle2, XCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
-import { Sale, InventoryUnit } from "../lib/types";
-import { PageHeader, Card, Table, Th, Td, EmptyState } from "../components/ui";
+import { Sale, InventoryUnit, Delivery, ReturnRequest } from "../lib/types";
+import { PageHeader, Card, EmptyState, Dropdown } from "../components/ui";
+import { RevenueChart, RevenuePoint } from "../components/RevenueChart";
+import { todayInSriLanka } from "../lib/time";
+
+const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+interface ActivityEvent {
+  id: string;
+  icon: any;
+  tone: "blue" | "green" | "amber" | "red";
+  title: string;
+  date: string;
+}
+
+const TONE_CLASSES: Record<ActivityEvent["tone"], string> = {
+  blue: "bg-blue-50 text-blue-500",
+  green: "bg-green-50 text-green-600",
+  amber: "bg-amber-50 text-amber-600",
+  red: "bg-red-50 text-red-500",
+};
+
+function timeAgo(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 60) return mins <= 1 ? "Just now" : `${mins} min ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
+// Merges sales, delivery-status changes, and returns into one
+// chronological feed — each mapped to an icon/tone in the same visual
+// language, newest first.
+function buildActivity(sales: Sale[], deliveries: Delivery[], returns: ReturnRequest[]): ActivityEvent[] {
+  const events: ActivityEvent[] = [];
+
+  for (const s of sales) {
+    events.push({
+      id: `sale-${s.id}`,
+      icon: ShoppingBag,
+      tone: "blue",
+      title: `${s.invoice} placed — Rs. ${s.total.toLocaleString()}`,
+      date: s.date,
+    });
+  }
+
+  for (const d of deliveries) {
+    if (d.dispatched_at) {
+      events.push({ id: `disp-${d.id}`, icon: Truck, tone: "blue", title: `${d.invoice ?? "Order"} — Dispatched`, date: d.dispatched_at });
+    }
+    if (d.delivery_date) {
+      events.push({
+        id: `deliv-${d.id}`,
+        icon: PackageCheck,
+        tone: "green",
+        title: `${d.invoice ?? "Order"} — Delivered`,
+        date: d.delivery_date,
+      });
+    }
+  }
+
+  for (const r of returns) {
+    events.push({
+      id: `ret-${r.id}`,
+      icon: RotateCcw,
+      tone: "amber",
+      title: `${r.invoice} — Return requested (${r.product_title})`,
+      date: r.requested_at,
+    });
+    if (r.decided_at && r.status !== "pending") {
+      events.push({
+        id: `retd-${r.id}`,
+        icon: r.status === "approved" ? CheckCircle2 : XCircle,
+        tone: r.status === "approved" ? "green" : "red",
+        title: `${r.invoice} — Return ${r.status}`,
+        date: r.decided_at,
+      });
+    }
+  }
+
+  return events.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 8);
+}
 
 interface ChequeReminder {
   id: number;
@@ -33,12 +116,15 @@ export default function DashboardPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  const [recentSales, setRecentSales] = useState<Sale[]>([]);
+  const [allSales, setAllSales] = useState<Sale[]>([]);
   const [cashTotal, setCashTotal] = useState<number | null>(null);
   const [bankTotal, setBankTotal] = useState<number | null>(null);
   const [lowStockCount, setLowStockCount] = useState<number | null>(null);
   const [owingSuppliers, setOwingSuppliers] = useState<SupplierBalance[]>([]);
   const [owingCustomers, setOwingCustomers] = useState<Customer[]>([]);
+  const [deliveries, setDeliveries] = useState<Delivery[]>([]);
+  const [returns, setReturns] = useState<ReturnRequest[]>([]);
+  const [chartPeriod, setChartPeriod] = useState<"year" | "month">("year");
   const [loading, setLoading] = useState(true);
 
   const [chequeReminders, setChequeReminders] = useState<{
@@ -50,18 +136,22 @@ export default function DashboardPage() {
     let cancelled = false;
     async function load() {
       try {
-        const [sales, inventory, summary, suppliers, customers] = await Promise.all([
+        const [sales, inventory, summary, suppliers, customers, deliveriesRes, returnsRes] = await Promise.all([
           api.get<Sale[]>("/sales"),
           api.get<InventoryUnit[]>("/inventory?status=available"),
           api.get<{ cash_total: number; bank_total: number }>("/cash-book/summary"),
           api.get<SupplierBalance[]>("/supplier-payments/summary"),
           api.get<Customer[]>("/customers"),
+          api.get<Delivery[]>("/deliveries").catch(() => []),
+          api.get<ReturnRequest[]>("/returns/requests").catch(() => []),
         ]);
         if (cancelled) return;
 
-        setRecentSales(sales.slice(0, 5));
+        setAllSales(sales);
         setCashTotal(summary.cash_total);
         setBankTotal(summary.bank_total);
+        setDeliveries(deliveriesRes);
+        setReturns(returnsRes);
 
         // Low stock count: how many distinct (product, color, size) variants
         // have 5 or fewer available units. Matches the threshold used on the
@@ -104,12 +194,40 @@ export default function DashboardPage() {
     };
   }, [user]);
 
-  const todayIso = new Date().toISOString().slice(0, 10);
-  const todaySales = recentSales.filter((s) => s.date.startsWith(todayIso));
+  // A voided sale is money that was reversed — it never counts as real
+  // revenue or shows up as if it were still an active order.
+  const activeSales = allSales.filter((s) => !s.is_voided);
+
+  const todayIso = todayInSriLanka();
+  const todaySales = activeSales.filter((s) => s.date.startsWith(todayIso));
   const todayTotal = todaySales.reduce((sum, s) => sum + s.total, 0);
 
   const supplierOwedTotal = owingSuppliers.reduce((sum, s) => sum + s.balance_owed, 0);
   const customerOwedTotal = owingCustomers.reduce((sum, c) => sum + c.balance_due, 0);
+
+  const activity = useMemo(() => buildActivity(activeSales, deliveries, returns), [activeSales, deliveries, returns]);
+
+  const revenueSeries: RevenuePoint[] = useMemo(() => {
+    const now = new Date();
+    if (chartPeriod === "year") {
+      const year = now.getFullYear();
+      const months = MONTH_LABELS.map((label) => ({ label, value: 0 }));
+      for (const s of activeSales) {
+        const d = new Date(s.date);
+        if (d.getFullYear() === year) months[d.getMonth()].value += s.total;
+      }
+      return months;
+    }
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const days = Array.from({ length: daysInMonth }, (_, i) => ({ label: String(i + 1), value: 0 }));
+    for (const s of activeSales) {
+      const d = new Date(s.date);
+      if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()) days[d.getDate() - 1].value += s.total;
+    }
+    return days;
+  }, [activeSales, chartPeriod]);
+
+  const revenueTotal = revenueSeries.reduce((sum, p) => sum + p.value, 0);
 
   const chequesToDeposit = chequeReminders?.to_deposit ?? [];
   const chequesToPay = chequeReminders?.to_pay ?? [];
@@ -302,62 +420,58 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* Row 3 — Recent sales */}
-      <Card className="p-0 overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-gray-900">Recent sales</h2>
+      {/* Row 3 — Revenue trend */}
+      <Card className="mb-6">
+        <div className="flex items-center justify-between mb-1">
+          <p className="text-sm text-gray-500">Total Revenue</p>
+          <div className="w-32">
+            <Dropdown
+              value={chartPeriod}
+              onChange={(v) => setChartPeriod(v as "year" | "month")}
+              options={[
+                { value: "year", label: "Yearly" },
+                { value: "month", label: "This month" },
+              ]}
+            />
+          </div>
+        </div>
+        <p className="text-2xl font-semibold text-gray-900 tabular-nums mb-2">Rs. {revenueTotal.toLocaleString()}</p>
+        {loading ? <p className="text-sm text-gray-400 py-10 text-center">Loading...</p> : <RevenueChart data={revenueSeries} />}
+      </Card>
+
+      {/* Row 4 — Activity timeline */}
+      <Card>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold text-gray-900">Activity Timeline</h2>
           <button
             onClick={() => navigate("/sales")}
             className="text-xs text-gray-500 hover:text-gray-800 inline-flex items-center gap-1"
           >
-            View all
+            See all
             <ArrowRight size={12} />
           </button>
         </div>
         {loading ? (
-          <p className="text-sm text-gray-400 p-4">Loading...</p>
-        ) : recentSales.length === 0 ? (
-          <div className="p-4">
-            <EmptyState title="No sales recorded yet." />
-          </div>
+          <p className="text-sm text-gray-400">Loading...</p>
+        ) : activity.length === 0 ? (
+          <EmptyState title="No activity recorded yet." />
         ) : (
-          <Table>
-            <thead>
-              <tr>
-                <Th>Invoice</Th>
-                <Th>Customer</Th>
-                <Th>Type</Th>
-                <Th className="text-right">Total</Th>
-                <Th>Status</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentSales.map((sale) => (
-                <tr key={sale.id}>
-                  <Td className="text-gray-500 text-xs">{sale.invoice}</Td>
-                  <Td>
-                    {sale.customer_name ??
-                      (sale.deleted_customer_snapshot ? `[Deleted: ${sale.deleted_customer_snapshot}]` : "Walk-in")}
-                  </Td>
-                  <Td className="text-gray-500 text-xs">{sale.sale_type === "online" ? "Online" : "In-store"}</Td>
-                  <Td className="text-right tabular-nums font-medium">Rs. {sale.total.toLocaleString()}</Td>
-                  <Td>
-                    <span
-                      className={`inline-block text-xs px-2 py-0.5 rounded-full ${
-                        sale.payment_status === "paid"
-                          ? "text-green-700 bg-green-50"
-                          : sale.payment_status === "partial"
-                          ? "text-amber-700 bg-amber-50"
-                          : "text-red-700 bg-red-50"
-                      }`}
-                    >
-                      {sale.payment_status}
-                    </span>
-                  </Td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
+          <div className="space-y-4">
+            {activity.map((ev) => {
+              const Icon = ev.icon;
+              return (
+                <div key={ev.id} className="flex items-start gap-3">
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${TONE_CLASSES[ev.tone]}`}>
+                    <Icon size={15} />
+                  </div>
+                  <div className="min-w-0 pt-1">
+                    <p className="text-sm text-gray-800">{ev.title}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">{timeAgo(ev.date)}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
       </Card>
     </div>

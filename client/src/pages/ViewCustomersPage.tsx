@@ -4,11 +4,8 @@ import { api, ApiRequestError } from "../lib/api";
 import { Customer, CustomerAddress, BankAccount } from "../lib/types";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { PageHeader, Card, Table, Th, Td, Input, Button, EmptyState, ErrorText, SuccessText, Label, FormGroup, Dropdown, DatePicker } from "../components/ui";
-
-function useCities(): string[] {
-  return [];
-}
+import { PageHeader, Card, Table, Th, Td, Input, Button, EmptyState, ErrorText, SuccessText, Label, FormGroup, Dropdown, DatePicker, HelpHint } from "../components/ui";
+import { CityPicker } from "../components/CityPicker";
 
 function whatsappLink(phone: string): string {
   const digitsOnly = phone.replace(/\D/g, "").replace(/^0/, "");
@@ -49,123 +46,6 @@ function todayIso(): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
-}
-
-function ComboPicker({
-  label,
-  placeholder,
-  existing,
-  value,
-  onSelect,
-  uppercase,
-}: {
-  label: string;
-  placeholder: string;
-  existing: string[];
-  value: string;
-  onSelect: (v: string) => void;
-  uppercase?: boolean;
-}) {
-  const [query, setQuery] = useState(value);
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    setQuery(value);
-  }, [value]);
-
-  useEffect(() => {
-    function onDocClick(e: MouseEvent) {
-      if (!wrapRef.current) return;
-      if (!wrapRef.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, []);
-
-  const normalized = uppercase ? query.trim().toUpperCase() : query.trim();
-  const matches = normalized
-    ? existing.filter((v) => v.toLowerCase().includes(normalized.toLowerCase()))
-    : existing;
-
-  const canAddNew =
-    normalized.length > 0 &&
-    !existing.some((v) => v.toLowerCase() === normalized.toLowerCase());
-
-  function commit(v: string) {
-    const final = uppercase ? v.trim().toUpperCase() : v.trim();
-    if (!final) return;
-    onSelect(final);
-    setQuery(final);
-    setOpen(false);
-  }
-
-  return (
-    <div ref={wrapRef} className="relative">
-      <Label>{label}</Label>
-      <div className="relative">
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            setOpen(true);
-          }}
-          onFocus={() => setOpen(true)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              if (matches.length > 0) commit(matches[0]);
-              else if (canAddNew) commit(query);
-            }
-            if (e.key === "Escape") {
-              setOpen(false);
-              setQuery(value);
-            }
-          }}
-          placeholder={existing.length ? placeholder : "Type to add a new city"}
-          className="w-full pl-3 pr-10 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-gray-400"
-        />
-        <button
-          type="button"
-          disabled={!canAddNew}
-          onClick={() => commit(query)}
-          className={`absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center justify-center w-7 h-7 rounded-md transition ${
-            canAddNew
-              ? "bg-black text-white hover:bg-gray-800"
-              : "bg-gray-100 text-gray-300 cursor-not-allowed"
-          }`}
-          title={canAddNew ? "Add as new" : "Type a value to add"}
-        >
-          <Plus size={14} />
-        </button>
-      </div>
-
-      {open && (matches.length > 0 || canAddNew) && (
-        <div className="absolute z-10 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-sm max-h-44 overflow-y-auto">
-          {matches.map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => commit(m)}
-              className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-            >
-              {m}
-            </button>
-          ))}
-          {canAddNew && (
-            <button
-              type="button"
-              onClick={() => commit(query)}
-              className="w-full text-left px-3 py-2 text-sm text-amber-700 hover:bg-amber-50 border-t border-gray-100"
-            >
-              Add new city: <span className="font-medium">{normalized}</span>
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
 }
 
 function PaymentPreviewPane({
@@ -241,7 +121,6 @@ export default function ViewCustomersPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
-  const cities = useCities();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [expandedDetail, setExpandedDetail] = useState<Customer | null>(null);
@@ -791,7 +670,7 @@ export default function ViewCustomersPage() {
     <div>
       <PageHeader
         title="Customers"
-        subtitle="Search to check if a customer already exists, or click a row for details."
+        subtitle="Click any customer for details."
         action={
           <Button variant="primary" onClick={() => navigate("/customers/add")} className="inline-flex items-center gap-1.5">
             <Plus size={16} />
@@ -805,7 +684,7 @@ export default function ViewCustomersPage() {
           <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
             <Search size={16} className="text-gray-400" />
           </div>
-          <Input className="pl-10" placeholder="Search by name, code, or phone..." value={query} onChange={(e) => setQuery(e.target.value)} />
+          <Input className="pl-10" placeholder="Search customers..." value={query} onChange={(e) => setQuery(e.target.value)} />
         </div>
       </Card>
 
@@ -1142,13 +1021,10 @@ export default function ViewCustomersPage() {
                                                 onChange={(e) => setEditAddr((f) => ({ ...f, address_line2: e.target.value }))}
                                               />
                                             </FormGroup>
-                                            <ComboPicker
-                                              label="City"
-                                              placeholder="— Type to search or add a city —"
-                                              existing={cities}
-                                              value={editAddr.city}
-                                              onSelect={(v) => setEditAddr((f) => ({ ...f, city: v }))}
-                                            />
+                                            <FormGroup>
+                                              <Label>City</Label>
+                                              <CityPicker value={editAddr.city} onChange={(v) => setEditAddr((f) => ({ ...f, city: v }))} />
+                                            </FormGroup>
                                           </div>
                                           {editAddrError && <ErrorText>{editAddrError}</ErrorText>}
                                           <div className="flex justify-end gap-2 mt-3">
@@ -1197,13 +1073,10 @@ export default function ViewCustomersPage() {
                                         <Label>Address line 2</Label>
                                         <Input value={newAddr.address_line2} onChange={(e) => setNewAddr((f) => ({ ...f, address_line2: e.target.value }))} />
                                       </FormGroup>
-                                      <ComboPicker
-                                        label="City"
-                                        placeholder="— Type to search or add a city —"
-                                        existing={cities}
-                                        value={newAddr.city}
-                                        onSelect={(v) => setNewAddr((f) => ({ ...f, city: v }))}
-                                      />
+                                      <FormGroup>
+                                        <Label>City</Label>
+                                        <CityPicker value={newAddr.city} onChange={(v) => setNewAddr((f) => ({ ...f, city: v }))} />
+                                      </FormGroup>
                                     </div>
                                     {addrError && <ErrorText>{addrError}</ErrorText>}
                                     <div className="flex justify-end gap-2 mt-3">
@@ -1463,7 +1336,6 @@ export default function ViewCustomersPage() {
                           <Input
                             value={paymentNotes}
                             onChange={(e) => setPaymentNotes(e.target.value)}
-                            placeholder="Reference, remarks, etc."
                           />
                         </FormGroup>
                       </>
@@ -1487,7 +1359,7 @@ export default function ViewCustomersPage() {
                           />
                           <div className="col-span-2">
                             <Input
-                              placeholder="Payee name (as written on the cheque)"
+                              placeholder="Payee name"
                               value={chequePayeeName}
                               onChange={(e) => setChequePayeeName(e.target.value)}
                             />
@@ -1497,7 +1369,6 @@ export default function ViewCustomersPage() {
                             <Input
                               type="number"
                               min="0"
-                              placeholder="Amount"
                               value={chequeAmount}
                               onChange={(e) => setChequeAmount(e.target.value)}
                             />
@@ -1507,7 +1378,7 @@ export default function ViewCustomersPage() {
                             <DatePicker
                               value={chequeDate || null}
                               onChange={setChequeDate}
-                              placeholder="Date on cheque"
+                              placeholder="Select date"
                               min={todayIso()}
                             />
                           </div>
@@ -1529,7 +1400,6 @@ export default function ViewCustomersPage() {
                           <Input
                             value={paymentNotes}
                             onChange={(e) => setPaymentNotes(e.target.value)}
-                            placeholder="Reference, remarks, etc."
                           />
                         </FormGroup>
                       </>
@@ -1662,19 +1532,18 @@ export default function ViewCustomersPage() {
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl">
             <div className="p-5 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-base font-semibold text-gray-900">Suspend {suspendTarget.name}</h2>
+              <h2 className="text-base font-semibold text-gray-900">
+                Suspend {suspendTarget.name}
+                <HelpHint text="They'll stay fully in the system — every sale, loyalty point, and credit is untouched — they just can't be selected for a new sale until reactivated." />
+              </h2>
               <button onClick={() => setSuspendTarget(null)} className="text-gray-400 hover:text-gray-600">
                 <X size={18} />
               </button>
             </div>
             <div className="p-5">
-              <p className="text-xs text-gray-400 mb-3">
-                They'll stay fully in the system — every sale, loyalty point, and credit is untouched — they just can't be selected for a
-                new sale until reactivated.
-              </p>
               <FormGroup>
                 <Label>Reason</Label>
-                <Input value={suspendReason} onChange={(e) => setSuspendReason(e.target.value)} placeholder="Why are they being suspended?" />
+                <Input value={suspendReason} onChange={(e) => setSuspendReason(e.target.value)} />
               </FormGroup>
               {suspendError && <ErrorText>{suspendError}</ErrorText>}
               <div className="flex justify-end gap-2 mt-2">
@@ -1703,7 +1572,6 @@ export default function ViewCustomersPage() {
                 <Input
                   value={reactivateReason}
                   onChange={(e) => setReactivateReason(e.target.value)}
-                  placeholder="Why are they being reactivated?"
                 />
               </FormGroup>
               {reactivateError && <ErrorText>{reactivateError}</ErrorText>}

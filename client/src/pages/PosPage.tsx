@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { InventoryUnit, Customer, SaleType, CustomerAddress, Coupon } from "../lib/types";
-import { Input, Label, FormGroup, ErrorText, SuccessText, Button, Dropdown } from "../components/ui";
+import { Input, Label, FormGroup, ErrorText, SuccessText, Button, Dropdown, HelpHint } from "../components/ui";
 import { CityPicker } from "../components/CityPicker";
 import { useAuth } from "../context/AuthContext";
 import { DELIVERY_PARTNERS, DeliveryPartner, calculateDeliveryFee, calculateCodAmount } from "../lib/delivery";
@@ -49,7 +49,6 @@ export default function PosPage() {
   // silently dropped, so it's obvious something changed instead of the
   // line just vanishing.
   const [staleUnitIds, setStaleUnitIds] = useState<Set<number>>(new Set());
-  const [restoredDraftNotice, setRestoredDraftNotice] = useState(false);
 
   // Admin-only credit sale — lets a trusted customer take items now and
   // settle later. Reuses the existing amount_paid < total mechanism (the
@@ -259,7 +258,6 @@ export default function PosPage() {
     setPaymentMethod(draft.paymentMethod);
 
     if (draft.cart.length > 0) {
-      setRestoredDraftNotice(true);
       const allIds = draft.cart.flatMap((line) => line.units.map((u) => u.id));
       api
         .post<{ id: number; status: string }[]>("/inventory/check-status", { ids: allIds })
@@ -718,6 +716,7 @@ export default function PosPage() {
 
       const sale = await api.post<{ invoice: string }>("/sales", {
         customer_id: selectedCustomer?.id,
+        salesperson: user?.name ?? user?.username,
         items: cart.flatMap((line) => line.units.map((u) => ({ inventory_id: u.id, unit_price: line.unit_price }))),
         manual_discount_type: discountType,
         manual_discount_value: parseFloat(discountValue) || 0,
@@ -770,27 +769,38 @@ export default function PosPage() {
   }
 
   return (
-    <div className="h-screen flex flex-col p-4 gap-4 overflow-hidden">
-      <div className="flex-1 flex gap-4 min-h-0">
-        <div className="flex-1 flex flex-col bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden min-h-0">
+    <div className="flex flex-col lg:h-screen p-3 lg:p-4 gap-3 lg:gap-4 lg:overflow-hidden">
+      <div className="flex-1 flex flex-col lg:flex-row gap-3 lg:gap-4 lg:min-h-0">
+        <div className="flex-1 flex flex-col bg-white rounded-2xl shadow-sm border border-gray-200 lg:overflow-hidden lg:min-h-0">
           <div className="p-4 border-b border-gray-200 bg-white flex-shrink-0">
-            <div className="grid grid-cols-3 items-center gap-3">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-9 h-9 bg-black rounded-full flex items-center justify-center flex-shrink-0">
-                  <ShoppingCart size={18} className="text-white" />
+            <div className="flex flex-col gap-3 lg:grid lg:grid-cols-3 lg:items-center">
+              <div className="flex items-center justify-between gap-3 min-w-0">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-9 h-9 bg-black rounded-full flex items-center justify-center flex-shrink-0">
+                    <ShoppingCart size={18} className="text-white" />
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="text-lg font-bold text-gray-900 truncate">Current sale</h2>
+                    <p className="text-xs text-gray-500">
+                      {totalCartUnits} item{totalCartUnits !== 1 ? "s" : ""} in cart
+                    </p>
+                  </div>
                 </div>
-                <div className="min-w-0">
-                  <h2 className="text-lg font-bold text-gray-900 truncate">Current sale</h2>
-                  <p className="text-xs text-gray-500">
-                    {totalCartUnits} item{totalCartUnits !== 1 ? "s" : ""} in cart
-                  </p>
-                </div>
+                <button
+                  onClick={toggleBrowser}
+                  className={`flex lg:hidden items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition flex-shrink-0 ${
+                    showBrowser ? "bg-black text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                  }`}
+                >
+                  <Package size={14} />
+                  Browse
+                </button>
               </div>
 
               <div className="flex items-center justify-center gap-2">
                 <button
                   onClick={() => setSaleType("in_store")}
-                  className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${
+                  className={`flex-1 lg:flex-none px-4 py-1.5 rounded-lg text-sm font-medium transition ${
                     saleType === "in_store" ? "bg-black text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
                   }`}
                 >
@@ -798,7 +808,7 @@ export default function PosPage() {
                 </button>
                 <button
                   onClick={() => setSaleType("online")}
-                  className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${
+                  className={`flex-1 lg:flex-none px-4 py-1.5 rounded-lg text-sm font-medium transition ${
                     saleType === "online" ? "bg-black text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
                   }`}
                 >
@@ -806,7 +816,7 @@ export default function PosPage() {
                 </button>
               </div>
 
-              <div className="flex justify-end">
+              <div className="hidden lg:flex justify-end">
                 <button
                   onClick={toggleBrowser}
                   className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-sm transition flex-shrink-0 ${
@@ -824,7 +834,7 @@ export default function PosPage() {
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={17} />
                 <input
                   type="text"
-                  placeholder="Search or scan by product name, SKU, or barcode... (Press Enter to add)"
+                  placeholder="Scan or search products..."
                   value={productQuery}
                   onChange={(e) => handleProductQueryChange(e.target.value)}
                   onFocus={() => productQuery && setProductSearchOpen(true)}
@@ -862,17 +872,8 @@ export default function PosPage() {
             {productSearchError && <ErrorText>{productSearchError}</ErrorText>}
           </div>
 
-          {restoredDraftNotice && cart.length > 0 && (
-            <div className="mx-4 mt-3 flex items-center justify-between gap-3 bg-blue-50 border border-blue-200 rounded-xl px-3.5 py-2">
-              <p className="text-xs text-blue-700">Resumed your in-progress sale from before.</p>
-              <button onClick={() => setRestoredDraftNotice(false)} className="text-blue-400 hover:text-blue-600 flex-shrink-0">
-                <X size={14} />
-              </button>
-            </div>
-          )}
-
           {cart.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center text-center min-h-0">
+            <div className="flex-1 flex flex-col items-center justify-center text-center min-h-0 py-10 lg:py-0">
               <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mb-3">
                 <ShoppingCart size={40} className="text-gray-400" />
               </div>
@@ -880,9 +881,9 @@ export default function PosPage() {
               <p className="text-sm text-gray-500 mt-1">Search for products or browse the catalog</p>
             </div>
           ) : (
-            <div className="flex-1 overflow-y-auto p-4 min-h-0">
+            <div className="lg:flex-1 lg:overflow-y-auto p-4 lg:min-h-0">
               <div className="space-y-2">
-                <div className="grid grid-cols-12 gap-3 px-4 py-2 bg-gray-50 rounded-lg text-xs font-medium text-gray-600">
+                <div className="hidden lg:grid grid-cols-12 gap-3 px-4 py-2 bg-gray-50 rounded-lg text-xs font-medium text-gray-600">
                   <div className="col-span-5">Product</div>
                   <div className="col-span-1 text-center">Qty</div>
                   <div className="col-span-3">Price</div>
@@ -901,13 +902,13 @@ export default function PosPage() {
                   return (
                     <div
                       key={lineKey}
-                      className={`grid grid-cols-12 gap-3 items-center px-4 py-2.5 border rounded-xl transition ${
+                      className={`grid grid-cols-12 gap-2 lg:gap-3 items-center px-3 lg:px-4 py-2.5 border rounded-xl transition ${
                         hasStaleUnit
                           ? "bg-red-50/50 border-red-200"
                           : "bg-white border-gray-100 hover:shadow-sm"
                       }`}
                     >
-                      <div className="col-span-5 min-w-0">
+                      <div className="col-span-9 lg:col-span-5 min-w-0 order-1 lg:order-none">
                         <p className={`font-medium text-sm truncate ${hasStaleUnit ? "text-gray-400 line-through" : "text-gray-900"}`}>
                           {sample.product_title}
                         </p>
@@ -918,12 +919,23 @@ export default function PosPage() {
                           <p className="text-xs text-red-600 mt-0.5 font-medium">No longer in stock — remove before checkout</p>
                         )}
                       </div>
-                      <div className="col-span-1 text-center">
+                      <div className="col-span-3 lg:col-span-1 text-center order-2 lg:order-none">
+                        <button
+                          onClick={() => removeFromCart(lineKey)}
+                          className="lg:hidden text-gray-400 hover:text-red-500 transition float-right"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                        <span className="hidden lg:inline-flex items-center justify-center w-6 h-6 bg-gray-100 rounded-full text-xs font-semibold text-gray-700">
+                          {qty}
+                        </span>
+                      </div>
+                      <div className="col-span-3 lg:hidden order-3 flex items-center">
                         <span className="inline-flex items-center justify-center w-6 h-6 bg-gray-100 rounded-full text-xs font-semibold text-gray-700">
                           {qty}
                         </span>
                       </div>
-                      <div className="col-span-3">
+                      <div className={`${isEditing ? "col-span-12" : "col-span-5"} lg:col-span-3 order-4 lg:order-none`}>
                         {isEditing ? (
                           <div className="flex items-center gap-1.5">
                             <input
@@ -960,10 +972,10 @@ export default function PosPage() {
                         )}
                         {priceEditError && isEditing && <p className="text-xs text-red-500 mt-1">{priceEditError}</p>}
                       </div>
-                      <div className="col-span-2">
+                      <div className={`${isEditing ? "hidden lg:block" : "col-span-4"} lg:col-span-2 order-5 lg:order-none text-right lg:text-left`}>
                         <p className="text-gray-900 font-semibold text-sm">Rs. {(line.unit_price * qty).toLocaleString()}</p>
                       </div>
-                      <div className="col-span-1 text-right">
+                      <div className="col-span-1 text-right hidden lg:block">
                         <button onClick={() => removeFromCart(lineKey)} className="text-gray-400 hover:text-red-500 transition">
                           <Trash2 size={15} />
                         </button>
@@ -976,30 +988,20 @@ export default function PosPage() {
           )}
 
           <div className="border-t border-gray-200 bg-white p-4 flex-shrink-0">
-            <div className="grid grid-cols-2 gap-6 items-start">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 lg:gap-6 items-start">
               <div className="space-y-3">
                 <FormGroup>
                   <Label>Discount</Label>
                   <div className="flex gap-2">
-                    <div className="flex rounded-lg border border-gray-300 overflow-hidden flex-shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => setDiscountType("fixed")}
-                        className={`px-2.5 py-1.5 text-xs font-medium transition ${
-                          discountType === "fixed" ? "bg-black text-white" : "bg-white text-gray-600 hover:bg-gray-50"
-                        }`}
-                      >
-                        LKR
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDiscountType("percent")}
-                        className={`px-2.5 py-1.5 text-xs font-medium transition border-l border-gray-300 ${
-                          discountType === "percent" ? "bg-black text-white" : "bg-white text-gray-600 hover:bg-gray-50"
-                        }`}
-                      >
-                        %
-                      </button>
+                    <div className="w-24 flex-shrink-0">
+                      <Dropdown
+                        value={discountType}
+                        onChange={(v) => setDiscountType(v as "percent" | "fixed")}
+                        options={[
+                          { value: "fixed", label: "LKR" },
+                          { value: "percent", label: "%" },
+                        ]}
+                      />
                     </div>
                     <Input
                       type="number"
@@ -1007,7 +1009,7 @@ export default function PosPage() {
                       max={discountType === "percent" ? 100 : undefined}
                       value={discountValue}
                       onChange={(e) => setDiscountValue(e.target.value)}
-                      placeholder={discountType === "percent" ? "e.g. 10" : "e.g. 500"}
+                      placeholder="0"
                     />
                   </div>
                   {manualDiscountAmount > 0 && (
@@ -1036,7 +1038,6 @@ export default function PosPage() {
                       <Input
                         value={couponCode}
                         onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
-                        placeholder="e.g. WELCOME10"
                         onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), applyCoupon())}
                       />
                       <button
@@ -1057,7 +1058,13 @@ export default function PosPage() {
                     <div className="flex items-center gap-2">
                       <User size={15} className="text-gray-600" />
                       <span className="text-sm font-medium text-gray-700">
-                        Customer{saleType === "online" && <span className="text-red-500"> *</span>}
+                        Customer
+                        {saleType === "online" && (
+                          <>
+                            <span className="text-red-500"> *</span>
+                            <HelpHint text="A customer is required for online orders, so delivery can use their saved address." />
+                          </>
+                        )}
                       </span>
                     </div>
                     {selectedCustomer && (
@@ -1142,13 +1149,6 @@ export default function PosPage() {
                     </div>
                   )}
 
-                  {saleType === "online" && !selectedCustomer && (
-                    <div className="mt-2 flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
-                      <AlertTriangle size={12} className="text-amber-600 flex-shrink-0 mt-0.5" />
-                      <p className="text-xs text-amber-800">A customer is required for online orders, so delivery can use their saved address.</p>
-                    </div>
-                  )}
-
                   {availableStoreCredit > 0 && (
                     <div className="mt-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
                       <label className="flex items-center gap-2 text-sm text-blue-900 cursor-pointer">
@@ -1184,7 +1184,6 @@ export default function PosPage() {
                           value={packageWeight}
                           onChange={(e) => setPackageWeight(e.target.value)}
                           disabled={isFreeDelivery}
-                          placeholder="e.g. 1.5"
                         />
                       </FormGroup>
                     </div>
@@ -1194,7 +1193,10 @@ export default function PosPage() {
 
               <div className="space-y-3">
                 <div>
-                  <Label>Order summary</Label>
+                  <Label>
+                    Order summary
+                    <HelpHint text="Discounts, coupons, and store credit are applied here first — the amount shown at the bottom is what's actually left to collect." />
+                  </Label>
                   <div className="space-y-1.5 mt-1">
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-600">Subtotal</span>
@@ -1248,12 +1250,11 @@ export default function PosPage() {
                       </div>
                     ) : (
                       <FormGroup>
-                        <Label>Amount paid now, if any (Rs.)</Label>
+                        <Label>
+                          Amount paid now, if any (Rs.)
+                          <HelpHint text="This applies against the full amount owed (product + delivery fee). Pay it all now and COD becomes Rs. 0; pay less and the difference — including the delivery fee — becomes COD." />
+                        </Label>
                         <Input type="number" min="0" value={advancePaid} onChange={(e) => setAdvancePaid(e.target.value)} placeholder="0" />
-                        <p className="text-xs text-gray-400 mt-1">
-                          This applies against the full amount owed (product + delivery fee). Pay it all now and COD becomes Rs. 0; pay
-                          less and the difference — including the delivery fee — becomes COD.
-                        </p>
                       </FormGroup>
                     )}
 
@@ -1493,7 +1494,7 @@ export default function PosPage() {
         </div>
 
         <div
-          className={`bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col overflow-hidden flex-shrink-0 transition-all duration-200 ${
+          className={`hidden lg:flex bg-white rounded-2xl shadow-sm border border-gray-200 flex-col overflow-hidden flex-shrink-0 transition-all duration-200 ${
             showBrowser ? "w-80 opacity-100" : "w-0 opacity-0 border-0"
           }`}
         >
@@ -1556,6 +1557,68 @@ export default function PosPage() {
           </div>
         </div>
       </div>
+
+      {/* Mobile: product catalog opens as a full-screen sheet instead of a
+          320px sidebar, which has no room to exist on a phone. */}
+      {showBrowser && (
+        <div className="lg:hidden fixed inset-0 z-40 bg-white flex flex-col">
+          <div className="p-3.5 border-b border-gray-200 bg-gray-50 flex-shrink-0">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-gray-900 text-sm">Product catalog</h3>
+              <button onClick={toggleBrowser} className="text-gray-400 hover:text-gray-600 p-1">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="flex gap-1.5 mt-2.5 overflow-x-auto pb-1">
+              <button
+                onClick={() => setBrowserCategory("all")}
+                className={`px-2.5 py-1 rounded-lg text-xs whitespace-nowrap transition ${
+                  browserCategory === "all" ? "bg-black text-white" : "bg-white text-gray-700 hover:bg-gray-100"
+                }`}
+              >
+                All
+              </button>
+              {browserCategories.slice(0, 8).map((cat) => (
+                <button
+                  key={cat}
+                  onClick={() => setBrowserCategory(cat)}
+                  className={`px-2.5 py-1 rounded-lg text-xs whitespace-nowrap transition ${
+                    browserCategory === cat ? "bg-black text-white" : "bg-white text-gray-700 hover:bg-gray-100"
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+            {browserFiltered.length === 0 ? (
+              <div className="text-center py-8 text-gray-500 text-sm">No available items in this category</div>
+            ) : (
+              browserFiltered.map((u) => (
+                <button
+                  key={u.id}
+                  onClick={() => addToCart(u)}
+                  className="w-full text-left p-3 border border-gray-100 rounded-xl active:bg-gray-50 transition"
+                >
+                  <div className="flex justify-between items-start gap-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-gray-900 text-sm truncate">{u.product_title}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {u.color ?? "—"} / {u.size ?? "—"}
+                      </p>
+                      <p className="text-xs text-gray-400 mt-0.5">SKU: {u.sku}</p>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <p className="font-bold text-gray-900 text-sm">Rs. {(u.selling_price ?? 0).toLocaleString()}</p>
+                    </div>
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
 
       {/* NEW CUSTOMER MODAL — full intake form: name, phone (required) +
           phone2 (optional), address line 1/2, and city. */}

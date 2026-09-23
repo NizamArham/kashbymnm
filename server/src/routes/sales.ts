@@ -108,9 +108,10 @@ salesRouter.get(
     const sale = db
       .prepare(
         `SELECT sales.*, customers.name as customer_name, customers.customer_code,
-                customers.phone as customer_phone
+                customers.phone as customer_phone, deliveries.delivery_partner
          FROM sales
          LEFT JOIN customers ON customers.id = sales.customer_id
+         LEFT JOIN deliveries ON deliveries.sale_id = sales.id
          WHERE sales.id = ?`
       )
       .get(req.params.id) as any;

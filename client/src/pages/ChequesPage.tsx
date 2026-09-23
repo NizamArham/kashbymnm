@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { Banknote, CheckCircle2, XCircle, Plus, Pencil, Trash2, X } from "lucide-react";
+import { Banknote, CheckCircle2, XCircle, Plus, Pencil, Trash2, X, Download } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Supplier } from "../lib/types";
-import { PageHeader, Card, Table, Th, Td, Button, EmptyState, ErrorText, Badge, TabToggle, Input, Label, FormGroup, Dropdown, DatePicker } from "../components/ui";
+import { downloadTabularReport } from "../lib/reportPdf";
+import { PageHeader, Card, Table, Th, Td, Button, EmptyState, ErrorText, Badge, TabToggle, Input, Label, FormGroup, Dropdown, DatePicker, HelpHint } from "../components/ui";
 
 interface ChequeRow {
   id: number;
@@ -251,13 +252,63 @@ export default function ChequesPage() {
     }
   }
 
+  const tabLabel: Record<Tab, string> = { in_hand: "In Hand", all: "All Cheques", issued: "Written by Me" };
+
+  // Exports exactly the active tab's currently-loaded rows — there's no
+  // date filter on this page (cheque volumes here are small enough that
+  // one hasn't been needed), so this is "what's on screen", same rule
+  // as everywhere else this report pattern is used.
+  function downloadChequesPdf() {
+    if (activeTab === "issued") {
+      const total = issuedCheques.reduce((sum, c) => sum + c.amount, 0);
+      downloadTabularReport({
+        headerLabel: "M&M Clothing — Cheque Register",
+        title: "Cheques Written by Me",
+        rangeLabel: "All records",
+        columns: [
+          { label: "Issued", width: 75 },
+          { label: "Cheque #", width: 90 },
+          { label: "Bank", width: 90 },
+          { label: "Cheque date", width: 75 },
+          { label: "Amount", width: 80, align: "right" },
+          { label: "To supplier", width: 105 },
+        ],
+        rows: issuedCheques.map((c) => ({
+          cells: [c.date_issued.slice(0, 10), c.cheque_number, c.bank_name, c.cheque_date.slice(0, 10), `Rs. ${c.amount.toLocaleString()}`, c.supplier_name],
+        })),
+        summaryLines: [{ text: `Total: Rs. ${total.toLocaleString()} (${issuedCheques.length} cheque${issuedCheques.length !== 1 ? "s" : ""})`, bold: true }],
+        filename: `cheques-issued-${new Date().toISOString().slice(0, 10)}.pdf`,
+      });
+    } else {
+      const total = cheques.reduce((sum, c) => sum + c.amount, 0);
+      downloadTabularReport({
+        headerLabel: "M&M Clothing — Cheque Register",
+        title: `Cheques — ${tabLabel[activeTab]}`,
+        rangeLabel: "All records",
+        columns: [
+          { label: "Received", width: 75 },
+          { label: "Cheque #", width: 90 },
+          { label: "Bank", width: 90 },
+          { label: "Cheque date", width: 75 },
+          { label: "Amount", width: 80, align: "right" },
+          { label: "From", width: 105 },
+        ],
+        rows: cheques.map((c) => ({
+          cells: [c.date_received.slice(0, 10), c.cheque_number, c.bank_name, c.cheque_date.slice(0, 10), `Rs. ${c.amount.toLocaleString()}`, `${c.customer_name} (${c.customer_code})`],
+        })),
+        summaryLines: [{ text: `Total: Rs. ${total.toLocaleString()} (${cheques.length} cheque${cheques.length !== 1 ? "s" : ""})`, bold: true }],
+        filename: `cheques-${activeTab}-${new Date().toISOString().slice(0, 10)}.pdf`,
+      });
+    }
+  }
+
   return (
     <div>
       <PageHeader
         title="Cheques"
-        subtitle="Track cheques from receipt through to clearing — including ones handed on to a supplier, or written from your own account."
+        subtitle="Track every cheque from receipt to clearing."
         action={
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <TabToggle
               value={activeTab}
               onChange={setActiveTab}
@@ -267,6 +318,14 @@ export default function ChequesPage() {
                 { value: "issued", label: "Written by Me" },
               ]}
             />
+            <Button
+              onClick={downloadChequesPdf}
+              disabled={activeTab === "issued" ? issuedCheques.length === 0 : cheques.length === 0}
+              className="inline-flex items-center gap-1.5"
+            >
+              <Download size={14} />
+              Download PDF
+            </Button>
             {activeTab === "issued" && (
               <Button variant="primary" onClick={() => setShowIssueForm(true)} className="inline-flex items-center gap-1.5">
                 <Plus size={15} />
@@ -402,7 +461,7 @@ export default function ChequesPage() {
                     )}
                   </Td>
                   <Td>
-                    <Badge label={c.status.replace("_", " ")} tone={statusTone(c.status)} />
+                    <Badge label={c.status.replace(/_/g, " ")} tone={statusTone(c.status)} />
                     {c.status === "bounced" && c.bounced_reason && (
                       <div className="text-xs text-gray-400 mt-0.5">{c.bounced_reason}</div>
                     )}
@@ -461,7 +520,22 @@ export default function ChequesPage() {
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl">
             <div className="p-5 border-b border-gray-100">
-              <h2 className="text-base font-semibold text-gray-900">Mark cheque cleared</h2>
+              <h2 className="text-base font-semibold text-gray-900">
+                Mark cheque cleared
+                {(() => {
+                  const cheque = cheques.find((c) => c.id === clearingId);
+                  const wasTransferred = clearingIsIssued || !!cheque?.transferred_to_supplier_name;
+                  return (
+                    <HelpHint
+                      text={
+                        wasTransferred
+                          ? "This records the cash book expense for paying the supplier with this cheque."
+                          : "This records the cash book income for this cheque, since the money is now real."
+                      }
+                    />
+                  );
+                })()}
+              </h2>
             </div>
             <div className="p-5">
               {(() => {
@@ -469,11 +543,6 @@ export default function ChequesPage() {
                 const wasTransferred = clearingIsIssued || !!cheque?.transferred_to_supplier_name;
                 return (
                   <>
-                    <p className="text-xs text-gray-400 mb-3">
-                      {wasTransferred
-                        ? "This records the cash book expense for paying the supplier with this cheque."
-                        : "This records the cash book income for this cheque, since the money is now real."}
-                    </p>
                     {!wasTransferred && (
                       <FormGroup>
                         <Label>Deposited into</Label>
@@ -505,16 +574,15 @@ export default function ChequesPage() {
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl">
             <div className="p-5 border-b border-gray-100">
-              <h2 className="text-base font-semibold text-gray-900">Mark cheque bounced</h2>
+              <h2 className="text-base font-semibold text-gray-900">
+                Mark cheque bounced
+                <HelpHint text="The originating customer's sales revert to unpaid. If this cheque was already given to a supplier, their balance is reinstated too." />
+              </h2>
             </div>
             <div className="p-5">
-              <p className="text-xs text-gray-400 mb-3">
-                The originating customer's sales revert to unpaid. If this cheque was already given to a supplier, their balance is
-                reinstated too.
-              </p>
               <FormGroup>
                 <Label>Reason</Label>
-                <Input value={bounceReason} onChange={(e) => setBounceReason(e.target.value)} placeholder="e.g. Insufficient funds" />
+                <Input value={bounceReason} onChange={(e) => setBounceReason(e.target.value)} />
               </FormGroup>
               <div className="flex gap-2 mt-2">
                 <Button variant="danger" onClick={() => handleBounce(bouncingId, bouncingIsIssued)} disabled={bounceSubmitting}>
@@ -531,16 +599,15 @@ export default function ChequesPage() {
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl">
             <div className="p-5 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-base font-semibold text-gray-900">Issue a cheque</h2>
+              <h2 className="text-base font-semibold text-gray-900">
+                Issue a cheque
+                <HelpHint text="A cheque written from your own account, straight to a supplier. Their balance reduces now; the Cash Book updates once it clears." />
+              </h2>
               <button onClick={() => setShowIssueForm(false)} className="text-gray-400 hover:text-gray-600">
                 ✕
               </button>
             </div>
             <div className="p-5">
-              <p className="text-xs text-gray-400 mb-3">
-                A cheque written from your own account, straight to a supplier. Their balance reduces now; the Cash Book updates once
-                it clears.
-              </p>
               <FormGroup>
                 <Label>Supplier</Label>
                 <Dropdown
@@ -583,17 +650,21 @@ export default function ChequesPage() {
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl">
             <div className="p-5 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-base font-semibold text-gray-900">Edit cheque</h2>
+              <h2 className="text-base font-semibold text-gray-900">
+                Edit cheque
+                <HelpHint
+                  text={
+                    editingCheque.isIssued
+                      ? "Changing the amount adjusts the supplier's balance to match."
+                      : "Changing the amount re-applies it against the customer's outstanding sales."
+                  }
+                />
+              </h2>
               <button onClick={() => setEditingCheque(null)} className="text-gray-400 hover:text-gray-600">
                 <X size={18} />
               </button>
             </div>
             <div className="p-5">
-              <p className="text-xs text-gray-400 mb-3">
-                {editingCheque.isIssued
-                  ? "Changing the amount adjusts the supplier's balance to match."
-                  : "Changing the amount re-applies it against the customer's outstanding sales."}
-              </p>
               <FormGroup>
                 <Label>Cheque number</Label>
                 <Input value={editChequeNumber} onChange={(e) => setEditChequeNumber(e.target.value)} />

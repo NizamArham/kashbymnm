@@ -1,8 +1,9 @@
 import { useEffect, useState, FormEvent, Fragment } from "react";
-import { Landmark, Pencil, X, ArrowLeftRight, Plus, TrendingUp, TrendingDown, Wallet, Building2, ArrowUpRight, ArrowDownLeft, ChevronDown, ChevronRight } from "lucide-react";
+import { Landmark, Pencil, X, ArrowLeftRight, Plus, TrendingUp, TrendingDown, Wallet, Building2, ArrowUpRight, ArrowDownLeft, ChevronDown, ChevronRight, Download } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { CashBookEntry } from "../lib/types";
-import { PageHeader, Card, Input, Select, Label, FormGroup, ErrorText, SuccessText, Button, Table, Th, Td, EmptyState, Dropdown, DateRangePicker } from "../components/ui";
+import { downloadTabularReport, rangeLabelFor } from "../lib/reportPdf";
+import { PageHeader, Card, Input, Select, Label, FormGroup, ErrorText, SuccessText, Button, Table, Th, Td, EmptyState, Dropdown, DateRangePicker, HelpHint } from "../components/ui";
 
 const PAYMENT_METHOD_OPTIONS = [
   { value: "cash", label: "Cash" },
@@ -112,6 +113,8 @@ export default function CashBookPage() {
   const [editSubmitting, setEditSubmitting] = useState(false);
 
   const [expandedNotesId, setExpandedNotesId] = useState<number | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   async function loadStats() {
     try {
@@ -159,6 +162,58 @@ export default function CashBookPage() {
 
   async function refreshAll() {
     await Promise.all([loadEntries(), loadStats()]);
+  }
+
+  const REPORT_ROW_CAP = 500;
+
+  // Downloads the full filtered range as a PDF — not just the current
+  // page of 7 — so it needs its own fetch at report scale rather than
+  // reusing the paginated `entries` state. The server caps a single
+  // page at 500 rows; if the filtered range holds more than that, the
+  // report says so instead of silently only covering the latest 500.
+  async function downloadPdf() {
+    setDownloadError(null);
+    setDownloading(true);
+    try {
+      const params = new URLSearchParams({ page: "1", pageSize: String(REPORT_ROW_CAP) });
+      if (dateStart) params.set("start", dateStart);
+      if (dateEnd) params.set("end", dateEnd);
+      const result = await api.get<{ rows: CashBookEntry[]; total: number }>(`/cash-book?${params.toString()}`);
+      const rangeLabel = rangeLabelFor(dateStart || null, dateEnd || null);
+      const truncated = result.total > result.rows.length;
+
+      downloadTabularReport({
+        headerLabel: "M&M Clothing — Cash Book Report",
+        title: "Cash Book",
+        rangeLabel,
+        columns: [
+          { label: "Date", width: 95 },
+          { label: "Type", width: 60 },
+          { label: "Method", width: 90 },
+          { label: "Amount", width: 105, align: "right" },
+          { label: "Balance", width: 105, align: "right" },
+        ],
+        rows: result.rows.map((entry) => ({
+          cells: [
+            entry.entry_date.slice(0, 16).replace("T", " "),
+            typeLabel(entry.type),
+            methodLabel(entry.payment_method),
+            `${entry.type === "income" ? "+" : "-"} Rs. ${entry.amount.toLocaleString()}`,
+            `Rs. ${entry.running_balance.toLocaleString()}`,
+          ],
+          styles: [undefined, undefined, undefined, { color: entry.type === "income" ? ([21, 128, 61] as [number, number, number]) : ([220, 38, 38] as [number, number, number]) }, undefined],
+        })),
+        summaryLines: [
+          ...(truncated ? [{ text: `Showing the latest ${result.rows.length} of ${result.total} entries — narrow the date range for a complete report.` }] : []),
+          { text: `Closing balance for this range: Rs. ${(result.rows[0]?.running_balance ?? 0).toLocaleString()}`, bold: true },
+        ],
+        filename: `cash-book-${dateStart || "all"}-to-${dateEnd || "now"}.pdf`,
+      });
+    } catch (err) {
+      setDownloadError(err instanceof ApiRequestError ? err.message : "Failed to generate report");
+    } finally {
+      setDownloading(false);
+    }
   }
 
   async function handleAdd(e: FormEvent) {
@@ -273,7 +328,7 @@ export default function CashBookPage() {
     <div>
       <PageHeader
         title="Cash book"
-        subtitle="Sales, supplier payments, and courier payments are logged here automatically."
+        subtitle="Sales, returns, purchases, supplier payments, cheques, and courier settlements are logged here automatically."
         action={
           <Button onClick={() => setShowTransfer(true)} className="inline-flex items-center gap-1.5">
             <ArrowLeftRight size={15} />
@@ -331,13 +386,11 @@ export default function CashBookPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-4 items-start">
         <Card className="lg:sticky lg:top-6">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-4">
             <Plus size={15} className="text-gray-400" />
             <h2 className="text-sm font-semibold text-gray-900">Add manual entry</h2>
+            <HelpHint text="For anything with no other source — rent, utilities, misc income." />
           </div>
-          <p className="text-xs text-gray-400 mb-4">
-            For anything with no other source — rent, utilities, misc income.
-          </p>
 
           <form onSubmit={handleAdd}>
             <FormGroup>
@@ -392,7 +445,7 @@ export default function CashBookPage() {
 
             <FormGroup>
               <Label>Notes (optional)</Label>
-              <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Reference, remarks, etc." />
+              <Input value={notes} onChange={(e) => setNotes(e.target.value)} />
             </FormGroup>
 
             {formError && <ErrorText>{formError}</ErrorText>}
@@ -447,8 +500,17 @@ export default function CashBookPage() {
                     setEntriesPage(1);
                   }}
                 />
+                <Button onClick={downloadPdf} disabled={downloading || entries.length === 0} className="inline-flex items-center gap-1.5">
+                  <Download size={14} />
+                  {downloading ? "Preparing..." : "Download PDF"}
+                </Button>
               </div>
             </div>
+            {downloadError && (
+              <div className="px-4 pt-3">
+                <ErrorText>{downloadError}</ErrorText>
+              </div>
+            )}
 
             {loading ? (
               <div className="p-4">
@@ -628,16 +690,15 @@ export default function CashBookPage() {
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl">
             <div className="p-5 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-base font-semibold text-gray-900">Move cash / bank</h2>
+              <h2 className="text-base font-semibold text-gray-900">
+                Move cash / bank
+                <HelpHint text="This isn't credit or debit — it's the same money, just held differently. Both sides are recorded together so totals stay correct." />
+              </h2>
               <button onClick={() => setShowTransfer(false)} className="text-gray-400 hover:text-gray-600">
                 <X size={18} />
               </button>
             </div>
             <div className="p-5">
-              <p className="text-xs text-gray-400 mb-3">
-                Moving money between cash-in-hand and the bank isn't credit or debit — it's the same money, just held
-                differently. This records both sides together so your totals stay correct.
-              </p>
               <FormGroup>
                 <Label>Direction</Label>
                 <div className="flex gap-2">

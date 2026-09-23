@@ -3,7 +3,7 @@ import { X, Plus, Wand2, AlertTriangle } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Supplier, Product, Purchase } from "../lib/types";
 import { mainCategories, categoryStructure, genderOptions } from "../lib/categories";
-import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Dropdown, TabToggle, NewSupplierModal } from "../components/ui";
+import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Dropdown, TabToggle, NewSupplierModal, HelpHint } from "../components/ui";
 
 interface VariantRow {
   size: string;
@@ -360,7 +360,7 @@ export default function AddProductPage() {
     <div>
       <PageHeader
         title="Add product"
-        subtitle="Set up the style, then add its color/size variants — stock is created automatically."
+        subtitle="Create a new style, or restock an existing one."
         action={
           <TabToggle
             value={mode}
@@ -412,7 +412,7 @@ export default function AddProductPage() {
                 <>
                   <FormGroup>
                     <Label>Product title</Label>
-                    <Input value={form.product_title} onChange={(e) => update("product_title", e.target.value)} placeholder="e.g. Classic Denim Jacket" />
+                    <Input value={form.product_title} onChange={(e) => update("product_title", e.target.value)} />
                     {duplicateWarning && (
                       <div className="mt-2 flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                         <AlertTriangle size={14} className="text-amber-600 flex-shrink-0 mt-0.5" />
@@ -480,14 +480,18 @@ export default function AddProductPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <FormGroup>
-                  <Label>Cost price for this batch (Rs.)</Label>
+                  <Label>
+                    Cost price for this batch (Rs.)
+                    {mode === "existing" && <HelpHint text="Can differ from this product's previous cost." />}
+                  </Label>
                   <Input type="number" min="0" step="0.01" value={form.cost_price} onChange={(e) => update("cost_price", e.target.value)} />
-                  {mode === "existing" && <p className="text-xs text-gray-400 mt-1">Can differ from this product's previous cost.</p>}
                 </FormGroup>
                 <FormGroup>
-                  <Label>Selling price for this batch (Rs.)</Label>
+                  <Label>
+                    Selling price for this batch (Rs.)
+                    {mode === "existing" && <HelpHint text="Older stock keeps its own price; only new units use this one." />}
+                  </Label>
                   <Input type="number" min="0" step="0.01" value={form.selling_price} onChange={(e) => update("selling_price", e.target.value)} />
-                  {mode === "existing" && <p className="text-xs text-gray-400 mt-1">Older stock keeps its own price; only new units use this.</p>}
                 </FormGroup>
               </div>
 
@@ -514,7 +518,10 @@ export default function AddProductPage() {
                 if (openLines.length === 0) return null;
                 return (
                   <div className="mb-4 border border-gray-300 rounded-xl p-3">
-                    <Label>Fulfilling a line from an existing pending purchase?</Label>
+                    <Label>
+                      Fulfilling a line from an existing pending purchase?
+                      <HelpHint text="Linking this to a pending purchase line means the supplier cost/payment for that line are already recorded — this step just adds the actual product/variant details. Other lines on the same purchase can still be fulfilled separately later, from here or from Manage Products." />
+                    </Label>
                     <Dropdown
                       value={fulfillsLineId}
                       onChange={(v) => {
@@ -539,11 +546,6 @@ export default function AddProductPage() {
                         label: `${purchase.purchase_code} — ${line.description} (${line.quantity} pcs @ Rs. ${line.unit_cost.toLocaleString()})`,
                       }))}
                     />
-                    <p className="text-xs text-gray-500 mt-1">
-                      Linking this to a pending purchase line means the supplier cost/payment for that line are already recorded — this
-                      step just adds the actual product/variant details. Other lines on the same purchase can still be fulfilled
-                      separately later, from here or from Manage Products.
-                    </p>
                   </div>
                 );
               })()}
@@ -551,7 +553,10 @@ export default function AddProductPage() {
               {mode === "new" && (
                 <>
                   <FormGroup>
-                    <Label>Product type</Label>
+                    <Label>
+                      Product type
+                      <HelpHint text="This is set once and can't be changed later — a different type of the same style is added as its own separate product." />
+                    </Label>
                     <Dropdown
                       value={productType}
                       onChange={(v) => setProductType(v as "FO" | "OG" | "OR" | "OP" | "IM")}
@@ -563,10 +568,6 @@ export default function AddProductPage() {
                         { value: "IM", label: "IM — Imported" },
                       ]}
                     />
-                    <p className="text-xs text-gray-400 mt-1">
-                      This is set once and can't be changed later — a different type of the same style is added as its own separate
-                      product.
-                    </p>
                   </FormGroup>
                   <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
                     <input type="checkbox" checked={allowReturns} onChange={(e) => setAllowReturns(e.target.checked)} className="rounded" />
@@ -582,8 +583,10 @@ export default function AddProductPage() {
             </Card>
 
             <Card>
-              <h2 className="text-base font-semibold text-gray-900 mb-1">Variants</h2>
-              <p className="text-xs text-gray-400 mb-4">Add colors and sizes — every combination becomes a row below where you set quantity.</p>
+              <h2 className="text-base font-semibold text-gray-900 mb-4 flex items-center">
+                Variants
+                <HelpHint text="Add colors and sizes — every combination becomes a row below where you set quantity." />
+              </h2>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -592,7 +595,7 @@ export default function AddProductPage() {
                     addingNewColor ? (
                       <div className="flex gap-2">
                         <Input
-                          placeholder="New color not listed above"
+                          placeholder="New color"
                           value={colorInput}
                           onChange={(e) => setColorInput(e.target.value)}
                           onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addColor())}
@@ -636,7 +639,6 @@ export default function AddProductPage() {
                   ) : (
                     <div className="flex gap-2">
                       <Input
-                        placeholder="e.g. Black, Navy"
                         value={colorInput}
                         onChange={(e) => setColorInput(e.target.value)}
                         onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addColor())}
@@ -667,7 +669,7 @@ export default function AddProductPage() {
                     addingNewSize ? (
                       <div className="flex gap-2">
                         <Input
-                          placeholder="New size not listed above"
+                          placeholder="New size"
                           value={sizeInput}
                           onChange={(e) => setSizeInput(e.target.value)}
                           onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addSize())}
@@ -711,7 +713,6 @@ export default function AddProductPage() {
                   ) : (
                     <div className="flex gap-2">
                       <Input
-                        placeholder="e.g. S, M, L"
                         value={sizeInput}
                         onChange={(e) => setSizeInput(e.target.value)}
                         onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addSize())}
@@ -738,16 +739,16 @@ export default function AddProductPage() {
               </div>
 
               <div className="mt-5 border-t border-gray-100 pt-4">
-                <Label>Add a variant</Label>
-                <p className="text-xs text-gray-400 mb-2">
-                  Pick the color and size you actually received, enter how many, and add it — one combination at a time, matching what's really in the delivery rather than every possible combination.
-                </p>
+                <Label>
+                  Add a variant
+                  <HelpHint text="Pick the color and size you actually received, enter how many, and add it — one combination at a time, matching what's really in the delivery." />
+                </Label>
                 <div className="flex gap-2 items-end flex-wrap">
                   <div className="w-36">
                     <Dropdown
                       value={pickColor}
                       onChange={setPickColor}
-                      placeholder={colors.length > 0 ? "Color" : "Color"}
+                      placeholder="Color"
                       disabled={colors.length === 0}
                       options={colors.map((c) => ({ value: c, label: c }))}
                     />
@@ -756,7 +757,7 @@ export default function AddProductPage() {
                     <Dropdown
                       value={pickSize}
                       onChange={setPickSize}
-                      placeholder={sizes.length > 0 ? "Size" : "Size"}
+                      placeholder="Size"
                       disabled={sizes.length === 0}
                       options={sizes.map((s) => ({ value: s, label: s }))}
                     />

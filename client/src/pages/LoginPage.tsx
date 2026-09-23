@@ -1,6 +1,5 @@
 import { useState, FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { ShoppingBag } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { ApiRequestError } from "../lib/api";
 import { Input, ErrorText } from "../components/ui";
@@ -36,12 +35,8 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <div className="w-full max-w-sm bg-white border border-gray-200 rounded-2xl shadow-sm p-8">
-        <div className="flex items-center gap-2 mb-1">
-          <ShoppingBag size={22} className="text-black" />
-          <h1 className="text-xl font-bold tracking-tight flex items-baseline gap-1">
-            Kash
-            <span className="text-xs italic font-light text-gray-400">by M&amp;M</span>
-          </h1>
+        <div className="mb-1">
+          <img src="/NameLogo.png" alt="M&M Clothing" className="h-8 w-auto" />
         </div>
         <p className="text-sm text-gray-400 mb-6">Sign in to the management system</p>
 

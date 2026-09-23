@@ -15,6 +15,7 @@ const infoInput = z.object({
   city: z.string().optional(),
   phone: z.string().optional(),
   email: z.string().optional(),
+  website: z.string().optional(),
   bank_name: z.string().optional(),
   bank_account_no: z.string().optional(),
   bank_account_name: z.string().optional(),
@@ -34,8 +35,8 @@ businessInfoRouter.put("/", (req, res) => {
 
   if (!existing) {
     db.prepare(
-      `INSERT INTO business_info (id, business_name, address_line1, address_line2, city, phone, email, bank_name, bank_account_no, bank_account_name, notes)
-       VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO business_info (id, business_name, address_line1, address_line2, city, phone, email, website, bank_name, bank_account_no, bank_account_name, notes)
+       VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       data.business_name ?? null,
       data.address_line1 ?? null,
@@ -43,6 +44,7 @@ businessInfoRouter.put("/", (req, res) => {
       data.city ?? null,
       data.phone ?? null,
       data.email ?? null,
+      data.website ?? null,
       data.bank_name ?? null,
       data.bank_account_no ?? null,
       data.bank_account_name ?? null,
@@ -52,7 +54,7 @@ businessInfoRouter.put("/", (req, res) => {
     const merged = { ...existing, ...data };
     db.prepare(
       `UPDATE business_info SET business_name = ?, address_line1 = ?, address_line2 = ?, city = ?,
-       phone = ?, email = ?, bank_name = ?, bank_account_no = ?, bank_account_name = ?, notes = ?
+       phone = ?, email = ?, website = ?, bank_name = ?, bank_account_no = ?, bank_account_name = ?, notes = ?
        WHERE id = 1`
     ).run(
       merged.business_name,
@@ -61,6 +63,7 @@ businessInfoRouter.put("/", (req, res) => {
       merged.city,
       merged.phone,
       merged.email,
+      merged.website,
       merged.bank_name,
       merged.bank_account_no,
       merged.bank_account_name,

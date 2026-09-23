@@ -1,0 +1,145 @@
+import { useMemo, useState } from "react";
+
+export interface RevenuePoint {
+  label: string;
+  value: number;
+}
+
+// Rounds a number up to a "nice" axis maximum (1/2/5 × a power of ten) so
+// gridlines land on round figures instead of an arbitrary max-value split.
+function niceCeiling(value: number): number {
+  if (value <= 0) return 100;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(value)));
+  const normalized = value / magnitude;
+  const step = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+  return step * magnitude;
+}
+
+function formatCompact(n: number): string {
+  if (n >= 1_000_000) return `${+(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${+(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}k`;
+  return String(Math.round(n));
+}
+
+// A single-series revenue trend — thin line, light gradient fill anchored
+// to the baseline, recessive gridlines, and a hover crosshair + tooltip
+// (per dataviz guidance: line/area charts get interaction by default).
+// No legend needed — there's only one series, and the card title names it.
+export function RevenueChart({ data, height = 220 }: { data: RevenuePoint[]; height?: number }) {
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+
+  const width = 760;
+  const padLeft = 46;
+  const padRight = 14;
+  const padTop = 16;
+  const padBottom = 26;
+  const plotWidth = width - padLeft - padRight;
+  const plotHeight = height - padTop - padBottom;
+
+  const maxValue = useMemo(() => niceCeiling(Math.max(...data.map((d) => d.value), 1) * 1.15), [data]);
+  const gridLines = 4;
+
+  const points = useMemo(() => {
+    if (data.length === 0) return [];
+    const stepX = data.length > 1 ? plotWidth / (data.length - 1) : 0;
+    return data.map((d, i) => ({
+      x: padLeft + stepX * i,
+      y: padTop + plotHeight * (1 - d.value / maxValue),
+      ...d,
+    }));
+  }, [data, maxValue, plotWidth, plotHeight]);
+
+  const linePath = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
+  const areaPath =
+    points.length > 0
+      ? `${linePath} L ${points[points.length - 1].x.toFixed(1)} ${(padTop + plotHeight).toFixed(1)} L ${points[0].x.toFixed(1)} ${(
+          padTop + plotHeight
+        ).toFixed(1)} Z`
+      : "";
+
+  const hovered = hoverIndex !== null ? points[hoverIndex] : null;
+
+  function handleMove(e: React.MouseEvent<SVGSVGElement>) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const relX = ((e.clientX - rect.left) / rect.width) * width;
+    if (points.length === 0) return;
+    const stepX = points.length > 1 ? plotWidth / (points.length - 1) : 0;
+    const idx = stepX > 0 ? Math.round((relX - padLeft) / stepX) : 0;
+    setHoverIndex(Math.max(0, Math.min(points.length - 1, idx)));
+  }
+
+  return (
+    <div className="relative">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="w-full"
+        style={{ height }}
+        onMouseMove={handleMove}
+        onMouseLeave={() => setHoverIndex(null)}
+      >
+        <defs>
+          <linearGradient id="revenueFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#111827" stopOpacity="0.16" />
+            <stop offset="100%" stopColor="#111827" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+
+        {/* Recessive gridlines + y-axis labels */}
+        {Array.from({ length: gridLines + 1 }, (_, i) => {
+          const value = (maxValue / gridLines) * i;
+          const y = padTop + plotHeight * (1 - i / gridLines);
+          return (
+            <g key={i}>
+              <line x1={padLeft} y1={y} x2={width - padRight} y2={y} stroke="#F1F1F1" strokeWidth={1} />
+              <text x={padLeft - 8} y={y + 3} textAnchor="end" fontSize="10" fill="#9CA3AF">
+                {formatCompact(value)}
+              </text>
+            </g>
+          );
+        })}
+
+        {/* x-axis labels */}
+        {points.map((p, i) => {
+          const showEvery = points.length > 14 ? Math.ceil(points.length / 8) : 1;
+          if (i % showEvery !== 0 && i !== points.length - 1) return null;
+          return (
+            <text key={i} x={p.x} y={height - 8} textAnchor="middle" fontSize="10" fill="#9CA3AF">
+              {p.label}
+            </text>
+          );
+        })}
+
+        {areaPath && <path d={areaPath} fill="url(#revenueFill)" />}
+        {linePath && <path d={linePath} fill="none" stroke="#111827" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />}
+
+        {hovered && (
+          <>
+            <line
+              x1={hovered.x}
+              y1={padTop}
+              x2={hovered.x}
+              y2={padTop + plotHeight}
+              stroke="#9CA3AF"
+              strokeWidth={1}
+              strokeDasharray="3,3"
+            />
+            <circle cx={hovered.x} cy={hovered.y} r={4} fill="#111827" stroke="#fff" strokeWidth={2} />
+          </>
+        )}
+      </svg>
+
+      {hovered && (
+        <div
+          className="absolute pointer-events-none bg-gray-900 text-white text-xs font-medium px-2.5 py-1.5 rounded-lg shadow-lg whitespace-nowrap -translate-x-1/2"
+          style={{
+            left: `${(hovered.x / width) * 100}%`,
+            top: `${Math.max(0, (hovered.y / height) * 100 - 14)}%`,
+          }}
+        >
+          Rs. {hovered.value.toLocaleString()}
+          <span className="block text-[10px] text-gray-400 font-normal">{hovered.label}</span>
+        </div>
+      )}
+    </div>
+  );
+}

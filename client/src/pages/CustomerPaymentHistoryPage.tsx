@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Receipt, Download } from "lucide-react";
-import jsPDF from "jspdf";
 import { api, ApiRequestError } from "../lib/api";
 import { Customer } from "../lib/types";
+import { downloadTabularReport, rangeLabelFor } from "../lib/reportPdf";
 import { PageHeader, Card, Table, Th, Td, EmptyState, ErrorText, DateRangePicker, Button } from "../components/ui";
 
 interface LedgerEntry {
@@ -85,120 +85,36 @@ export default function CustomerPaymentHistoryPage() {
 
   function downloadPdf() {
     if (!customer) return;
-    const doc = new jsPDF({ unit: "pt", format: "a4" });
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const pageHeight = doc.internal.pageSize.getHeight();
-    const marginX = 40;
-    const rangeLabel =
-      startDate && endDate ? `${startDate} to ${endDate}` : startDate ? `From ${startDate}` : endDate ? `Through ${endDate}` : "All records";
-
-    function drawHeaderFooter(pageNum: number, totalPages: number) {
-      doc.setFontSize(9);
-      doc.setTextColor(120);
-      doc.setFont("helvetica", "normal");
-      doc.text("M&M Clothing — Payment History Statement", marginX, 28);
-      doc.text(customer!.name, pageWidth - marginX, 28, { align: "right" });
-
-      doc.setDrawColor(220);
-      doc.line(marginX, 34, pageWidth - marginX, 34);
-
-      doc.setFontSize(8);
-      doc.setTextColor(150);
-      doc.text(`Generated ${toISODate(new Date())} · ${rangeLabel}`, marginX, pageHeight - 24);
-      doc.text(`Page ${pageNum} of ${totalPages}`, pageWidth - marginX, pageHeight - 24, { align: "right" });
-    }
-
-    let y = 70;
-    doc.setFontSize(20);
-    doc.setTextColor(20);
-    doc.setFont("helvetica", "bold");
-    doc.text("Payment History", marginX, y);
-    y += 22;
-    doc.setFontSize(13);
-    doc.setFont("helvetica", "normal");
-    doc.text(`for Customer: ${customer.name}`, marginX, y);
-    y += 18;
-    doc.setFontSize(10);
-    doc.setTextColor(100);
-    doc.text(`${customer.customer_code}${customer.phone ? ` · ${customer.phone}` : ""}`, marginX, y);
-    y += 28;
-
-    const columns = [
-      { label: "Date", width: 70 },
-      { label: "Description", width: 245 },
-      { label: "Amount", width: 100 },
-      { label: "Balance", width: 100 },
-    ];
-    const tableWidth = columns.reduce((sum, c) => sum + c.width, 0);
-    const rowHeight = 20;
-    const headerBandBottom = 44;
-    const footerBandTop = pageHeight - 40;
-
-    function drawTableHeader(yPos: number): number {
-      doc.setFillColor(245, 245, 245);
-      doc.rect(marginX, yPos, tableWidth, rowHeight, "F");
-      doc.setFontSize(9);
-      doc.setFont("helvetica", "bold");
-      doc.setTextColor(80);
-      let x = marginX + 6;
-      for (const col of columns) {
-        doc.text(col.label, x, yPos + 14);
-        x += col.width;
-      }
-      return yPos + rowHeight;
-    }
-
-    y = drawTableHeader(y);
-
-    let pageNum = 1;
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    doc.setTextColor(30);
-
-    for (const entry of displayEntries) {
-      if (y + rowHeight > footerBandTop) {
-        doc.addPage();
-        pageNum++;
-        y = headerBandBottom + 10;
-        y = drawTableHeader(y);
-      }
-
-      let x = marginX + 6;
-      doc.setTextColor(30);
-      doc.text(entry.date.slice(0, 10), x, y + 14);
-      x += columns[0].width;
-
-      const label = entry.label.length > 48 ? entry.label.slice(0, 45) + "..." : entry.label;
-      doc.text(label, x, y + 14);
-      x += columns[1].width;
-
-      const isPositive = entry.effect > 0;
-      doc.setTextColor(isPositive ? 20 : entry.effect < 0 ? 0 : 150);
-      doc.text(formatEntryAmount(entry), x, y + 14);
-      x += columns[2].width;
-
-      doc.setTextColor(30);
-      doc.text(`Rs. ${entry.running_balance.toLocaleString()}`, x, y + 14);
-
-      doc.setDrawColor(235);
-      doc.line(marginX, y + rowHeight, marginX + tableWidth, y + rowHeight);
-
-      y += rowHeight;
-    }
-
-    y += 10;
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.setTextColor(20);
-    doc.text(`Current balance owed: Rs. ${finalBalance.toLocaleString()}`, marginX, y);
-
-    const totalPages = doc.getNumberOfPages();
-    for (let p = 1; p <= totalPages; p++) {
-      doc.setPage(p);
-      drawHeaderFooter(p, totalPages);
-    }
-
-    doc.save(`payment-history-${customer.customer_code}-${toISODate(new Date())}.pdf`);
+    downloadTabularReport({
+      headerLabel: "M&M Clothing — Payment History Statement",
+      headerRight: customer.name,
+      title: "Payment History",
+      subjectLines: [
+        `for Customer: ${customer.name}`,
+        `${customer.customer_code}${customer.phone ? ` · ${customer.phone}` : ""}`,
+      ],
+      rangeLabel: rangeLabelFor(startDate, endDate),
+      columns: [
+        { label: "Date", width: 70 },
+        { label: "Description", width: 245 },
+        { label: "Amount", width: 100, align: "right" },
+        { label: "Balance", width: 100, align: "right" },
+      ],
+      rows: displayEntries.map((entry) => {
+        const isPositive = entry.effect > 0;
+        return {
+          cells: [
+            entry.date.slice(0, 10),
+            entry.label.length > 48 ? entry.label.slice(0, 45) + "..." : entry.label,
+            formatEntryAmount(entry),
+            `Rs. ${entry.running_balance.toLocaleString()}`,
+          ],
+          styles: [undefined, undefined, { color: isPositive ? 20 : entry.effect < 0 ? 0 : 150 }, undefined],
+        };
+      }),
+      summaryLines: [{ text: `Current balance owed: Rs. ${finalBalance.toLocaleString()}`, bold: true }],
+      filename: `payment-history-${customer.customer_code}-${toISODate(new Date())}.pdf`,
+    });
   }
 
   return (

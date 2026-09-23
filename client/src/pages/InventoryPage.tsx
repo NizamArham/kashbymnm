@@ -4,7 +4,22 @@ import { api, ApiRequestError } from "../lib/api";
 import { InventoryUnit } from "../lib/types";
 import { useAuth } from "../context/AuthContext";
 import { groupByProduct, compareSizes } from "../lib/sizeSort";
-import { PageHeader, Card, Input, Dropdown, Table, Th, Td, Badge, inventoryStatusTone, EmptyState, ErrorText } from "../components/ui";
+import {
+  PageHeader,
+  Card,
+  Input,
+  Dropdown,
+  Table,
+  Th,
+  Td,
+  Badge,
+  inventoryStatusTone,
+  EmptyState,
+  ErrorText,
+  RowCard,
+  RowCardStats,
+  RowCardStat,
+} from "../components/ui";
 
 export default function InventoryPage() {
   const { user } = useAuth();
@@ -247,7 +262,7 @@ export default function InventoryPage() {
               </div>
               <Input
                 className="pl-10"
-                placeholder="Scan a barcode, or type a SKU / product name..."
+                placeholder="Scan or search products..."
                 value={query}
                 onChange={(e) => {
                   setQuery(e.target.value);
@@ -349,97 +364,166 @@ export default function InventoryPage() {
       ) : groups.length === 0 ? (
         <EmptyState icon={Package} title="No inventory units found" subtitle="Try adjusting your filters" />
       ) : (
-        <Card className="p-0 overflow-hidden">
-          <Table>
-            <thead>
-              <tr>
-                <Th></Th>
-                <Th>Product title</Th>
-                <Th>Brand</Th>
-                <Th>Category</Th>
-                <Th>Total qty</Th>
-                <Th>Selling price</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {groups.map((group, index) => {
-                const isFocused = group.product_id === focusedProductId;
-                const isExpanded = expandedRowId === group.product_id;
-                const groupCategory = group.units[0]?.category ?? null;
-                const totalQty = group.units.length;
+        <>
+          {/* Desktop / tablet-landscape: full table, unchanged */}
+          <Card className="p-0 overflow-hidden hidden lg:block">
+            <Table>
+              <thead>
+                <tr>
+                  <Th></Th>
+                  <Th>Product title</Th>
+                  <Th>Brand</Th>
+                  <Th>Category</Th>
+                  <Th>Total qty</Th>
+                  <Th>Selling price</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {groups.map((group, index) => {
+                  const isFocused = group.product_id === focusedProductId;
+                  const isExpanded = expandedRowId === group.product_id;
+                  const groupCategory = group.units[0]?.category ?? null;
+                  const totalQty = group.units.length;
 
-                return (
-                  <Fragment key={group.product_id}>
-                    <tr
-                      onClick={() => setExpandedRowId(isExpanded ? null : group.product_id)}
-                      className={`cursor-pointer ${
-                        isFocused ? "bg-green-50/60 hover:bg-green-50" : index % 2 === 1 ? "bg-gray-50/60 hover:bg-gray-100" : "hover:bg-gray-100"
-                      }`}
-                    >
-                      <Td className="w-8">
-                        {isExpanded ? <ChevronDown size={15} className="text-gray-400" /> : <ChevronRight size={15} className="text-gray-400" />}
-                      </Td>
-                      <Td className="font-medium">{group.product_title}</Td>
-                      <Td>{group.brand ?? "—"}</Td>
-                      <Td>{groupCategory ?? "—"}</Td>
-                      <Td>{totalQty}</Td>
-                      <Td>Rs. {group.selling_price?.toLocaleString() ?? "—"}</Td>
-                    </tr>
-                    {isExpanded && (
-                      <tr>
-                        <Td colSpan={6} className="bg-gray-50/70 !py-3 !px-4">
-                          <div className="bg-white rounded-xl overflow-hidden shadow-sm">
-                            <table className="w-full text-sm">
-                              <thead>
-                                <tr className="bg-gray-50">
-                                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Size</th>
-                                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Color</th>
-                                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Qty</th>
-                                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">SKU</th>
-                                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Barcode</th>
-                                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Supplier</th>
-                                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-gray-100">
-                                {summarizeVariants(group.units).map((row, i) => {
-                                  const isExactVariant =
-                                    exactUnit && exactUnit.color === row.color && exactUnit.size === row.size && exactUnit.status === row.status;
-                                  return (
-                                    <tr
-                                      key={`${row.color}-${row.size}-${row.status}`}
-                                      className={
-                                        isExactVariant
-                                          ? "bg-green-50/70"
-                                          : i % 2 === 1
-                                          ? "bg-gray-50/50 hover:bg-gray-100/70"
-                                          : "hover:bg-gray-50"
-                                      }
-                                    >
-                                      <td className="px-4 py-2 font-medium text-gray-900">{row.size}</td>
-                                      <td className="px-4 py-2 text-gray-600">{row.color}</td>
-                                      <td className="px-4 py-2 text-gray-600">{row.count}</td>
-                                      <td className="px-4 py-2 text-gray-600">{row.count > 1 ? `${row.skuSample} (+${row.count - 1} more)` : row.skuSample}</td>
-                                      <td className="px-4 py-2 font-mono text-xs text-gray-500">{row.barcodeRange}</td>
-                                      <td className="px-4 py-2 text-gray-500">{row.batchSupplierCode ?? "—"}</td>
-                                      <td className="px-4 py-2">
-                                        <Badge label={row.status} tone={inventoryStatusTone(row.status)} />
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
+                  return (
+                    <Fragment key={group.product_id}>
+                      <tr
+                        onClick={() => setExpandedRowId(isExpanded ? null : group.product_id)}
+                        className={`cursor-pointer ${
+                          isFocused ? "bg-green-50/60 hover:bg-green-50" : index % 2 === 1 ? "bg-gray-50/60 hover:bg-gray-100" : "hover:bg-gray-100"
+                        }`}
+                      >
+                        <Td className="w-8">
+                          {isExpanded ? <ChevronDown size={15} className="text-gray-400" /> : <ChevronRight size={15} className="text-gray-400" />}
                         </Td>
+                        <Td className="font-medium">{group.product_title}</Td>
+                        <Td>{group.brand ?? "—"}</Td>
+                        <Td>{groupCategory ?? "—"}</Td>
+                        <Td>{totalQty}</Td>
+                        <Td>Rs. {group.selling_price?.toLocaleString() ?? "—"}</Td>
                       </tr>
-                    )}
-                  </Fragment>
-                );
-              })}
-            </tbody>
-          </Table>
-        </Card>
+                      {isExpanded && (
+                        <tr>
+                          <Td colSpan={6} className="bg-gray-50/70 !py-3 !px-4">
+                            <div className="bg-white rounded-xl overflow-hidden shadow-sm">
+                              <table className="w-full text-sm">
+                                <thead>
+                                  <tr className="bg-gray-50">
+                                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Size</th>
+                                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Color</th>
+                                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Qty</th>
+                                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">SKU</th>
+                                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Barcode</th>
+                                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Supplier</th>
+                                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                  {summarizeVariants(group.units).map((row, i) => {
+                                    const isExactVariant =
+                                      exactUnit && exactUnit.color === row.color && exactUnit.size === row.size && exactUnit.status === row.status;
+                                    return (
+                                      <tr
+                                        key={`${row.color}-${row.size}-${row.status}`}
+                                        className={
+                                          isExactVariant
+                                            ? "bg-green-50/70"
+                                            : i % 2 === 1
+                                            ? "bg-gray-50/50 hover:bg-gray-100/70"
+                                            : "hover:bg-gray-50"
+                                        }
+                                      >
+                                        <td className="px-4 py-2 font-medium text-gray-900">{row.size}</td>
+                                        <td className="px-4 py-2 text-gray-600">{row.color}</td>
+                                        <td className="px-4 py-2 text-gray-600">{row.count}</td>
+                                        <td className="px-4 py-2 text-gray-600">{row.count > 1 ? `${row.skuSample} (+${row.count - 1} more)` : row.skuSample}</td>
+                                        <td className="px-4 py-2 font-mono text-xs text-gray-500">{row.barcodeRange}</td>
+                                        <td className="px-4 py-2 text-gray-500">{row.batchSupplierCode ?? "—"}</td>
+                                        <td className="px-4 py-2">
+                                          <Badge label={row.status} tone={inventoryStatusTone(row.status)} />
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          </Td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </Table>
+          </Card>
+
+          {/* Mobile / tablet-portrait: stacked cards instead of a squeezed table */}
+          <div className="lg:hidden space-y-2.5">
+            {groups.map((group) => {
+              const isFocused = group.product_id === focusedProductId;
+              const isExpanded = expandedRowId === group.product_id;
+              const groupCategory = group.units[0]?.category ?? null;
+              const totalQty = group.units.length;
+
+              return (
+                <RowCard
+                  key={group.product_id}
+                  onClick={() => setExpandedRowId(isExpanded ? null : group.product_id)}
+                  className={isFocused ? "border-green-300 bg-green-50/40" : ""}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-medium text-gray-900 leading-snug">{group.product_title}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        {group.brand ?? "—"}
+                        {groupCategory ? ` · ${groupCategory}` : ""}
+                      </p>
+                    </div>
+                    <div className="flex-shrink-0 text-gray-400 mt-0.5">
+                      {isExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+                    </div>
+                  </div>
+
+                  <RowCardStats>
+                    <RowCardStat label="Total qty" value={totalQty} />
+                    <RowCardStat label="Selling price" value={`Rs. ${group.selling_price?.toLocaleString() ?? "—"}`} />
+                  </RowCardStats>
+
+                  {isExpanded && (
+                    <div className="mt-3 pt-3 border-t border-gray-100 space-y-2" onClick={(e) => e.stopPropagation()}>
+                      {summarizeVariants(group.units).map((row) => {
+                        const isExactVariant =
+                          exactUnit && exactUnit.color === row.color && exactUnit.size === row.size && exactUnit.status === row.status;
+                        return (
+                          <div
+                            key={`${row.color}-${row.size}-${row.status}`}
+                            className={`rounded-lg px-3 py-2.5 ${isExactVariant ? "bg-green-50 border border-green-200" : "bg-gray-50"}`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-sm font-medium text-gray-900">
+                                {row.size} <span className="text-gray-400 font-normal">·</span> {row.color}
+                              </p>
+                              <Badge label={row.status} tone={inventoryStatusTone(row.status)} />
+                            </div>
+                            <div className="flex items-center justify-between gap-2 mt-1.5 text-xs text-gray-500">
+                              <span className="font-mono">{row.barcodeRange}</span>
+                              <span>Qty {row.count}</span>
+                            </div>
+                            <div className="flex items-center justify-between gap-2 mt-1 text-xs text-gray-400">
+                              <span>{row.count > 1 ? `${row.skuSample} (+${row.count - 1} more)` : row.skuSample}</span>
+                              {row.batchSupplierCode && <span>Supplier {row.batchSupplierCode}</span>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </RowCard>
+              );
+            })}
+          </div>
+        </>
       )}
     </div>
   );

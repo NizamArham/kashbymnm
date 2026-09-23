@@ -1,4 +1,4 @@
-const API_BASE = "http://localhost:4000/api";
+const API_BASE = `http://${window.location.hostname}:4000/api`;
 
 function getToken(): string | null {
   return localStorage.getItem("mm_token");

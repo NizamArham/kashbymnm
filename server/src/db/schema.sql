@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS users (
   bank_account_name TEXT,
   -- Self-referencing: who this person reports to, for a simple org chart.
   reports_to INTEGER REFERENCES users(id),
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes'))
 );
 
 -- 0a. login_activity ------------------------------------------------------
@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS login_activity (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL REFERENCES users(id),
-  login_at TEXT NOT NULL DEFAULT (datetime('now')),
+  login_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes')),
   logout_at TEXT
 );
 
@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS attendance (
   user_id INTEGER NOT NULL REFERENCES users(id),
   attendance_date TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'present' CHECK (status IN ('present','absent','half_day','leave')),
-  marked_at TEXT NOT NULL DEFAULT (datetime('now')),
+  marked_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes')),
   marked_by INTEGER REFERENCES users(id),
   notes TEXT,
   UNIQUE(user_id, attendance_date)
@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS business_info (
   city TEXT,
   phone TEXT,
   email TEXT,
+  website TEXT,
   bank_name TEXT,
   bank_account_no TEXT,
   bank_account_name TEXT,
@@ -102,7 +103,7 @@ CREATE TABLE IF NOT EXISTS customers (
   suspended_at TEXT,
   reactivated_reason TEXT,
   reactivated_at TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes'))
 );
 
 -- 2a. loyalty_transactions -------------------------------------------------
@@ -119,7 +120,7 @@ CREATE TABLE IF NOT EXISTS loyalty_transactions (
   reason TEXT NOT NULL CHECK (reason IN ('sale','bonus_grant','manual_adjustment','redemption')),
   reference_id INTEGER, -- e.g. the sale id, when reason = 'sale'
   notes TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_loyalty_transactions_customer ON loyalty_transactions(customer_id);
@@ -145,7 +146,7 @@ CREATE TABLE IF NOT EXISTS store_credit_transactions (
   -- redemption row consuming this credit has no expiry of its own — it's
   -- just a negative entry, the expiry only matters on the grant.
   expires_at TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_store_credit_transactions_customer ON store_credit_transactions(customer_id);
@@ -179,7 +180,7 @@ CREATE TABLE IF NOT EXISTS cheque_receipts (
   bank_name TEXT NOT NULL,
   amount REAL NOT NULL,
   cheque_date TEXT NOT NULL, -- the date written on the cheque itself
-  date_received TEXT NOT NULL DEFAULT (datetime('now')),
+  date_received TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes')),
   customer_id INTEGER NOT NULL REFERENCES customers(id),
   -- The exact FIFO sale allocations this cheque settled, as JSON
   -- (same shape computeFifoAllocation returns) — needed so a bounce can
@@ -209,7 +210,7 @@ CREATE TABLE IF NOT EXISTS cheque_transfers (
   -- Links to the specific supplier_payments row this transfer created,
   -- so reversing on a bounce knows exactly which payment to undo.
   supplier_payment_id INTEGER REFERENCES supplier_payments(id),
-  date_given TEXT NOT NULL DEFAULT (datetime('now')),
+  date_given TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes')),
   notes TEXT
 );
 
@@ -230,7 +231,7 @@ CREATE TABLE IF NOT EXISTS cheques_issued (
   bank_name TEXT NOT NULL,
   amount REAL NOT NULL,
   cheque_date TEXT NOT NULL, -- the date written on the cheque — drives the "due soon" dashboard reminder
-  date_issued TEXT NOT NULL DEFAULT (datetime('now')),
+  date_issued TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes')),
   supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
   supplier_payment_id INTEGER REFERENCES supplier_payments(id),
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','cleared','bounced')),
@@ -323,7 +324,7 @@ CREATE TABLE IF NOT EXISTS products (
   -- FO = Factory Outlet, OG = Original (with labels), OR = Overrun,
   -- OP = Own Production.
   product_type TEXT NOT NULL DEFAULT 'OG' CHECK (product_type IN ('FO','OG','OR','OP','IM')),
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_products_supplier ON products(supplier_id);
@@ -352,7 +353,7 @@ CREATE TABLE IF NOT EXISTS inventory (
   -- Only set when status is a write-off reason (not 'available' or 'sold').
   removal_reason TEXT CHECK (removal_reason IN ('Damaged','Gifted','Staff Use','Stolen','Lost','Other')),
   removal_note TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_inventory_product ON inventory(product_id);
@@ -371,7 +372,7 @@ CREATE TABLE IF NOT EXISTS coupons (
   discount_value REAL NOT NULL,
   is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
   expires_at TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes'))
 );
 
 -- 6. sales -------------------------------------------------------------------
@@ -393,7 +394,7 @@ CREATE TABLE IF NOT EXISTS sales (
   -- before the real customer row is removed.
   deleted_customer_snapshot TEXT,
   salesperson TEXT,
-  date TEXT NOT NULL DEFAULT (datetime('now')),
+  date TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes')),
   subtotal REAL NOT NULL DEFAULT 0,
   -- discount is the COMBINED total (manual_discount + coupon_discount) —
   -- what actually reduces the sale total, and what the receipt shows as
@@ -477,7 +478,7 @@ CREATE TABLE IF NOT EXISTS return_requests (
   reason TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','declined')),
   requested_by INTEGER REFERENCES users(id),
-  requested_at TEXT NOT NULL DEFAULT (datetime('now')),
+  requested_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes')),
   decided_by INTEGER REFERENCES users(id),
   decided_at TEXT,
   decision_reason TEXT,
@@ -505,7 +506,7 @@ CREATE TABLE IF NOT EXISTS returns (
   refund_amount REAL NOT NULL DEFAULT 0,
   exchange_inventory_id INTEGER REFERENCES inventory(id) ON DELETE SET NULL,
   reason TEXT,
-  return_date TEXT NOT NULL DEFAULT (datetime('now'))
+  return_date TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_returns_sale_item ON returns(sale_item_id);
@@ -515,7 +516,7 @@ CREATE TABLE IF NOT EXISTS purchases (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   purchase_code TEXT UNIQUE NOT NULL,
   supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
-  purchase_date TEXT NOT NULL DEFAULT (datetime('now')),
+  purchase_date TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes')),
   -- For a FULFILLED (regular, non-pending) purchase, total_cost is the
   -- sum of its purchase_items as before. For a PENDING purchase,
   -- total_cost is the sum of its pending_purchase_lines' (qty * cost) —
@@ -591,7 +592,7 @@ CREATE TABLE IF NOT EXISTS purchase_expenses (
   purchase_id INTEGER NOT NULL REFERENCES purchases(id) ON DELETE CASCADE,
   label TEXT NOT NULL,
   amount REAL NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_purchase_expenses_purchase ON purchase_expenses(purchase_id);
@@ -611,7 +612,7 @@ CREATE TABLE IF NOT EXISTS supplier_credit_transactions (
   reason TEXT NOT NULL CHECK (reason IN ('damaged_goods_credit','applied_to_purchase','manual_adjustment')),
   reference_id INTEGER, -- the purchase id that generated or consumed this entry
   notes TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_supplier_credit_transactions_supplier ON supplier_credit_transactions(supplier_id);
@@ -637,7 +638,7 @@ CREATE TABLE IF NOT EXISTS purchase_returns (
   reason TEXT NOT NULL,
   resolution TEXT NOT NULL CHECK (resolution IN ('cash_refund','supplier_credit')),
   notes TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_purchase_returns_purchase ON purchase_returns(purchase_id);
@@ -684,7 +685,7 @@ CREATE TABLE IF NOT EXISTS supplier_payments (
   supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
   purchase_id INTEGER REFERENCES purchases(id),
   amount REAL NOT NULL,
-  payment_date TEXT NOT NULL DEFAULT (datetime('now')),
+  payment_date TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes')),
   method TEXT,
   is_partial INTEGER NOT NULL DEFAULT 0 CHECK (is_partial IN (0,1)),
   notes TEXT
@@ -738,22 +739,10 @@ CREATE TABLE IF NOT EXISTS deliveries (
 
 CREATE INDEX IF NOT EXISTS idx_deliveries_sale ON deliveries(sale_id);
 
--- 10. courier_payments --------------------------------------------------------
-CREATE TABLE IF NOT EXISTS courier_payments (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  courier_name TEXT,
-  delivery_id INTEGER REFERENCES deliveries(id),
-  amount REAL NOT NULL,
-  payment_date TEXT NOT NULL DEFAULT (datetime('now')),
-  notes TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_courier_payments_delivery ON courier_payments(delivery_id);
-
 -- 11. cash_book -----------------------------------------------------------
 CREATE TABLE IF NOT EXISTS cash_book (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  entry_date TEXT NOT NULL DEFAULT (datetime('now')),
+  entry_date TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes')),
   type TEXT NOT NULL CHECK (type IN ('income','expense')),
   category TEXT NOT NULL,
   -- How this entry was actually settled (cash/card/bank_transfer/credit)

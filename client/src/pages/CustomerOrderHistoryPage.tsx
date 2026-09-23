@@ -4,6 +4,7 @@ import { ArrowLeft, ChevronDown, ChevronRight, ShoppingBag, MoreVertical, Downlo
 import jsPDF from "jspdf";
 import { api, ApiRequestError } from "../lib/api";
 import { Sale, SaleItem, Customer } from "../lib/types";
+import { NAME_LOGO_PNG_BASE64, NAME_LOGO_ASPECT_RATIO } from "../lib/logoAsset";
 import { PageHeader, Card, Table, Th, Td, Badge, paymentStatusTone, EmptyState, ErrorText } from "../components/ui";
 
 interface BusinessInfo {
@@ -128,11 +129,10 @@ export default function CustomerOrderHistoryPage() {
       let y = 50;
 
       // Business header
-      doc.setFontSize(16);
-      doc.setFont("helvetica", "bold");
-      doc.setTextColor(20);
-      doc.text(businessInfo?.business_name || "M&M Clothing", marginX, y);
-      y += 18;
+      const logoWidth = 130;
+      const logoHeight = logoWidth / NAME_LOGO_ASPECT_RATIO;
+      doc.addImage(NAME_LOGO_PNG_BASE64, "PNG", marginX, y - 13, logoWidth, logoHeight, undefined, "SLOW");
+      y += logoHeight;
       doc.setFontSize(9);
       doc.setFont("helvetica", "normal");
       doc.setTextColor(100);

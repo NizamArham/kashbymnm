@@ -50,7 +50,7 @@ const USABLE_CREDIT_SUBQUERY = `
   COALESCE(
     (SELECT SUM(amount) FROM store_credit_transactions
      WHERE customer_id = customers.id
-       AND (expires_at IS NULL OR expires_at > datetime('now') OR amount < 0)),
+       AND (expires_at IS NULL OR expires_at > datetime('now', '+330 minutes') OR amount < 0)),
     0
   )
 `;
@@ -243,7 +243,7 @@ customersRouter.put(
 
     const data = suspendInput.parse(req.body);
     db.prepare(
-      `UPDATE customers SET is_suspended = 1, suspended_reason = ?, suspended_at = datetime('now') WHERE id = ?`
+      `UPDATE customers SET is_suspended = 1, suspended_reason = ?, suspended_at = datetime('now', '+330 minutes') WHERE id = ?`
     ).run(data.reason, req.params.id);
 
     const updated = db.prepare(`SELECT customers.*, ${CALC_SUBQUERY} FROM customers WHERE id = ?`).get(req.params.id);
@@ -264,7 +264,7 @@ customersRouter.put(
 
     const data = suspendInput.parse(req.body);
     db.prepare(
-      `UPDATE customers SET is_suspended = 0, reactivated_reason = ?, reactivated_at = datetime('now') WHERE id = ?`
+      `UPDATE customers SET is_suspended = 0, reactivated_reason = ?, reactivated_at = datetime('now', '+330 minutes') WHERE id = ?`
     ).run(data.reason, req.params.id);
 
     const updated = db.prepare(`SELECT customers.*, ${CALC_SUBQUERY} FROM customers WHERE id = ?`).get(req.params.id);
@@ -476,6 +476,21 @@ customersRouter.get(
          WHERE category = 'customer_payment' AND reference_id = ? ORDER BY entry_date`
       )
       .all(req.params.id) as any[];
+    // Money collected at checkout, or added to an existing sale later via
+    // PUT /sales/:id/payment, both land in cash_book under category
+    // 'sale' (reference_id = the sale's own id) — NOT 'customer_payment'
+    // (reference_id = the customer's id), which is only used by the
+    // dedicated "record a payment" / FIFO-allocation flow above. Without
+    // this, every sale paid at checkout would show as a phantom unpaid
+    // debt here, even though it's already settled everywhere else.
+    const salePayments = db
+      .prepare(
+        `SELECT id, entry_date, amount, payment_method, notes FROM cash_book
+         WHERE category = 'sale' AND type = 'income'
+           AND reference_id IN (SELECT id FROM sales WHERE customer_id = ? AND is_voided = 0)
+         ORDER BY entry_date`
+      )
+      .all(req.params.id) as any[];
     const cheques = db
       .prepare(
         `SELECT id, date_received, amount, cheque_number, bank_name, status FROM cheque_receipts
@@ -501,6 +516,13 @@ customersRouter.get(
         date: p.entry_date,
         type: "payment" as const,
         label: `Payment${p.payment_method ? ` (${p.payment_method})` : ""}`,
+        amount: p.amount,
+        effect: -p.amount,
+      })),
+      ...salePayments.map((p) => ({
+        date: p.entry_date,
+        type: "payment" as const,
+        label: p.notes || `Payment${p.payment_method ? ` (${p.payment_method})` : ""}`,
         amount: p.amount,
         effect: -p.amount,
       })),

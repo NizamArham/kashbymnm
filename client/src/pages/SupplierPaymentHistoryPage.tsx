@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { ArrowLeft, Receipt, Download } from "lucide-react";
-import jsPDF from "jspdf";
 import { api, ApiRequestError } from "../lib/api";
 import { Supplier } from "../lib/types";
+import { downloadTabularReport, rangeLabelFor } from "../lib/reportPdf";
 import { PageHeader, Card, Table, Th, Td, EmptyState, ErrorText, DateRangePicker, Button } from "../components/ui";
 
 interface LedgerEntry {
@@ -119,137 +119,42 @@ export default function SupplierPaymentHistoryPage() {
   }
 
   // PDF export — exactly what's on screen right now (the active date
-  // filter), never the unfiltered full history, per the confirmed
-  // design. A4, portrait: a genuinely large title on page 1 only, then
-  // a small running header + footer on every page (including page 1,
-  // beneath the big title) — matching a real printed statement rather
-  // than a plain data dump.
+  // filter), never the unfiltered full history, per the confirmed design.
   function downloadPdf() {
     if (!supplier) return;
-    const doc = new jsPDF({ unit: "pt", format: "a4" });
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const pageHeight = doc.internal.pageSize.getHeight();
-    const marginX = 40;
-    const rangeLabel =
-      startDate && endDate ? `${startDate} to ${endDate}` : startDate ? `From ${startDate}` : endDate ? `Through ${endDate}` : "All records";
-
-    // Small header/footer drawn on EVERY page, including page 1 — the
-    // big title (drawn separately, once) sits above this same header
-    // band on page 1 only.
-    function drawHeaderFooter(pageNum: number, totalPages: number) {
-      doc.setFontSize(9);
-      doc.setTextColor(120);
-      doc.setFont("helvetica", "normal");
-      doc.text("M&M Clothing — Payment History Statement", marginX, 28);
-      doc.text(supplier!.name, pageWidth - marginX, 28, { align: "right" });
-
-      doc.setDrawColor(220);
-      doc.line(marginX, 34, pageWidth - marginX, 34);
-
-      // Footer
-      doc.setFontSize(8);
-      doc.setTextColor(150);
-      doc.text(`Generated ${toISODate(new Date())} · ${rangeLabel}`, marginX, pageHeight - 24);
-      doc.text(`Page ${pageNum} of ${totalPages}`, pageWidth - marginX, pageHeight - 24, { align: "right" });
-    }
-
-    // ---- Page 1: the big title, page-1-only, sits ABOVE the shared
-    // header band everything else uses ----
-    let y = 70;
-    doc.setFontSize(20);
-    doc.setTextColor(20);
-    doc.setFont("helvetica", "bold");
-    doc.text("Payment History", marginX, y);
-    y += 22;
-    doc.setFontSize(13);
-    doc.setFont("helvetica", "normal");
-    doc.text(`for Supplier: ${supplier.name}`, marginX, y);
-    y += 18;
-    doc.setFontSize(10);
-    doc.setTextColor(100);
-    doc.text(`${supplier.supplier_code}${supplier.phone ? ` · ${supplier.phone}` : ""}${supplier.city ? ` · ${supplier.city}` : ""}`, marginX, y);
-    y += 28;
-
-    // Table header row
-    const columns = [
-      { label: "Date", width: 70 },
-      { label: "Description", width: 245 },
-      { label: "Amount", width: 100 },
-      { label: "Balance", width: 100 },
-    ];
-    const tableWidth = columns.reduce((sum, c) => sum + c.width, 0);
-    const rowHeight = 20;
-    const headerBandBottom = 44; // shared header band height, matches drawHeaderFooter's line at y=34 plus margin
-    const footerBandTop = pageHeight - 40;
-
-    function drawTableHeader(yPos: number): number {
-      doc.setFillColor(245, 245, 245);
-      doc.rect(marginX, yPos, tableWidth, rowHeight, "F");
-      doc.setFontSize(9);
-      doc.setFont("helvetica", "bold");
-      doc.setTextColor(80);
-      let x = marginX + 6;
-      for (const col of columns) {
-        doc.text(col.label, x, yPos + 14);
-        x += col.width;
-      }
-      return yPos + rowHeight;
-    }
-
-    y = drawTableHeader(y);
-
-    let pageNum = 1;
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    doc.setTextColor(30);
-
-    for (const entry of displayEntries) {
-      if (y + rowHeight > footerBandTop) {
-        doc.addPage();
-        pageNum++;
-        y = headerBandBottom + 10;
-        y = drawTableHeader(y);
-      }
-
-      let x = marginX + 6;
-      doc.setTextColor(30);
-      doc.text(entry.date.slice(0, 10), x, y + 14);
-      x += columns[0].width;
-
-      const label = entry.label.length > 48 ? entry.label.slice(0, 45) + "..." : entry.label;
-      doc.text(label, x, y + 14);
-      x += columns[1].width;
-
-      const isPositive = entry.effect > 0;
-      doc.setTextColor(isPositive ? 20 : entry.effect < 0 ? 0 : 150);
-      doc.text(formatEntryAmount(entry), x, y + 14);
-      x += columns[2].width;
-
-      doc.setTextColor(30);
-      doc.text(`Rs. ${entry.running_balance.toLocaleString()}`, x, y + 14);
-
-      doc.setDrawColor(235);
-      doc.line(marginX, y + rowHeight, marginX + tableWidth, y + rowHeight);
-
-      y += rowHeight;
-    }
-
-    // Closing balance line
-    y += 10;
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.setTextColor(20);
-    doc.text(`Current balance owed: Rs. ${finalBalance.toLocaleString()}`, marginX, y);
-
-    // Now that we know the true page count, stamp the shared
-    // header/footer band onto every page, including page 1.
-    const totalPages = doc.getNumberOfPages();
-    for (let p = 1; p <= totalPages; p++) {
-      doc.setPage(p);
-      drawHeaderFooter(p, totalPages);
-    }
-
-    doc.save(`payment-history-${supplier.supplier_code}-${toISODate(new Date())}.pdf`);
+    downloadTabularReport({
+      headerLabel: "M&M Clothing — Payment History Statement",
+      headerRight: supplier.name,
+      title: "Payment History",
+      subjectLines: [
+        `for Supplier: ${supplier.name}`,
+        // Deliberately no phone number here — a supplier statement is
+        // something that leaves the building, and their number isn't
+        // something to print on a document that could end up anywhere.
+        `${supplier.supplier_code}${supplier.city ? ` · ${supplier.city}` : ""}`,
+      ],
+      rangeLabel: rangeLabelFor(startDate, endDate),
+      columns: [
+        { label: "Date", width: 70 },
+        { label: "Description", width: 245 },
+        { label: "Amount", width: 100, align: "right" },
+        { label: "Balance", width: 100, align: "right" },
+      ],
+      rows: displayEntries.map((entry) => {
+        const isPositive = entry.effect > 0;
+        return {
+          cells: [
+            entry.date.slice(0, 10),
+            entry.label.length > 48 ? entry.label.slice(0, 45) + "..." : entry.label,
+            formatEntryAmount(entry),
+            `Rs. ${entry.running_balance.toLocaleString()}`,
+          ],
+          styles: [undefined, undefined, { color: isPositive ? 20 : entry.effect < 0 ? 0 : 150 }, undefined],
+        };
+      }),
+      summaryLines: [{ text: `Current balance owed: Rs. ${finalBalance.toLocaleString()}`, bold: true }],
+      filename: `payment-history-${supplier.supplier_code}-${toISODate(new Date())}.pdf`,
+    });
   }
 
   return (

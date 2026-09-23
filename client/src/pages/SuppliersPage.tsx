@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { Truck, ChevronDown, ChevronRight, Pencil, Plus, X } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Supplier, BankAccount } from "../lib/types";
-import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Table, Th, Td, EmptyState } from "../components/ui";
+import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Table, Th, Td, EmptyState, HelpHint } from "../components/ui";
 import { CityPicker } from "../components/CityPicker";
 
 type ExpandedTab = "details" | "bank" | "payment_history";
@@ -266,7 +266,7 @@ export default function SuppliersPage() {
     <div>
       <PageHeader
         title="Suppliers"
-        subtitle="Click a supplier to view and edit their details. Balance owed is calculated live from purchases minus payments."
+        subtitle="Click any supplier to manage it."
         action={
           <button
             onClick={() => {
@@ -342,7 +342,10 @@ export default function SuppliersPage() {
                   <Th>Name</Th>
                   <Th>Phone</Th>
                   <Th>City</Th>
-                  <Th>Balance owed</Th>
+                  <Th>
+                    Balance owed
+                    <HelpHint text="Calculated live from purchases minus payments made." />
+                  </Th>
                 </tr>
               </thead>
               <tbody>

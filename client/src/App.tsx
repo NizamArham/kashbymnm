@@ -19,7 +19,6 @@ import SaleHistoryPage from "./pages/SaleHistoryPage";
 import ReturnsPage from "./pages/ReturnsPage";
 import SuppliersPage from "./pages/SuppliersPage";
 import PurchasesPage from "./pages/PurchasesPage";
-import PurchaseReturnsPage from "./pages/PurchaseReturnsPage";
 import DeliveriesPage from "./pages/DeliveriesPage";
 import CashBookPage from "./pages/CashBookPage";
 import ProfilePage from "./pages/ProfilePage";
@@ -29,6 +28,7 @@ import AddStaffPage from "./pages/AddStaffPage";
 import SupplierPaymentsPage from "./pages/SupplierPaymentsPage";
 import ChequesPage from "./pages/ChequesPage";
 import CouriersPage from "./pages/CourierReconciliationPage";
+import CourierOrderHistoryPage from "./pages/CourierOrderHistoryPage";
 import GeneralSettingsPage from "./pages/GeneralSettingsPage";
 
 // Root path behaves differently per role: admin sees the Dashboard,
@@ -121,14 +121,6 @@ export default function App() {
           }
         />
         <Route
-          path="/purchases/returns"
-          element={
-            <ProtectedRoute adminOnly>
-              <PurchaseReturnsPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
           path="/supplier-payments"
           element={
             <ProtectedRoute adminOnly>
@@ -151,6 +143,14 @@ export default function App() {
           element={
             <ProtectedRoute adminOnly>
               <CouriersPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/couriers/history"
+          element={
+            <ProtectedRoute adminOnly>
+              <CourierOrderHistoryPage />
             </ProtectedRoute>
           }
         />

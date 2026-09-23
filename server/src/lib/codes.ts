@@ -83,33 +83,43 @@ export function generateSupplierCode(name: string, phone: string | null | undefi
 
 export type InvoiceCategory = "STR" | "SCR" | "OCD" | "OCR" | "OPS";
 
-// Format: {CATEGORY}{YY}{MM}{sequence} with no separators, e.g.
-// STR26090047. Each category keeps its own independent sequence that
-// never resets — STR and OCD invoices are numbered completely
-// separately from each other, only ever counting up.
+// Format: {CATEGORY}{day-of-360}X{sequence}, e.g. SCR263X0240 — a real
+// date is still in there (month/day on a 360-day-year basis: (month-1)
+// * 30 + day), but not in the obvious YYMMDD shape anyone can decode
+// in two seconds. "X" is just a fixed separator letter, same for every
+// category. The sequence is a lifetime running number shared across
+// every category, never resetting, starting at 0240 rather than 1 —
+// so the very first invoice under this format doesn't read as
+// "customer number one."
 // STR = in-store, paid now (cash/card/bank)
 // SCR = in-store, credit (balance due)
 // OCD = online, cash on delivery
 // OCR = online, credit (balance due, delivery fee still COD)
 // OPS = online, fully paid upfront (nothing owed, no COD needed)
+//
+// Older invoices (before this format) look like STR26090047 or
+// STR26092301 or STR-8 — none of them contain an "X", so filtering on
+// that safely excludes all of them; nothing here parses those, they
+// stay as historical records.
 export function nextInvoiceCode(category: InvoiceCategory): string {
-  const now = new Date();
-  const yymm = `${String(now.getFullYear()).slice(-2)}${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const { day360 } = db
+    .prepare(
+      `SELECT (CAST(strftime('%m', 'now', '+330 minutes') AS INTEGER) - 1) * 30
+              + CAST(strftime('%d', 'now', '+330 minutes') AS INTEGER) AS day360`
+    )
+    .get() as { day360: number };
+  const dayPart = String(day360).padStart(3, "0");
 
-  const row = db
-    .prepare(`SELECT invoice FROM sales WHERE invoice LIKE ? ORDER BY id DESC LIMIT 1`)
-    .get(`${category}%`) as { invoice: string } | undefined;
-
-  let nextNum = 1;
-  if (row?.invoice) {
-    // Existing invoices in this category look like STR2609XXXX — the
-    // sequence is everything after the category letters + YYMM digits.
-    const digits = row.invoice.slice(category.length);
-    const existingSeq = parseInt(digits.slice(4), 10);
-    if (!isNaN(existingSeq)) nextNum = existingSeq + 1;
+  const rows = db.prepare(`SELECT invoice FROM sales WHERE invoice LIKE '%X%'`).all() as { invoice: string }[];
+  let nextNum = 240;
+  for (const { invoice } of rows) {
+    const match = invoice.match(/^[A-Z]+\d{3}X(\d{4})$/);
+    if (!match) continue;
+    const n = parseInt(match[1], 10);
+    if (!isNaN(n) && n + 1 > nextNum) nextNum = n + 1;
   }
 
-  return `${category}${yymm}${String(nextNum).padStart(4, "0")}`;
+  return `${category}${dayPart}X${String(nextNum).padStart(4, "0")}`;
 }
 
 // Format: P{YY}{MM}{sequence}, e.g. P26090001 — same style as invoice
