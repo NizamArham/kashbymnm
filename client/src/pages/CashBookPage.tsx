@@ -3,7 +3,7 @@ import { Landmark, Pencil, X, ArrowLeftRight, Plus, TrendingUp, TrendingDown, Wa
 import { api, ApiRequestError } from "../lib/api";
 import { CashBookEntry } from "../lib/types";
 import { downloadTabularReport, rangeLabelFor } from "../lib/reportPdf";
-import { PageHeader, Card, Input, Select, Label, FormGroup, ErrorText, SuccessText, Button, Table, Th, Td, EmptyState, Dropdown, DateRangePicker, HelpHint } from "../components/ui";
+import { PageHeader, Card, Input, Select, Label, FormGroup, ErrorText, SuccessText, Button, Table, Th, Td, EmptyState, Dropdown, DateRangePicker, HelpHint, RefLink } from "../components/ui";
 
 const PAYMENT_METHOD_OPTIONS = [
   { value: "cash", label: "Cash" },
@@ -643,7 +643,17 @@ export default function CashBookPage() {
                                     Notes
                                   </div>
                                   <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">
-                                    {hasNotes ? entry.notes : <span className="text-gray-400 italic">No notes on this entry</span>}
+                                    {!hasNotes ? (
+                                      <span className="text-gray-400 italic">No notes on this entry</span>
+                                    ) : (entry.category === "sale" || entry.category === "sale_void") && entry.reference_id ? (
+                                      // The invoice number isn't a separate field here, just part of
+                                      // this sentence — linking the whole note (rather than trying to
+                                      // pick the invoice substring out of free text) still gets to the
+                                      // sale in one click.
+                                      <RefLink to={`/sales/${entry.reference_id}`}>{entry.notes}</RefLink>
+                                    ) : (
+                                      entry.notes
+                                    )}
                                   </p>
                                 </div>
                               </td>

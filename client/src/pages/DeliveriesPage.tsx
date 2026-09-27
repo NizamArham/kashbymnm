@@ -1,10 +1,76 @@
-import { useEffect, useState, useMemo, Fragment, ReactNode } from "react";
-import { Truck, Package, Send, CheckCircle2, RotateCcw, FileDown, Ban, ExternalLink, ChevronDown, ChevronRight } from "lucide-react";
+import { useEffect, useState, useMemo, useRef, Fragment, ReactNode } from "react";
+import { Truck, Package, Send, CheckCircle2, RotateCcw, FileDown, Ban, ExternalLink, ChevronDown, ChevronRight, MoreHorizontal, Download, MessageCircle } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
-import { Delivery, DeliveryStatus } from "../lib/types";
-import { PageHeader, Card, Table, Th, Td, Button, EmptyState, ErrorText, DateRangePicker, Badge, RowCard, RowCardStats, RowCardStat } from "../components/ui";
+import { Delivery, DeliveryStatus, BusinessInfo } from "../lib/types";
+import { PageHeader, Card, Table, Th, Td, Button, EmptyState, ErrorText, DateRangePicker, Badge, RowCard, RowCardStats, RowCardStat, RefLink } from "../components/ui";
 import PackWaybillModal from "../components/PackWaybillModal";
-import { DELIVERY_PARTNERS, courierTrackingUrl } from "../lib/delivery";
+import { DELIVERY_PARTNERS, courierTrackingUrl, waybillShopCode } from "../lib/delivery";
+import { generateWaybillLabelPdf } from "../lib/waybillLabelPdf";
+import { WaybillLabelData } from "../components/WaybillLabel";
+import { applyBusinessInfoToReturnAddress } from "../lib/businessInfo";
+
+function formatLabelDate(d: Date): string {
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+// Re-creates the same waybill PDF from what's already on file — the
+// original pack/pcs/weight typed in at packing time was never stored
+// beyond the tracking number itself, so this is a fresh copy (today's
+// date, 1 piece unless a weight was saved) rather than a byte-for-byte
+// reprint. The tracking number and barcode — the only thing a courier
+// actually scans — are identical either way, which is what matters if
+// the original physical label was lost or damaged.
+async function redownloadWaybill(d: Delivery) {
+  const businessInfo = await api.get<BusinessInfo | null>("/business-info").catch(() => null);
+  let returnBusinessName = "M&M Clothing";
+  let returnAddress = "78/2 Anderson Rd, Dehiwala,\nSri Lanka.";
+  let returnPhone = "+94 70-5500174";
+  let returnWebsite = "www.mnmclothing.lk";
+  if (businessInfo) {
+    applyBusinessInfoToReturnAddress(
+      businessInfo,
+      (v) => (returnBusinessName = v),
+      (v) => (returnAddress = v),
+      (v) => (returnPhone = v),
+      (v) => (returnWebsite = v)
+    );
+  }
+
+  const codAmount = d.cod_amount ?? 0;
+  const labelData: WaybillLabelData = {
+    shopCode: waybillShopCode(d.delivery_partner),
+    date: formatLabelDate(new Date()),
+    customerName: d.customer_name ?? "",
+    addressLines: [d.address_line1, d.address_line2].filter(Boolean) as string[],
+    city: d.city ?? "",
+    phones: [d.customer_phone ?? ""],
+    orderRef: d.invoice ?? "",
+    pcs: 1,
+    weight: d.package_weight_kg ? String(d.package_weight_kg) : "",
+    paymentType: codAmount > 0 ? "COD" : "Prepaid",
+    codAmount,
+    description: d.items?.map((i) => `${i.product_title ?? "Item"} x${i.quantity}`).join(", ") ?? "",
+    trackingNumber: d.tracking_number ?? "",
+    returnBusinessName,
+    returnAddressLines: returnAddress.split("\n"),
+    returnPhone,
+    returnWebsite,
+  };
+
+  const pdf = generateWaybillLabelPdf(labelData);
+  pdf.save(`M&M_Waybill_${d.tracking_number}.pdf`);
+}
+
+// No fetch needed — phone and invoice are already on the delivery
+// object — so this stays fully synchronous. window.open has to happen
+// inside the click itself or Chrome silently blocks it as a popup.
+function contactViaWhatsApp(d: Delivery) {
+  if (!d.customer_phone) return;
+  const digitsOnly = d.customer_phone.replace(/\D/g, "").replace(/^0/, "");
+  const message = `Hi ${d.customer_name ?? "there"}, this is M&M Clothing regarding your order ${d.invoice ?? ""}.`;
+  window.open(`https://wa.me/94${digitsOnly}?text=${encodeURIComponent(message)}`, "_blank");
+}
 
 function toISODate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -63,7 +129,68 @@ function TimelineStep({ label, date, reached, isLast }: { label: string; date: s
 }
 
 function ExpandedDetail({ d }: { d: Delivery }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function handleClickOutside(e: globalThis.MouseEvent) {
+      if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [menuOpen]);
+
+  // A waybill only ever existed once tracking_number was set (at
+  // packing time) — before that there's nothing to re-download and
+  // no one to message about a shipment that hasn't been packed yet.
+  const hasWaybill = !!d.tracking_number;
+
   return (
+    <div className="relative">
+      {hasWaybill && (
+        <div className="absolute top-0 right-0" ref={menuRef}>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen((v) => !v);
+            }}
+            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition"
+          >
+            <MoreHorizontal size={16} />
+          </button>
+          {menuOpen && (
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="absolute right-0 mt-1 w-56 bg-white border border-gray-200 rounded-xl shadow-lg z-10 overflow-hidden"
+            >
+              <button
+                onClick={() => {
+                  redownloadWaybill(d);
+                  setMenuOpen(false);
+                }}
+                className="w-full flex items-center gap-2 px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition"
+              >
+                <Download size={14} />
+                Download waybill
+              </button>
+              {d.customer_phone && (
+                <button
+                  onClick={() => {
+                    contactViaWhatsApp(d);
+                    setMenuOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2 px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition"
+                >
+                  <MessageCircle size={14} className="text-green-600" />
+                  Contact via WhatsApp
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
     <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto_240px] gap-6 lg:gap-8 items-start">
       {/* Items */}
       <div>
@@ -114,6 +241,7 @@ function ExpandedDetail({ d }: { d: Delivery }) {
           </div>
         )}
       </div>
+    </div>
     </div>
   );
 }
@@ -378,10 +506,14 @@ export default function DeliveriesPage() {
                           {showWaybill ? (
                             <>
                               <div className="font-semibold text-gray-900">{d.waybill_number ?? "Not packed yet"}</div>
-                              <div className="text-xs text-gray-500 mt-0.5">{d.invoice}</div>
+                              <div className="text-xs text-gray-500 mt-0.5">
+                                <RefLink to={`/sales/${d.sale_id}`}>{d.invoice}</RefLink>
+                              </div>
                             </>
                           ) : (
-                            <div className="font-semibold text-gray-900">{d.invoice}</div>
+                            <div className="font-semibold text-gray-900">
+                              <RefLink to={`/sales/${d.sale_id}`}>{d.invoice}</RefLink>
+                            </div>
                           )}
                         </Td>
                         <Td>
@@ -438,8 +570,18 @@ export default function DeliveriesPage() {
                 <RowCard key={d.id} onClick={() => toggleExpand(d)}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="font-semibold text-gray-900">{showWaybill ? d.waybill_number ?? "Not packed yet" : d.invoice}</p>
-                      {showWaybill && <p className="text-xs text-gray-500 mt-0.5">{d.invoice}</p>}
+                      <p className="font-semibold text-gray-900">
+                        {showWaybill ? (
+                          d.waybill_number ?? "Not packed yet"
+                        ) : (
+                          <RefLink to={`/sales/${d.sale_id}`}>{d.invoice}</RefLink>
+                        )}
+                      </p>
+                      {showWaybill && (
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          <RefLink to={`/sales/${d.sale_id}`}>{d.invoice}</RefLink>
+                        </p>
+                      )}
                       <p className="text-sm text-gray-700 mt-1.5">{d.customer_name ?? "Walk-in"}</p>
                       <p className="text-xs text-gray-500 truncate mt-0.5">
                         {d.address_line1 ? `${d.address_line1}, ${d.city ?? ""}` : d.city ?? "No address on file"}

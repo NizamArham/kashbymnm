@@ -33,6 +33,15 @@ const bankAccountInput = z.object({
   is_default: z.boolean().optional(),
 });
 
+// A customer needs to have reached this balance at least once before
+// any redemption is allowed — a one-time unlock, not a permanent
+// floor they can never dip below. 1 point redeems for exactly Rs. 1
+// of store credit, matching the 1%-of-sale earn rate (see
+// LOYALTY_RATE_PERCENT in sales.ts) so there's no separate conversion
+// scale to explain on top of the earn rate.
+const LOYALTY_REDEMPTION_MIN_BALANCE = 500;
+const LOYALTY_POINT_VALUE = 1;
+
 // loyalty_points = bonus_points (manually granted, kept for backward
 // compatibility with the legacy-customer import) + sum of every real
 // loyalty_transactions entry (earned, granted, redeemed, or reversed).
@@ -485,7 +494,7 @@ customersRouter.get(
     // debt here, even though it's already settled everywhere else.
     const salePayments = db
       .prepare(
-        `SELECT id, entry_date, amount, payment_method, notes FROM cash_book
+        `SELECT id, entry_date, amount, payment_method, notes, reference_id FROM cash_book
          WHERE category = 'sale' AND type = 'income'
            AND reference_id IN (SELECT id FROM sales WHERE customer_id = ? AND is_voided = 0)
          ORDER BY entry_date`
@@ -503,7 +512,15 @@ customersRouter.get(
       )
       .all(req.params.id) as any[];
 
-    type LedgerEntry = { date: string; type: "sale" | "payment" | "cheque" | "credit"; label: string; amount: number; effect: number };
+    type LedgerEntry = {
+      date: string;
+      type: "sale" | "payment" | "cheque" | "credit";
+      label: string;
+      amount: number;
+      effect: number;
+      sale_id?: number;
+      sale_invoice?: string;
+    };
     const entries: LedgerEntry[] = [
       ...sales.map((s) => ({
         date: s.date,
@@ -511,6 +528,8 @@ customersRouter.get(
         label: `Sale ${s.invoice}`,
         amount: s.total,
         effect: s.total,
+        sale_id: s.id,
+        sale_invoice: s.invoice,
       })),
       ...payments.map((p) => ({
         date: p.entry_date,
@@ -525,6 +544,7 @@ customersRouter.get(
         label: p.notes || `Payment${p.payment_method ? ` (${p.payment_method})` : ""}`,
         amount: p.amount,
         effect: -p.amount,
+        sale_id: p.reference_id,
       })),
       // A cheque still in_hand or otherwise not yet cleared/bounced is
       // shown as settling the balance right away — matching the app's
@@ -567,6 +587,36 @@ customersRouter.get(
     if (!customer) throw new ApiError(404, "Customer not found");
 
     res.json(computeCreditGrantBreakdown(Number(req.params.id)));
+  })
+);
+
+// GET /api/customers/:id/loyalty-ledger — the raw earned/redeemed
+// history behind the single loyalty_points number, newest first. No
+// FIFO/remaining-balance logic needed here (unlike store credit) since
+// points don't expire or get consumed against specific grants — it's
+// just a running total, so the plain transaction list is the whole
+// story.
+customersRouter.get(
+  "/:id/loyalty-ledger",
+  asyncHandler(async (req, res) => {
+    const customer = db.prepare(`SELECT id FROM customers WHERE id = ?`).get(req.params.id);
+    if (!customer) throw new ApiError(404, "Customer not found");
+
+    // The sale link comes from a real join, not by parsing the invoice
+    // number out of the notes sentence — reference_id already points
+    // at the sale for 'sale' and reversal entries, so sale_id/invoice
+    // are exact whenever there's a real sale behind this row.
+    const entries = db
+      .prepare(
+        `SELECT lt.points, lt.reason, lt.notes, lt.created_at,
+                sales.id AS sale_id, sales.invoice AS sale_invoice
+         FROM loyalty_transactions lt
+         LEFT JOIN sales ON sales.id = lt.reference_id AND lt.reason IN ('sale', 'manual_adjustment')
+         WHERE lt.customer_id = ? ORDER BY lt.created_at DESC, lt.id DESC`
+      )
+      .all(req.params.id);
+
+    res.json(entries);
   })
 );
 
@@ -647,6 +697,14 @@ const chequeItemInput = z.object({
   bank_name: z.string().min(1, "Bank name is required"),
   amount: z.number().positive(),
   cheque_date: z.string(),
+  branch: z.string().optional(),
+  // Whether the physical cheque is crossed — a fact about the paper
+  // itself, read off it when recording the payment, not a choice made
+  // here. Defaults to true (crossed) to match the column's own default.
+  is_crossed: z.boolean().optional(),
+  // Exactly who the cheque was made out to. Left unset/blank means it
+  // was made out to "Cash".
+  payee_name: z.string().optional(),
 });
 
 const recordPaymentInput = z.object({
@@ -719,8 +777,8 @@ customersRouter.post(
         for (const c of cheques) {
           const receiptResult = db
             .prepare(
-              `INSERT INTO cheque_receipts (cheque_number, bank_name, amount, cheque_date, customer_id, sale_allocations, notes)
-               VALUES (?, ?, ?, ?, ?, ?, ?)`
+              `INSERT INTO cheque_receipts (cheque_number, bank_name, amount, cheque_date, customer_id, sale_allocations, notes, branch, is_crossed, payee_name)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             )
             .run(
               c.cheque_number.trim(),
@@ -731,7 +789,10 @@ customersRouter.post(
               sharedAllocationJson,
               `From ${customer.name} (${customer.customer_code}) — part of a combined payment applied to ${invoiceList}${
                 data.notes?.trim() ? ` — ${data.notes.trim()}` : ""
-              }`
+              }`,
+              c.branch?.trim() || null,
+              c.is_crossed === false ? 0 : 1,
+              c.payee_name?.trim() || null
             );
           chequeReceiptIds.push(Number(receiptResult.lastInsertRowid));
         }
@@ -757,5 +818,62 @@ customersRouter.post(
       .get(req.params.id);
 
     res.status(201).json({ customer: updatedCustomer, allocations, unapplied, cheque_receipt_ids: chequeReceiptIds });
+  })
+);
+
+const redeemLoyaltyInput = z.object({
+  points: z.number().int().positive(),
+});
+
+// POST /api/customers/:id/redeem-loyalty-points — trade loyalty
+// points in for store credit, reusing the existing store-credit
+// ledger (and its checkout redemption, already wired in) rather than
+// building a separate discount mechanism. Requires the customer's
+// balance to have reached LOYALTY_REDEMPTION_MIN_BALANCE — once past
+// that, any amount up to their full balance can be redeemed, not just
+// the amount above the minimum.
+customersRouter.post(
+  "/:id/redeem-loyalty-points",
+  asyncHandler(async (req, res) => {
+    const customer = db
+      .prepare(`SELECT customers.*, ${CALC_SUBQUERY} FROM customers WHERE customers.id = ?`)
+      .get(req.params.id) as any;
+    if (!customer) throw new ApiError(404, "Customer not found");
+
+    const { points } = redeemLoyaltyInput.parse(req.body);
+
+    if (customer.loyalty_points < LOYALTY_REDEMPTION_MIN_BALANCE) {
+      throw new ApiError(
+        409,
+        `${customer.name} needs at least ${LOYALTY_REDEMPTION_MIN_BALANCE} points before any redemption (currently ${customer.loyalty_points})`
+      );
+    }
+    if (points > customer.loyalty_points) {
+      throw new ApiError(400, `Only ${customer.loyalty_points} points are available to redeem`);
+    }
+
+    const creditAmount = points * LOYALTY_POINT_VALUE;
+
+    const runRedemption = db.transaction(() => {
+      db.prepare(`INSERT INTO loyalty_transactions (customer_id, points, reason, notes) VALUES (?, ?, 'redemption', ?)`).run(
+        req.params.id,
+        -points,
+        `Redeemed ${points} points for Rs. ${creditAmount} store credit`
+      );
+
+      db.prepare(`INSERT INTO store_credit_transactions (customer_id, amount, reason, notes) VALUES (?, ?, 'redemption', ?)`).run(
+        req.params.id,
+        creditAmount,
+        `From ${points} redeemed loyalty points`
+      );
+    });
+
+    runRedemption();
+
+    const updatedCustomer = db
+      .prepare(`SELECT customers.*, ${CALC_SUBQUERY} FROM customers WHERE customers.id = ?`)
+      .get(req.params.id);
+
+    res.status(201).json({ customer: updatedCustomer, credit_granted: creditAmount });
   })
 );

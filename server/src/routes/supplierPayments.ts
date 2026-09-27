@@ -206,6 +206,64 @@ supplierPaymentsRouter.get(
     const payments = db
       .prepare(`SELECT id, payment_date, amount, method, purchase_id FROM supplier_payments WHERE supplier_id = ? ORDER BY payment_date`)
       .all(req.params.supplierId) as any[];
+
+    // For each cheque payment, trace it back to the real cheque — either
+    // the shop's own (cheques_issued, written directly to this supplier)
+    // or a customer's cheque the shop later handed over instead of
+    // depositing (cheque_transfers -> cheque_receipts -> customers).
+    // Both FKs already exist for this; nothing needed a schema change.
+    function findChequeForPayment(supplierPaymentId: number) {
+      const issued = db
+        .prepare(
+          `SELECT cheque_number, bank_name, amount, cheque_date, status, branch, is_crossed, payee_name
+           FROM cheques_issued WHERE supplier_payment_id = ?`
+        )
+        .get(supplierPaymentId) as
+        | {
+            cheque_number: string;
+            bank_name: string;
+            amount: number;
+            cheque_date: string;
+            status: string;
+            branch: string | null;
+            is_crossed: number;
+            payee_name: string | null;
+          }
+        | undefined;
+      if (issued) return { source: "issued" as const, ...issued };
+
+      const transferred = db
+        .prepare(
+          `SELECT cheque_receipts.cheque_number, cheque_receipts.bank_name, cheque_receipts.amount,
+                  cheque_receipts.cheque_date, cheque_receipts.status, cheque_receipts.date_received,
+                  cheque_receipts.branch, cheque_receipts.is_crossed, cheque_receipts.payee_name,
+                  customers.name as from_customer_name, customers.customer_code as from_customer_code,
+                  cheque_transfers.date_given as transfer_date
+           FROM cheque_transfers
+           JOIN cheque_receipts ON cheque_receipts.id = cheque_transfers.cheque_receipt_id
+           JOIN customers ON customers.id = cheque_receipts.customer_id
+           WHERE cheque_transfers.supplier_payment_id = ?`
+        )
+        .get(supplierPaymentId) as
+        | {
+            cheque_number: string;
+            bank_name: string;
+            amount: number;
+            cheque_date: string;
+            status: string;
+            date_received: string;
+            branch: string | null;
+            is_crossed: number;
+            payee_name: string | null;
+            from_customer_name: string;
+            from_customer_code: string;
+            transfer_date: string;
+          }
+        | undefined;
+      if (transferred) return { source: "transferred" as const, ...transferred };
+
+      return null;
+    }
     const credits = db
       .prepare(
         `SELECT id, created_at, amount, reason, notes FROM supplier_credit_transactions WHERE supplier_id = ? ORDER BY created_at`
@@ -229,7 +287,30 @@ supplierPaymentsRouter.get(
     // increases it back — mirroring the exact real balance formula used
     // everywhere else (purchases - payments - credit_transactions), so
     // this ledger's running balance always reconciles with it.
-    type LedgerEntry = { date: string; type: "purchase" | "payment" | "credit" | "return"; label: string; amount: number; effect: number };
+    type ChequeInfo = {
+      source: "issued" | "transferred";
+      cheque_number: string;
+      bank_name: string;
+      amount: number;
+      cheque_date: string;
+      status: string;
+      date_received?: string;
+      from_customer_name?: string;
+      from_customer_code?: string;
+      transfer_date?: string;
+      branch: string | null;
+      is_crossed: number;
+      payee_name: string | null;
+    };
+    type LedgerEntry = {
+      date: string;
+      type: "purchase" | "payment" | "credit" | "return";
+      label: string;
+      amount: number;
+      effect: number;
+      id?: number;
+      cheque?: ChequeInfo;
+    };
     const entries: LedgerEntry[] = [
       ...purchases.map((p) => {
         // Only the portion of amount_paid NOT already covered by a
@@ -250,13 +331,18 @@ supplierPaymentsRouter.get(
           effect: netOwed,
         };
       }),
-      ...payments.map((p) => ({
-        date: p.payment_date,
-        type: "payment" as const,
-        label: `Payment${p.method ? ` (${p.method})` : ""}`,
-        amount: p.amount,
-        effect: -p.amount,
-      })),
+      ...payments.map((p) => {
+        const cheque = p.method === "cheque" ? findChequeForPayment(p.id) : null;
+        return {
+          date: p.payment_date,
+          type: "payment" as const,
+          label: `Payment${p.method ? ` (${p.method})` : ""}${cheque ? ` — #${cheque.cheque_number}` : ""}`,
+          amount: p.amount,
+          effect: -p.amount,
+          id: p.id,
+          cheque: cheque ?? undefined,
+        };
+      }),
       ...credits.map((c) => ({
         date: c.created_at,
         type: "credit" as const,

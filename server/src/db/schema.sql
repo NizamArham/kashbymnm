@@ -191,7 +191,18 @@ CREATE TABLE IF NOT EXISTS cheque_receipts (
   cleared_at TEXT,
   bounced_at TEXT,
   bounced_reason TEXT,
-  notes TEXT
+  notes TEXT,
+  -- Whether the customer's cheque was crossed (bank-deposit only, can't
+  -- be cashed over the counter) — a real fact about the physical
+  -- cheque, not something we assume. Defaults to crossed since that's
+  -- the norm for anything going through a proper audit trail.
+  is_crossed INTEGER NOT NULL DEFAULT 1,
+  branch TEXT,
+  -- Who the cheque was actually made out to, exactly as written. NULL
+  -- means it was left blank / made out to "Cash" — most cheques we
+  -- actually see are, so that's the default assumption, not a named
+  -- payee.
+  payee_name TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_cheque_receipts_customer ON cheque_receipts(customer_id);
@@ -238,7 +249,14 @@ CREATE TABLE IF NOT EXISTS cheques_issued (
   cleared_at TEXT,
   bounced_at TEXT,
   bounced_reason TEXT,
-  notes TEXT
+  notes TEXT,
+  -- Same three fields as cheque_receipts, same reasoning: a real,
+  -- per-cheque fact we choose when writing it, not assumed.
+  is_crossed INTEGER NOT NULL DEFAULT 1,
+  branch TEXT,
+  -- NULL means made out to "Cash" — writing a supplier cheque straight
+  -- to Cash is common practice here, not the exception.
+  payee_name TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_cheques_issued_supplier ON cheques_issued(supplier_id);

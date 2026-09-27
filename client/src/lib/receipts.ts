@@ -1,8 +1,9 @@
 import jsPDF from "jspdf";
-import { Sale } from "./types";
+import { Sale, BusinessInfo } from "./types";
 import { NAME_LOGO_PNG_BASE64, NAME_LOGO_ASPECT_RATIO } from "./logoAsset";
 import { barcodePng } from "./waybillLabelPdf";
 import { DELIVERY_PARTNERS, waybillShopCode } from "./delivery";
+import { api } from "./api";
 
 // ---------------------------------------------------------------------
 // Shared helpers
@@ -33,6 +34,10 @@ function amountLKR(n: number): string {
 // The shop's own account — shown on the invoice only when there's an
 // actual credit balance to pay off, so a customer with an unpaid
 // credit bill knows exactly where to send it without having to ask.
+// These are only the FALLBACK values, used when General Settings
+// hasn't been filled in yet — the real source of truth is the
+// business_info record (see downloadA4Pdf), so editing the bank
+// details there actually changes what prints here.
 const SHOP_ACCOUNT_NAME = "M&M Clothing";
 const SHOP_ACCOUNT_NUMBER = "028010029170";
 const SHOP_BANK_NAME = "Hatton National Bank";
@@ -86,7 +91,7 @@ function paymentDisplay(sale: Sale): string {
 // redrawn with jsPDF's own primitives rather than a screenshot so the
 // output stays crisp regardless of screen zoom or device pixel ratio.
 // ---------------------------------------------------------------------
-export function generateA4Pdf(sale: Sale): jsPDF {
+export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): jsPDF {
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const pageWidth = 210;
   const marginX = 18;
@@ -151,18 +156,24 @@ export function generateA4Pdf(sale: Sale): jsPDF {
       doc.setFont("helvetica", "normal");
     }
   });
-  kvRow("Shipping", (x, yy) => doc.text(shippingLabel(sale), x, yy));
-
+  // For an online order with an address on file, the Shipping row shows
+  // the actual delivery address instead of the courier's name — the
+  // courier is already identifiable from the Payment row above it
+  // (e.g. "COD [MNM X CPAK]"), so repeating "CityPak" here was
+  // redundant with something the address line couldn't also tell you.
+  // In-store (or online with no address on file) still shows the
+  // plain shipping label as before.
   const addr = sale.delivery_address;
   const hasAddress = addr && (addr.address_line1 || addr.city);
-  if (sale.sale_type === "online" && hasAddress) {
-    const addressParts = [addr!.address_line1, addr!.address_line2, addr!.city].filter(Boolean);
-    doc.setFontSize(9);
-    doc.setTextColor(120);
-    doc.text(addressParts.join(", "), valueX, y);
-    doc.setFontSize(12);
-    y += 5.8;
-  }
+  const showAddressAsShipping = sale.sale_type === "online" && hasAddress;
+  kvRow("Shipping", (x, yy) => {
+    if (showAddressAsShipping) {
+      const addressParts = [addr!.address_line1, addr!.address_line2, addr!.city].filter(Boolean);
+      doc.text(addressParts.join(", "), x, yy);
+    } else {
+      doc.text(shippingLabel(sale), x, yy);
+    }
+  });
 
   y += 6;
 
@@ -347,11 +358,14 @@ export function generateA4Pdf(sale: Sale): jsPDF {
   kvRow("Total", (x, yy) => doc.text(`${sale.total.toLocaleString()}LKR`, x, yy));
 
   if (needsPayHere) {
-    kvRow("Pay Here", (x, yy) => doc.text(SHOP_ACCOUNT_NAME, x, yy));
+    const accountName = businessInfo?.bank_account_name || SHOP_ACCOUNT_NAME;
+    const accountNumber = businessInfo?.bank_account_no || SHOP_ACCOUNT_NUMBER;
+    const bankName = businessInfo?.bank_name || SHOP_BANK_NAME;
+    kvRow("Pay Here", (x, yy) => doc.text(accountName, x, yy));
     doc.setTextColor(20);
-    doc.text(SHOP_ACCOUNT_NUMBER, valueX, y);
+    doc.text(accountNumber, valueX, y);
     y += 5.8;
-    doc.text(SHOP_BANK_NAME, valueX, y);
+    doc.text(bankName, valueX, y);
     y += 5.8;
   }
 
@@ -359,7 +373,7 @@ export function generateA4Pdf(sale: Sale): jsPDF {
   doc.setFont("helvetica", "italic");
   doc.setFontSize(9);
   doc.setTextColor(120);
-  doc.text("Thank you for shopping with M&M Clothing!", marginX, y);
+  doc.text(`Thank you for shopping with ${businessInfo?.business_name || "M&M Clothing"}!`, marginX, y);
   doc.setFont("helvetica", "normal");
 
   // Footer — stamped on every page (not just the last), since a
@@ -382,9 +396,14 @@ export function generateA4Pdf(sale: Sale): jsPDF {
   return doc;
 }
 
-export function downloadA4Pdf(sale: Sale) {
-  const doc = generateA4Pdf(sale);
-  doc.save(`${sale.invoice}.pdf`);
+export async function downloadA4Pdf(sale: Sale) {
+  // General Settings is the real source of truth for the shop's bank
+  // details now — this is the one place that actually reads it. Falls
+  // back to the hardcoded defaults above if it's never been filled in
+  // (or the request fails) rather than leaving the invoice blank.
+  const businessInfo = await api.get<BusinessInfo | null>("/business-info").catch(() => null);
+  const doc = generateA4Pdf(sale, businessInfo);
+  doc.save(`Invoice${sale.invoice}.pdf`);
 }
 
 // ---------------------------------------------------------------------
@@ -520,11 +539,11 @@ export function downloadThermalPdf(sale: Sale) {
 // WhatsApp text bill — a plain-text order summary opened in wa.me,
 // pre-filled and ready to send to the customer's saved phone number.
 // ---------------------------------------------------------------------
-export function buildWhatsAppMessage(sale: Sale): string {
+export function buildWhatsAppMessage(sale: Sale, businessInfo?: BusinessInfo | null): string {
   const items = sale.items ?? [];
   const lines: string[] = [];
 
-  lines.push(`*M&M Clothing — Receipt*`);
+  lines.push(`*${businessInfo?.business_name || "M&M Clothing"} — Receipt*`);
   lines.push(`Invoice: ${sale.invoice}`);
   lines.push(`Date: ${formatDate(sale.date)}`);
   const addr = sale.delivery_address;
@@ -558,7 +577,19 @@ export function buildWhatsAppMessage(sale: Sale): string {
 // leading 0 before prefixing the country code, matching the pattern
 // already used for the WhatsApp icon on the Customers page.
 export function sendWhatsAppBill(sale: Sale, phone: string) {
-  const digitsOnly = phone.replace(/\D/g, "").replace(/^0/, "");
-  const text = encodeURIComponent(buildWhatsAppMessage(sale));
-  window.open(`https://wa.me/94${digitsOnly}?text=${text}`, "_blank");
+  // The tab has to open synchronously, right here in the click handler
+  // — browsers only allow window.open without it being blocked as a
+  // popup when it happens inside the original user gesture, not after
+  // an await. So it opens blank first, and gets pointed at the real
+  // WhatsApp URL once the business-info fetch (for the shop name in
+  // the message) resolves.
+  const win = window.open("", "_blank");
+  api
+    .get<BusinessInfo | null>("/business-info")
+    .catch(() => null)
+    .then((businessInfo) => {
+      const digitsOnly = phone.replace(/\D/g, "").replace(/^0/, "");
+      const text = encodeURIComponent(buildWhatsAppMessage(sale, businessInfo));
+      if (win) win.location.href = `https://wa.me/94${digitsOnly}?text=${text}`;
+    });
 }

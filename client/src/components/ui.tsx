@@ -1,6 +1,30 @@
 import { ReactNode, useState, useRef, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { ChevronDown, Check, Plus, CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
+
+// A reference to another record (an invoice, a product) shown inline
+// in a list or a sentence — a dotted underline (not a solid one, and
+// no color change) so it reads as "this is a reference" rather than a
+// primary navigation link, and stays discoverable on touch devices
+// where hover never happens. stopPropagation is baked in since every
+// real usage sits inside a row that already has its own click handler
+// (e.g. to expand it) — without this, clicking the reference would
+// also trigger that row's own click.
+export function RefLink({ to, children, className }: { to: string; children: ReactNode; className?: string }) {
+  const navigate = useNavigate();
+  return (
+    <span
+      onClick={(e) => {
+        e.stopPropagation();
+        navigate(to);
+      }}
+      className={`cursor-pointer underline decoration-dotted decoration-gray-400 underline-offset-2 ${className ?? ""}`}
+    >
+      {children}
+    </span>
+  );
+}
 
 export function PageHeader({ title, subtitle, action }: { title: string; subtitle?: string; action?: ReactNode }) {
   return (

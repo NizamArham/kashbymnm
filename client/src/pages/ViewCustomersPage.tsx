@@ -4,7 +4,7 @@ import { api, ApiRequestError } from "../lib/api";
 import { Customer, CustomerAddress, BankAccount } from "../lib/types";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { PageHeader, Card, Table, Th, Td, Input, Button, EmptyState, ErrorText, SuccessText, Label, FormGroup, Dropdown, DatePicker, HelpHint } from "../components/ui";
+import { PageHeader, Card, Table, Th, Td, Input, Button, EmptyState, ErrorText, SuccessText, Label, FormGroup, Dropdown, DatePicker, HelpHint, TabToggle } from "../components/ui";
 import { CityPicker } from "../components/CityPicker";
 
 function whatsappLink(phone: string): string {
@@ -152,6 +152,11 @@ export default function ViewCustomersPage() {
   const [paymentAmount, setPaymentAmount] = useState("");
   const [chequeNumber, setChequeNumber] = useState("");
   const [chequeBankName, setChequeBankName] = useState("");
+  const [chequeBranch, setChequeBranch] = useState("");
+  const [chequeIsCrossed, setChequeIsCrossed] = useState(true);
+  // A customer's cheque could be made out to Cash just as easily as to
+  // the business by name — default to Cash, not a forced name.
+  const [chequePayCash, setChequePayCash] = useState(true);
   const [chequePayeeName, setChequePayeeName] = useState("");
   const [chequeAmount, setChequeAmount] = useState("");
   const [chequeDate, setChequeDate] = useState("");
@@ -159,6 +164,8 @@ export default function ViewCustomersPage() {
   const [chequeList, setChequeList] = useState<{
     cheque_number: string;
     bank_name: string;
+    branch: string;
+    is_crossed: boolean;
     payee_name: string;
     amount: number;
     cheque_date: string;
@@ -179,6 +186,11 @@ export default function ViewCustomersPage() {
   const [suspendReason, setSuspendReason] = useState("");
   const [suspendError, setSuspendError] = useState<string | null>(null);
   const [suspendSubmitting, setSuspendSubmitting] = useState(false);
+
+  const [redeemTarget, setRedeemTarget] = useState<Customer | null>(null);
+  const [redeemPoints, setRedeemPoints] = useState("");
+  const [redeemError, setRedeemError] = useState<string | null>(null);
+  const [redeemSubmitting, setRedeemSubmitting] = useState(false);
 
   const [reactivateTarget, setReactivateTarget] = useState<Customer | null>(null);
   const [reactivateReason, setReactivateReason] = useState("");
@@ -306,8 +318,8 @@ export default function ViewCustomersPage() {
       setChequeListError("Bank name is required");
       return;
     }
-    if (!chequePayeeName.trim()) {
-      setChequeListError("Payee name (as written on the cheque) is required");
+    if (!chequePayCash && !chequePayeeName.trim()) {
+      setChequeListError("Enter who the cheque is payable to, or switch back to Cash");
       return;
     }
     if (!amt || amt <= 0) {
@@ -328,7 +340,9 @@ export default function ViewCustomersPage() {
       {
         cheque_number: chequeNumber.trim(),
         bank_name: chequeBankName.trim(),
-        payee_name: chequePayeeName.trim(),
+        branch: chequeBranch.trim(),
+        is_crossed: chequeIsCrossed,
+        payee_name: chequePayCash ? "" : chequePayeeName.trim(),
         amount: amt,
         cheque_date: chequeDate,
         received_date: todayIso(),
@@ -337,6 +351,9 @@ export default function ViewCustomersPage() {
 
     setChequeNumber("");
     setChequeBankName("");
+    setChequeBranch("");
+    setChequeIsCrossed(true);
+    setChequePayCash(true);
     setChequePayeeName("");
     setChequeAmount("");
     setChequeDate("");
@@ -369,6 +386,8 @@ export default function ViewCustomersPage() {
               ? chequeList.map((c) => ({
                   cheque_number: c.cheque_number,
                   bank_name: c.bank_name,
+                  branch: c.branch || undefined,
+                  is_crossed: c.is_crossed,
                   payee_name: c.payee_name,
                   amount: c.amount,
                   cheque_date: c.cheque_date,
@@ -424,6 +443,38 @@ export default function ViewCustomersPage() {
       setSuspendError(err instanceof ApiRequestError ? err.message : "Failed to suspend this customer");
     } finally {
       setSuspendSubmitting(false);
+    }
+  }
+
+  function openRedeem(c: Customer) {
+    setRedeemTarget(c);
+    setRedeemPoints(String(c.loyalty_points));
+    setRedeemError(null);
+  }
+
+  async function handleRedeem() {
+    if (!redeemTarget) return;
+    setRedeemError(null);
+    const points = parseInt(redeemPoints, 10);
+    if (!points || points <= 0) {
+      setRedeemError("Enter how many points to redeem");
+      return;
+    }
+    if (points > redeemTarget.loyalty_points) {
+      setRedeemError(`Only ${redeemTarget.loyalty_points} points are available`);
+      return;
+    }
+    setRedeemSubmitting(true);
+    try {
+      await api.post(`/customers/${redeemTarget.id}/redeem-loyalty-points`, { points });
+      setRedeemTarget(null);
+      setRedeemPoints("");
+      load();
+      if (expandedId === redeemTarget.id) refreshExpanded(redeemTarget.id);
+    } catch (err) {
+      setRedeemError(err instanceof ApiRequestError ? err.message : "Failed to redeem points");
+    } finally {
+      setRedeemSubmitting(false);
     }
   }
 
@@ -787,6 +838,22 @@ export default function ViewCustomersPage() {
                                   <div>
                                     <p className="text-xs text-gray-400">Loyalty points</p>
                                     <p className="text-gray-900 font-medium">{expandedDetail.loyalty_points}</p>
+                                    <button
+                                      onClick={() => navigate(`/customers/${expandedDetail.id}/loyalty-history`)}
+                                      className="inline-flex items-center gap-1 text-xs text-black underline hover:no-underline mt-1"
+                                    >
+                                      <Star size={12} />
+                                      View points transactions
+                                    </button>
+                                    {expandedDetail.loyalty_points >= 500 && (
+                                      <button
+                                        onClick={() => openRedeem(expandedDetail)}
+                                        className="inline-flex items-center gap-1 text-xs text-black underline hover:no-underline mt-1 ml-3"
+                                      >
+                                        <Star size={12} />
+                                        Redeem
+                                      </button>
+                                    )}
                                   </div>
                                   <div>
                                     <p className="text-xs text-gray-400">Balance due</p>
@@ -1342,44 +1409,69 @@ export default function ViewCustomersPage() {
                     ) : (
                       <>
                         <div className="flex items-baseline justify-between">
-                          <h3 className="text-sm font-semibold text-gray-900">Add cheque</h3>
+                          <h3 className="text-sm font-semibold text-gray-900">
+                            Add cheque
+                            <HelpHint text="Add one or more cheques received from this customer, in one combined payment." />
+                          </h3>
                           <span className="text-[11px] text-gray-400">Clears later</span>
                         </div>
 
                         <div className="grid grid-cols-2 gap-2">
                           <Input
-                            placeholder="Cheque #"
+                            placeholder="Cheque number"
                             value={chequeNumber}
                             onChange={(e) => setChequeNumber(e.target.value)}
                           />
                           <Input
-                            placeholder="Bank"
+                            placeholder="Bank name"
                             value={chequeBankName}
                             onChange={(e) => setChequeBankName(e.target.value)}
                           />
+                          <Input
+                            placeholder="Branch (optional)"
+                            value={chequeBranch}
+                            onChange={(e) => setChequeBranch(e.target.value)}
+                          />
+                          <DatePicker
+                            value={chequeDate || null}
+                            onChange={setChequeDate}
+                            placeholder="Cheque date"
+                            min={todayIso()}
+                          />
+                          <Input
+                            type="number"
+                            min="0"
+                            placeholder="Amount"
+                            value={chequeAmount}
+                            onChange={(e) => setChequeAmount(e.target.value)}
+                          />
+                          <label className="flex items-center gap-1.5 text-xs text-gray-600 self-center pl-1">
+                            <input
+                              type="checkbox"
+                              checked={chequeIsCrossed}
+                              onChange={(e) => setChequeIsCrossed(e.target.checked)}
+                              className="rounded border-gray-300"
+                            />
+                            Crossed cheque
+                          </label>
+                          <div className="col-span-2">
+                            <Label>Payable to</Label>
+                            <TabToggle
+                              value={chequePayCash ? "cash" : "name"}
+                              onChange={(v) => setChequePayCash(v === "cash")}
+                              options={[
+                                { value: "cash", label: "Cash" },
+                                { value: "name", label: "A specific name" },
+                              ]}
+                            />
+                          </div>
                           <div className="col-span-2">
                             <Input
-                              placeholder="Payee name"
+                              placeholder="Who the cheque is made out to"
                               value={chequePayeeName}
                               onChange={(e) => setChequePayeeName(e.target.value)}
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] text-gray-400 mb-1 pl-1">Amount</label>
-                            <Input
-                              type="number"
-                              min="0"
-                              value={chequeAmount}
-                              onChange={(e) => setChequeAmount(e.target.value)}
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] text-gray-400 mb-1 pl-1">Cheque date</label>
-                            <DatePicker
-                              value={chequeDate || null}
-                              onChange={setChequeDate}
-                              placeholder="Select date"
-                              min={todayIso()}
+                              disabled={chequePayCash}
+                              className={chequePayCash ? "opacity-40 cursor-not-allowed" : ""}
                             />
                           </div>
                         </div>
@@ -1522,6 +1614,49 @@ export default function ViewCustomersPage() {
                     Open in WhatsApp
                   </a>
                 )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {redeemTarget && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl">
+            <div className="p-5 border-b border-gray-100 flex items-center justify-between">
+              <h2 className="text-base font-semibold text-gray-900">
+                Redeem points — {redeemTarget.name}
+                <HelpHint text="1 point = Rs. 1 of store credit. Redeemable now that this customer has reached the 500-point minimum." />
+              </h2>
+              <button onClick={() => setRedeemTarget(null)} className="text-gray-400 hover:text-gray-600">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-5">
+              <p className="text-xs text-gray-400 mb-3">
+                {redeemTarget.loyalty_points} points available — redeeming converts them to store credit.
+              </p>
+              <FormGroup>
+                <Label>Points to redeem</Label>
+                <Input
+                  type="number"
+                  value={redeemPoints}
+                  onChange={(e) => setRedeemPoints(e.target.value)}
+                  max={redeemTarget.loyalty_points}
+                  min={1}
+                />
+              </FormGroup>
+              {redeemPoints && !isNaN(parseInt(redeemPoints, 10)) && (
+                <p className="text-xs text-gray-500 mb-2">
+                  = Rs. {parseInt(redeemPoints, 10).toLocaleString()} store credit
+                </p>
+              )}
+              {redeemError && <ErrorText>{redeemError}</ErrorText>}
+              <div className="flex justify-end gap-2 mt-2">
+                <Button onClick={() => setRedeemTarget(null)}>Cancel</Button>
+                <Button variant="primary" onClick={handleRedeem} disabled={redeemSubmitting}>
+                  {redeemSubmitting ? "Redeeming..." : "Redeem"}
+                </Button>
               </div>
             </div>
           </div>

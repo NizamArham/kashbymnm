@@ -11,11 +11,14 @@ import ManageProductsPage from "./pages/ManageProductsPage";
 import AddCustomerPage from "./pages/AddCustomerPage";
 import CustomerOrderHistoryPage from "./pages/CustomerOrderHistoryPage";
 import CustomerPaymentHistoryPage from "./pages/CustomerPaymentHistoryPage";
+import CustomerLoyaltyHistoryPage from "./pages/CustomerLoyaltyHistoryPage";
 import WaybillGeneratorPage from "./pages/WaybillGeneratorPage";
 import SupplierPaymentHistoryPage from "./pages/SupplierPaymentHistoryPage";
 import ViewCustomersPage from "./pages/ViewCustomersPage";
 import PosPage from "./pages/PosPage";
 import SaleHistoryPage from "./pages/SaleHistoryPage";
+import SaleDetailPage from "./pages/SaleDetailPage";
+import ProductDetailPage from "./pages/ProductDetailPage";
 import ReturnsPage from "./pages/ReturnsPage";
 import SuppliersPage from "./pages/SuppliersPage";
 import PurchasesPage from "./pages/PurchasesPage";
@@ -71,10 +74,12 @@ export default function App() {
             </ProtectedRoute>
           }
         />
+        <Route path="/products/:id" element={<ProductDetailPage />} />
 
         <Route path="/customers/add" element={<AddCustomerPage />} />
         <Route path="/customers/:id/orders" element={<CustomerOrderHistoryPage />} />
         <Route path="/customers/:id/payment-history" element={<CustomerPaymentHistoryPage />} />
+        <Route path="/customers/:id/loyalty-history" element={<CustomerLoyaltyHistoryPage />} />
         <Route path="/customers" element={<ViewCustomersPage />} />
         <Route
           path="/staff"
@@ -94,6 +99,7 @@ export default function App() {
         />
 
         <Route path="/sales" element={<SaleHistoryPage />} />
+        <Route path="/sales/:id" element={<SaleDetailPage />} />
         <Route path="/returns" element={<ReturnsPage />} />
 
         <Route

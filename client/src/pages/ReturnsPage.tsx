@@ -25,6 +25,7 @@ import {
   ReasonDropdown,
   RowCard,
   HelpHint,
+  RefLink,
 } from "../components/ui";
 
 type ReturnsTab = "request" | "all";
@@ -593,7 +594,7 @@ function AllReturnsTab({ isAdmin }: { isAdmin: boolean }) {
         <div>
           <p className="text-xs text-gray-400 mb-1">Item</p>
           <p className="text-sm font-medium text-gray-900">
-            {r.product_title} ({r.sku})
+            {r.product_id ? <RefLink to={`/products/${r.product_id}`}>{r.product_title}</RefLink> : r.product_title} ({r.sku})
             {(r.color || r.size) && <span className="text-gray-400 font-normal"> · {[r.color, r.size].filter(Boolean).join(" / ")}</span>}
           </p>
         </div>
@@ -899,7 +900,9 @@ function AllReturnsTab({ isAdmin }: { isAdmin: boolean }) {
                         <Td>{shortDate(r.requested_at)}</Td>
                         <Td>{r.customer_name ?? (r.deleted_customer_snapshot ? `[Deleted: ${r.deleted_customer_snapshot}]` : "Walk-in")}</Td>
                         <Td>
-                          <p className="text-gray-900">{r.product_title}</p>
+                          <p className="text-gray-900">
+                            {r.product_id ? <RefLink to={`/products/${r.product_id}`}>{r.product_title}</RefLink> : r.product_title}
+                          </p>
                           <p className="text-xs text-gray-400">{r.sku}</p>
                           {r.is_admin_override === 1 && r.status === "pending" && (
                             <span className="text-xs text-amber-600 font-medium">Final Sale</span>
@@ -941,7 +944,9 @@ function AllReturnsTab({ isAdmin }: { isAdmin: boolean }) {
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="font-medium text-gray-900 leading-snug">{r.product_title}</p>
+                      <p className="font-medium text-gray-900 leading-snug">
+                        {r.product_id ? <RefLink to={`/products/${r.product_id}`}>{r.product_title}</RefLink> : r.product_title}
+                      </p>
                       <p className="text-xs text-gray-400 mt-0.5">{r.sku}</p>
                       <p className="text-xs text-gray-500 mt-1">
                         #{r.id} · {shortDate(r.requested_at)} ·{" "}

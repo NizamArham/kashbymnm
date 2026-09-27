@@ -80,6 +80,12 @@ export default function PurchasesPage() {
   const [chequeSearchError, setChequeSearchError] = useState<string | null>(null);
   const [ownChequeNumber, setOwnChequeNumber] = useState("");
   const [ownChequeBankName, setOwnChequeBankName] = useState("");
+  const [ownChequeBranch, setOwnChequeBranch] = useState("");
+  const [ownChequeIsCrossed, setOwnChequeIsCrossed] = useState(true);
+  // Most cheques we write are made out to "Cash", not the supplier by
+  // name — defaults to that.
+  const [ownChequePayCash, setOwnChequePayCash] = useState(true);
+  const [ownChequePayeeName, setOwnChequePayeeName] = useState("");
   const [ownChequeDate, setOwnChequeDate] = useState("");
   const [expenses, setExpenses] = useState<DraftExpense[]>([]);
   const [notes, setNotes] = useState("");
@@ -213,6 +219,10 @@ export default function PurchasesPage() {
         setFormError("Cheque number, bank name, and date are all required for your own cheque");
         return;
       }
+      if (chequeKind === "own" && !ownChequePayCash && !ownChequePayeeName.trim()) {
+        setFormError("Enter who the cheque is payable to, or switch back to Cash");
+        return;
+      }
     }
 
     setSubmitting(true);
@@ -233,6 +243,13 @@ export default function PurchasesPage() {
         cheque_number: paidAmountNum > 0 && paymentMethod === "cheque" && chequeKind === "own" ? ownChequeNumber.trim() : undefined,
         bank_name: paidAmountNum > 0 && paymentMethod === "cheque" && chequeKind === "own" ? ownChequeBankName.trim() : undefined,
         cheque_date: paidAmountNum > 0 && paymentMethod === "cheque" && chequeKind === "own" ? ownChequeDate : undefined,
+        cheque_branch:
+          paidAmountNum > 0 && paymentMethod === "cheque" && chequeKind === "own" ? ownChequeBranch.trim() || undefined : undefined,
+        cheque_is_crossed: paidAmountNum > 0 && paymentMethod === "cheque" && chequeKind === "own" ? ownChequeIsCrossed : undefined,
+        cheque_payee_name:
+          paidAmountNum > 0 && paymentMethod === "cheque" && chequeKind === "own" && !ownChequePayCash
+            ? ownChequePayeeName.trim()
+            : undefined,
         expenses: validExpenses.map((e) => ({ label: e.label.trim(), amount: parseFloat(e.amount) })),
         description: notes.trim() || undefined,
       });
@@ -252,6 +269,10 @@ export default function PurchasesPage() {
       setChequeMatch(null);
       setOwnChequeNumber("");
       setOwnChequeBankName("");
+      setOwnChequeBranch("");
+      setOwnChequeIsCrossed(true);
+      setOwnChequePayCash(true);
+      setOwnChequePayeeName("");
       setOwnChequeDate("");
       setExpenses([]);
       setNotes("");
@@ -681,9 +702,40 @@ export default function PurchasesPage() {
                         <Input value={ownChequeBankName} onChange={(e) => setOwnChequeBankName(e.target.value)} />
                       </FormGroup>
                       <FormGroup>
+                        <Label>Branch (optional)</Label>
+                        <Input value={ownChequeBranch} onChange={(e) => setOwnChequeBranch(e.target.value)} />
+                      </FormGroup>
+                      <FormGroup>
                         <Label>Cheque date</Label>
                         <DatePicker value={ownChequeDate || null} onChange={setOwnChequeDate} />
                       </FormGroup>
+                      <FormGroup>
+                        <Label>Payable to</Label>
+                        <TabToggle
+                          value={ownChequePayCash ? "cash" : "name"}
+                          onChange={(v) => setOwnChequePayCash(v === "cash")}
+                          options={[
+                            { value: "cash", label: "Cash" },
+                            { value: "name", label: "A specific name" },
+                          ]}
+                        />
+                        <Input
+                          className={`mt-2 ${ownChequePayCash ? "opacity-40 cursor-not-allowed" : ""}`}
+                          placeholder="Who the cheque is made out to"
+                          value={ownChequePayeeName}
+                          onChange={(e) => setOwnChequePayeeName(e.target.value)}
+                          disabled={ownChequePayCash}
+                        />
+                      </FormGroup>
+                      <label className="flex items-center gap-1.5 text-xs text-gray-600 mb-3">
+                        <input
+                          type="checkbox"
+                          checked={ownChequeIsCrossed}
+                          onChange={(e) => setOwnChequeIsCrossed(e.target.checked)}
+                          className="rounded border-gray-300"
+                        />
+                        Crossed cheque
+                      </label>
                     </>
                   )}
                 </div>

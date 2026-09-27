@@ -108,7 +108,7 @@ courierReconciliationRouter.get("/", asyncHandler(async (_req, res) => {
   const settlements = db.prepare(`SELECT * FROM courier_settlements ORDER BY received_date DESC, id DESC`).all();
   const orders = db.prepare(`
     SELECT courier_reconciliations.*, deliveries.delivery_status, deliveries.tracking_number, deliveries.waybill_number,
-      sales.invoice, sales.date AS sale_date, customers.name AS customer_name
+      sales.id AS sale_id, sales.invoice, sales.date AS sale_date, customers.name AS customer_name
     FROM courier_reconciliations
     JOIN deliveries ON deliveries.id = courier_reconciliations.delivery_id
     JOIN sales ON sales.id = deliveries.sale_id
@@ -162,26 +162,40 @@ courierReconciliationRouter.post("/settlements", asyncHandler(async (req, res) =
 
     // A settlement means the courier has now actually paid the shop back
     // for everything they've delivered for this partner so far — so the
-    // underlying sales should stop showing as still-owed. Without this,
-    // a COD order stays "unpaid" on the customer's balance and in
-    // reports forever, even once the money has genuinely come in via
-    // this exact settlement's cash_book entry above. Only 'delivered'
-    // orders (real COD collected) qualify — a 'returned' one never had
-    // COD collected, so its sale is left alone. No separate cash_book
-    // entry is made per sale: the courier's lump remittance already
-    // covers this money, recorded once, above.
+    // underlying sales should stop showing as still-owed, but ONLY for
+    // the portion of the COD collection that was actually for the SALE.
+    // cod_amount is (remaining sale balance at dispatch) + delivery_fee
+    // (see the deliveries table comment) — so cod_amount - delivery_fee
+    // is exactly what the sale itself received. For a normal COD order
+    // that's the full remaining balance; for an online CREDIT order
+    // where only the delivery fee is collected on delivery (the "OCR"
+    // invoice category — merchandise stays on credit), that comes out
+    // to zero, so the courier settling correctly does NOT mark the
+    // credit sale as paid. Only 'delivered' orders (real COD collected)
+    // qualify — a 'returned' one never had COD collected, so its sale
+    // is left alone. No separate cash_book entry is made per sale: the
+    // courier's lump remittance already covers this money, recorded
+    // once, above.
     const unpaidDelivered = db
       .prepare(
-        `SELECT sales.id, sales.total FROM courier_reconciliations cr
+        `SELECT sales.id, sales.total, sales.amount_paid, cr.cod_amount, deliveries.delivery_fee
+         FROM courier_reconciliations cr
          JOIN deliveries ON deliveries.id = cr.delivery_id
          JOIN sales ON sales.id = deliveries.sale_id
          WHERE cr.courier_partner = ? AND deliveries.delivery_status = 'delivered' AND sales.payment_status != 'paid'
          ORDER BY deliveries.delivery_date ASC`
       )
-      .all(data.courier_partner) as { id: number; total: number }[];
+      .all(data.courier_partner) as
+      | { id: number; total: number; amount_paid: number; cod_amount: number; delivery_fee: number }[];
 
-    const markPaid = db.prepare(`UPDATE sales SET amount_paid = ?, payment_status = 'paid' WHERE id = ?`);
-    for (const sale of unpaidDelivered) markPaid.run(sale.total, sale.id);
+    const updateSale = db.prepare(`UPDATE sales SET amount_paid = ?, payment_status = ? WHERE id = ?`);
+    for (const sale of unpaidDelivered) {
+      const towardSale = Math.max(0, sale.cod_amount - sale.delivery_fee);
+      const newAmountPaid = sale.amount_paid + towardSale;
+      const newStatus: "paid" | "partial" | "unpaid" =
+        newAmountPaid >= sale.total && sale.total > 0 ? "paid" : newAmountPaid > 0 ? "partial" : "unpaid";
+      updateSale.run(newAmountPaid, newStatus, sale.id);
+    }
 
     return result.lastInsertRowid;
   });

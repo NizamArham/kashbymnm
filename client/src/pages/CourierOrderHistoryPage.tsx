@@ -4,7 +4,7 @@ import { ArrowLeft, CheckCircle2, Download } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { CourierReconciliationOrder, CourierSettlement } from "../lib/types";
 import { downloadTabularReport, rangeLabelFor } from "../lib/reportPdf";
-import { Card, Button, DateRangePicker, ErrorText, HelpHint, PageHeader, Table, Td, Th } from "../components/ui";
+import { Card, Button, DateRangePicker, ErrorText, HelpHint, PageHeader, Table, Td, Th, RefLink } from "../components/ui";
 
 type Summary = { courier_partner: string; cod_collected: number; courier_charges: number; expected_net: number; delivered_orders: number };
 type ReconciliationData = { summary: Summary[]; settlements: CourierSettlement[]; orders: CourierReconciliationOrder[] };
@@ -229,7 +229,9 @@ export default function CourierOrderHistoryPage() {
               {filteredOrders.map((order) => (
                 <tr key={order.id}>
                   <Td>
-                    <span className="font-medium">{order.invoice}</span>
+                    <span className="font-medium">
+                      <RefLink to={`/sales/${order.sale_id}`}>{order.invoice}</RefLink>
+                    </span>
                     <span className="block text-xs text-gray-400">{order.customer_name ?? "Walk-in"}</span>
                   </Td>
                   <Td>{labels[order.courier_partner] ?? order.courier_partner}</Td>

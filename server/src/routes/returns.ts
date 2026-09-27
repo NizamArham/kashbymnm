@@ -36,6 +36,7 @@ const REQUEST_SELECT = `
          sales.invoice, sales.customer_id, sales.deleted_customer_snapshot, customers.name as customer_name,
          inventory.sku, inventory.color, inventory.size,
          COALESCE(products.product_title, sale_items.product_snapshot) as product_title,
+         products.id as product_id,
          COALESCE(products.allow_returns, 0) as allow_returns,
          requester.name as requested_by_name, decider.name as decided_by_name,
          returns.refund_amount

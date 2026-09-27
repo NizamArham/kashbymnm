@@ -187,6 +187,7 @@ export interface SaleItem {
   size?: string | null;
   color?: string | null;
   barcode?: string | null;
+  product_id?: number | null;
   product_title?: string;
   brand?: string;
 }
@@ -280,6 +281,7 @@ export interface ReturnRequest {
   color?: string | null;
   size?: string | null;
   product_title: string;
+  product_id: number | null;
   allow_returns: number;
   refund_amount?: number | null;
 }
@@ -360,6 +362,29 @@ export interface SupplierBalance {
   total_purchased: number;
   total_paid: number;
   balance_owed: number;
+}
+
+// Traced back from a supplier_payments row of method "cheque" — either the
+// shop's own cheque written straight to the supplier ("issued"), or a
+// customer's cheque the shop received and later handed on to the supplier
+// instead of depositing it ("transferred", carrying the customer it came
+// from too).
+export interface ChequeInfo {
+  source: "issued" | "transferred";
+  cheque_number: string;
+  bank_name: string;
+  amount: number;
+  cheque_date: string;
+  status: string;
+  date_received?: string;
+  from_customer_name?: string;
+  from_customer_code?: string;
+  transfer_date?: string;
+  branch: string | null;
+  is_crossed: number;
+  // Who the cheque was actually made out to, exactly as written. Null
+  // means it was made out to "Cash".
+  payee_name: string | null;
 }
 
 export interface BusinessInfo {
@@ -471,6 +496,7 @@ export interface CourierReconciliationOrder {
   delivery_status: DeliveryStatus;
   tracking_number: string | null;
   waybill_number: string | null;
+  sale_id: number;
   invoice: string;
   sale_date: string;
   customer_name: string | null;

@@ -24,6 +24,9 @@ interface ChequeRow {
   transferred_to_supplier_id: number | null;
   transferred_to_supplier_name: string | null;
   transfer_date: string | null;
+  branch: string | null;
+  is_crossed: number;
+  payee_name: string | null;
 }
 
 interface IssuedChequeRow {
@@ -37,6 +40,9 @@ interface IssuedChequeRow {
   supplier_name: string;
   status: "pending" | "cleared" | "bounced";
   bounced_reason: string | null;
+  branch: string | null;
+  is_crossed: number;
+  payee_name: string | null;
 }
 
 function statusTone(status: string): "success" | "warning" | "danger" | "neutral" {
@@ -81,6 +87,13 @@ export default function ChequesPage() {
   const [issueSupplierId, setIssueSupplierId] = useState("");
   const [issueChequeNumber, setIssueChequeNumber] = useState("");
   const [issueBankName, setIssueBankName] = useState("");
+  const [issueBranch, setIssueBranch] = useState("");
+  const [issueIsCrossed, setIssueIsCrossed] = useState(true);
+  // Most cheques we write are made out to "Cash", not to the supplier
+  // by name — this defaults to that, and only asks for a name when the
+  // person explicitly says it's payable to someone specific.
+  const [issuePayCash, setIssuePayCash] = useState(true);
+  const [issuePayeeName, setIssuePayeeName] = useState("");
   const [issueAmount, setIssueAmount] = useState("");
   const [issueChequeDate, setIssueChequeDate] = useState("");
   const [issueError, setIssueError] = useState<string | null>(null);
@@ -179,6 +192,10 @@ export default function ChequesPage() {
       setIssueError("Cheque number, bank name, and date are all required");
       return;
     }
+    if (!issuePayCash && !issuePayeeName.trim()) {
+      setIssueError("Enter who the cheque is payable to, or switch back to Cash");
+      return;
+    }
     setIssueSubmitting(true);
     try {
       await api.post("/cheques/issued", {
@@ -187,11 +204,18 @@ export default function ChequesPage() {
         amount,
         cheque_date: issueChequeDate,
         supplier_id: parseInt(issueSupplierId, 10),
+        branch: issueBranch.trim() || undefined,
+        is_crossed: issueIsCrossed,
+        payee_name: issuePayCash ? undefined : issuePayeeName.trim(),
       });
       setShowIssueForm(false);
       setIssueSupplierId("");
       setIssueChequeNumber("");
       setIssueBankName("");
+      setIssueBranch("");
+      setIssueIsCrossed(true);
+      setIssuePayCash(true);
+      setIssuePayeeName("");
       setIssueAmount("");
       setIssueChequeDate("");
       load();
@@ -597,7 +621,7 @@ export default function ChequesPage() {
 
       {showIssueForm && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl">
+          <div className="bg-white rounded-2xl max-w-xl w-full shadow-2xl">
             <div className="p-5 border-b border-gray-100 flex items-center justify-between">
               <h2 className="text-base font-semibold text-gray-900">
                 Issue a cheque
@@ -607,6 +631,9 @@ export default function ChequesPage() {
                 ✕
               </button>
             </div>
+            {/* Laid out like the cheque itself reads — bank details up
+                top, payee and amount in the middle, terms last — instead
+                of one long stacked column. */}
             <div className="p-5">
               <FormGroup>
                 <Label>Supplier</Label>
@@ -618,22 +645,59 @@ export default function ChequesPage() {
                   options={suppliers.map((s) => ({ value: String(s.id), label: s.name, sublabel: s.supplier_code }))}
                 />
               </FormGroup>
+              <div className="grid grid-cols-2 gap-x-3">
+                <FormGroup>
+                  <Label>Bank name</Label>
+                  <Input value={issueBankName} onChange={(e) => setIssueBankName(e.target.value)} />
+                </FormGroup>
+                <FormGroup>
+                  <Label>Branch (optional)</Label>
+                  <Input value={issueBranch} onChange={(e) => setIssueBranch(e.target.value)} />
+                </FormGroup>
+                <FormGroup>
+                  <Label>Cheque number</Label>
+                  <Input value={issueChequeNumber} onChange={(e) => setIssueChequeNumber(e.target.value)} />
+                </FormGroup>
+                <FormGroup>
+                  <Label>Cheque date</Label>
+                  <Input type="date" value={issueChequeDate} onChange={(e) => setIssueChequeDate(e.target.value)} />
+                </FormGroup>
+              </div>
+              <div className="grid grid-cols-2 gap-x-3">
+                <FormGroup>
+                  <Label>Amount (Rs.)</Label>
+                  <Input type="number" min="0" value={issueAmount} onChange={(e) => setIssueAmount(e.target.value)} />
+                </FormGroup>
+                <FormGroup>
+                  <Label>Payable to</Label>
+                  <TabToggle
+                    value={issuePayCash ? "cash" : "name"}
+                    onChange={(v) => setIssuePayCash(v === "cash")}
+                    options={[
+                      { value: "cash", label: "Cash" },
+                      { value: "name", label: "A name" },
+                    ]}
+                  />
+                </FormGroup>
+              </div>
               <FormGroup>
-                <Label>Cheque number</Label>
-                <Input value={issueChequeNumber} onChange={(e) => setIssueChequeNumber(e.target.value)} />
+                <Label>Who the cheque is made out to</Label>
+                <Input
+                  value={issuePayeeName}
+                  onChange={(e) => setIssuePayeeName(e.target.value)}
+                  disabled={issuePayCash}
+                  className={issuePayCash ? "opacity-40 cursor-not-allowed" : ""}
+                />
               </FormGroup>
-              <FormGroup>
-                <Label>Bank name</Label>
-                <Input value={issueBankName} onChange={(e) => setIssueBankName(e.target.value)} />
-              </FormGroup>
-              <FormGroup>
-                <Label>Amount (Rs.)</Label>
-                <Input type="number" min="0" value={issueAmount} onChange={(e) => setIssueAmount(e.target.value)} />
-              </FormGroup>
-              <FormGroup>
-                <Label>Cheque date</Label>
-                <Input type="date" value={issueChequeDate} onChange={(e) => setIssueChequeDate(e.target.value)} />
-              </FormGroup>
+              <label className="flex items-center gap-1.5 text-xs text-gray-600 mb-3">
+                <input
+                  type="checkbox"
+                  checked={issueIsCrossed}
+                  onChange={(e) => setIssueIsCrossed(e.target.checked)}
+                  className="rounded border-gray-300"
+                />
+                Crossed cheque
+              </label>
               {issueError && <ErrorText>{issueError}</ErrorText>}
               <div className="flex gap-2 mt-2">
                 <Button variant="primary" onClick={handleIssueCheque} disabled={issueSubmitting}>

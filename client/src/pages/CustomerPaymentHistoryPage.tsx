@@ -4,7 +4,7 @@ import { ArrowLeft, Receipt, Download } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Customer } from "../lib/types";
 import { downloadTabularReport, rangeLabelFor } from "../lib/reportPdf";
-import { PageHeader, Card, Table, Th, Td, EmptyState, ErrorText, DateRangePicker, Button } from "../components/ui";
+import { PageHeader, Card, Table, Th, Td, EmptyState, ErrorText, DateRangePicker, Button, RefLink } from "../components/ui";
 
 interface LedgerEntry {
   date: string;
@@ -13,6 +13,8 @@ interface LedgerEntry {
   amount: number;
   effect: number;
   running_balance: number;
+  sale_id?: number;
+  sale_invoice?: string;
 }
 
 function typeTone(type: LedgerEntry["type"]): string {
@@ -190,7 +192,20 @@ export default function CustomerPaymentHistoryPage() {
               {displayEntries.map((entry, i) => (
                 <tr key={i} className={i % 2 === 1 ? "bg-gray-50/60" : ""}>
                   <Td>{entry.date.slice(0, 10)}</Td>
-                  <Td>{entry.label}</Td>
+                  <Td>
+                    {entry.type === "sale" && entry.sale_id && entry.sale_invoice ? (
+                      <>
+                        Sale <RefLink to={`/sales/${entry.sale_id}`}>{entry.sale_invoice}</RefLink>
+                      </>
+                    ) : entry.sale_id ? (
+                      // No discrete invoice field on this row (it's a
+                      // free-text note) — linking the whole label still
+                      // gets to the sale in one click.
+                      <RefLink to={`/sales/${entry.sale_id}`}>{entry.label}</RefLink>
+                    ) : (
+                      entry.label
+                    )}
+                  </Td>
                   <Td className={`font-medium ${typeTone(entry.type)}`}>{formatEntryAmount(entry)}</Td>
                   <Td>Rs. {entry.running_balance.toLocaleString()}</Td>
                 </tr>

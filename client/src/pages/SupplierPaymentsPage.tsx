@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, Fragment } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import { Plus } from "lucide-react";
 import {
   Landmark,
   X,
@@ -15,7 +16,7 @@ import {
 import { api, ApiRequestError } from "../lib/api";
 import { SupplierPayment, SupplierBalance, Supplier, Purchase, BankAccount } from "../lib/types";
 import { downloadTabularReport, rangeLabelFor } from "../lib/reportPdf";
-import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Table, Th, Td, Dropdown, EmptyState, DateRangePicker, DatePicker, HelpHint } from "../components/ui";
+import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Table, Th, Td, Dropdown, EmptyState, DateRangePicker, DatePicker, HelpHint, TabToggle } from "../components/ui";
 
 type ExpandedTab = "activity";
 
@@ -74,10 +75,28 @@ export default function SupplierPaymentsPage() {
   const [chequeSearchError, setChequeSearchError] = useState<string | null>(null);
   const [ownChequeNumber, setOwnChequeNumber] = useState("");
   const [ownChequeBankName, setOwnChequeBankName] = useState("");
+  const [ownChequeBranch, setOwnChequeBranch] = useState("");
+  const [ownChequeIsCrossed, setOwnChequeIsCrossed] = useState(true);
+  // Most cheques we write are made out to "Cash", not the supplier by
+  // name — defaults to that.
+  const [ownChequePayCash, setOwnChequePayCash] = useState(true);
+  const [ownChequePayeeName, setOwnChequePayeeName] = useState("");
   const [ownChequeAmount, setOwnChequeAmount] = useState("");
   const [ownChequeDate, setOwnChequeDate] = useState("");
   const [chequeList, setChequeList] = useState<
-    ({ kind: "in_hand"; receipt: any } | { kind: "own"; cheque_number: string; bank_name: string; amount: number; cheque_date: string })[]
+    (
+      | { kind: "in_hand"; receipt: any }
+      | {
+          kind: "own";
+          cheque_number: string;
+          bank_name: string;
+          branch: string;
+          is_crossed: boolean;
+          payee_name: string;
+          amount: number;
+          cheque_date: string;
+        }
+    )[]
   >([]);
 
   async function load() {
@@ -244,12 +263,29 @@ export default function SupplierPaymentsPage() {
       setChequeSearchError("Cheque number, bank name, a valid amount, and date are all required");
       return;
     }
+    if (!ownChequePayCash && !ownChequePayeeName.trim()) {
+      setChequeSearchError("Enter who the cheque is payable to, or switch back to Cash");
+      return;
+    }
     setChequeList((list) => [
       ...list,
-      { kind: "own", cheque_number: ownChequeNumber.trim(), bank_name: ownChequeBankName.trim(), amount: amt, cheque_date: ownChequeDate },
+      {
+        kind: "own",
+        cheque_number: ownChequeNumber.trim(),
+        bank_name: ownChequeBankName.trim(),
+        branch: ownChequeBranch.trim(),
+        is_crossed: ownChequeIsCrossed,
+        payee_name: ownChequePayCash ? "" : ownChequePayeeName.trim(),
+        amount: amt,
+        cheque_date: ownChequeDate,
+      },
     ]);
     setOwnChequeNumber("");
     setOwnChequeBankName("");
+    setOwnChequeBranch("");
+    setOwnChequeIsCrossed(true);
+    setOwnChequePayCash(true);
+    setOwnChequePayeeName("");
     setOwnChequeAmount("");
     setOwnChequeDate("");
   }
@@ -283,7 +319,15 @@ export default function SupplierPaymentsPage() {
           in_hand_cheque_ids: chequeList.filter((c) => c.kind === "in_hand").map((c: any) => c.receipt.id),
           own_cheques: chequeList
             .filter((c) => c.kind === "own")
-            .map((c: any) => ({ cheque_number: c.cheque_number, bank_name: c.bank_name, amount: c.amount, cheque_date: c.cheque_date })),
+            .map((c: any) => ({
+              cheque_number: c.cheque_number,
+              bank_name: c.bank_name,
+              branch: c.branch || undefined,
+              is_crossed: c.is_crossed,
+              payee_name: c.payee_name || undefined,
+              amount: c.amount,
+              cheque_date: c.cheque_date,
+            })),
         });
         setFormSuccess(
           `${chequeList.length} cheque(s) recorded — the supplier's balance is reduced by Rs. ${chequeListTotal.toLocaleString()} now; the Cash Book updates as each one clears.`
@@ -568,6 +612,8 @@ export default function SupplierPaymentsPage() {
                             <div className="grid grid-cols-2 gap-2">
                               <Input placeholder="Cheque number" value={ownChequeNumber} onChange={(e) => setOwnChequeNumber(e.target.value)} />
                               <Input placeholder="Bank name" value={ownChequeBankName} onChange={(e) => setOwnChequeBankName(e.target.value)} />
+                              <Input placeholder="Branch (optional)" value={ownChequeBranch} onChange={(e) => setOwnChequeBranch(e.target.value)} />
+                              <DatePicker value={ownChequeDate || null} onChange={setOwnChequeDate} placeholder="Cheque date" />
                               <Input
                                 type="number"
                                 min="0"
@@ -575,10 +621,45 @@ export default function SupplierPaymentsPage() {
                                 value={ownChequeAmount}
                                 onChange={(e) => setOwnChequeAmount(e.target.value)}
                               />
-                              <DatePicker value={ownChequeDate || null} onChange={setOwnChequeDate} placeholder="Cheque date" />
+                              <label className="flex items-center gap-1.5 text-xs text-gray-600 self-center pl-1">
+                                <input
+                                  type="checkbox"
+                                  checked={ownChequeIsCrossed}
+                                  onChange={(e) => setOwnChequeIsCrossed(e.target.checked)}
+                                  className="rounded border-gray-300"
+                                />
+                                Crossed cheque
+                              </label>
+                              <div className="col-span-2">
+                                <Label>Payable to</Label>
+                                <TabToggle
+                                  value={ownChequePayCash ? "cash" : "name"}
+                                  onChange={(v) => setOwnChequePayCash(v === "cash")}
+                                  options={[
+                                    { value: "cash", label: "Cash" },
+                                    { value: "name", label: "A specific name" },
+                                  ]}
+                                />
+                              </div>
+                              <div className="col-span-2">
+                                <Input
+                                  placeholder="Who the cheque is made out to"
+                                  value={ownChequePayeeName}
+                                  onChange={(e) => setOwnChequePayeeName(e.target.value)}
+                                  disabled={ownChequePayCash}
+                                  className={ownChequePayCash ? "opacity-40 cursor-not-allowed" : ""}
+                                />
+                              </div>
                             </div>
                             {chequeSearchError && <ErrorText>{chequeSearchError}</ErrorText>}
-                            <Button onClick={addOwnCheque}>Add this cheque</Button>
+                            <button
+                              type="button"
+                              onClick={addOwnCheque}
+                              className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-lg border border-dashed border-gray-300 text-sm font-medium text-gray-600 hover:border-gray-900 hover:text-gray-900 hover:bg-gray-50 transition"
+                            >
+                              <Plus size={14} />
+                              Add cheque to list
+                            </button>
                           </>
                         )}
                       </>

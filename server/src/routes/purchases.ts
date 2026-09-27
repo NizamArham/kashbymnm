@@ -121,6 +121,10 @@ const pendingPurchaseInput = z.object({
   cheque_number: z.string().optional(), // for own
   bank_name: z.string().optional(), // for own
   cheque_date: z.string().optional(), // for own
+  cheque_branch: z.string().optional(), // for own
+  cheque_is_crossed: z.boolean().optional(), // for own
+  // Left unset means made out to "Cash". For own cheques only.
+  cheque_payee_name: z.string().optional(),
   // Transport, commission, loading, or any other cost that ISN'T owed to
   // the supplier — each its own named line, all recorded straight to the
   // cash book as separate expenses, never added to the supplier's
@@ -241,8 +245,8 @@ purchasesRouter.post(
                 `Cheque #${data.cheque_number} (${data.bank_name}) — pending purchase ${purchase_code}`
               );
             db.prepare(
-              `INSERT INTO cheques_issued (cheque_number, bank_name, amount, cheque_date, supplier_id, supplier_payment_id, notes)
-               VALUES (?, ?, ?, ?, ?, ?, ?)`
+              `INSERT INTO cheques_issued (cheque_number, bank_name, amount, cheque_date, supplier_id, supplier_payment_id, notes, branch, is_crossed, payee_name)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             ).run(
               data.cheque_number.trim(),
               data.bank_name.trim(),
@@ -250,7 +254,10 @@ purchasesRouter.post(
               data.cheque_date,
               data.supplier_id,
               paymentResult.lastInsertRowid,
-              `For pending purchase ${purchase_code}`
+              `For pending purchase ${purchase_code}`,
+              data.cheque_branch?.trim() || null,
+              data.cheque_is_crossed === false ? 0 : 1,
+              data.cheque_payee_name?.trim() || null
             );
           }
           // No cash_book entry here — a cheque isn't real cash yet,

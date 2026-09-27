@@ -92,16 +92,23 @@ function layoutTopGroup(doc: jsPDF, data: WaybillLabelData, startY: number, draw
   })();
   y += deliverTagH + 3;
 
+  // Name/address/phone bumped up a size from before — the printed label
+  // was reading noticeably smaller than the on-screen preview suggested.
+  // The label's own layout budget is already tight (a long 3-line
+  // address plus the return-address footer can nearly fill the page),
+  // so the small fixed gaps around these lines (not the text itself)
+  // are trimmed slightly to make room, rather than touching line
+  // spacing that actually helps legibility.
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(13);
+  doc.setFontSize(14);
   const nameDims = doc.getTextDimensions(data.customerName || "Customer Name");
   if (draw) doc.text(data.customerName || "Customer Name", MARGIN, startY + y + nameDims.h * 0.78);
-  y += nameDims.h + 0.6;
+  y += nameDims.h + 0.4;
 
   const addressJoined = data.addressLines.filter(Boolean).join(", ") || "Address line 1";
   const addressText = `${addressJoined},`;
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(9.5);
+  doc.setFontSize(10);
   const addressLines: string[] = doc.splitTextToSize(addressText, CONTENT_W).slice(0, 3);
   const addressLineBase = doc.getTextDimensions("Mg").h;
   const addressLineSpacing = addressLineBase * 1.3;
@@ -109,16 +116,16 @@ function layoutTopGroup(doc: jsPDF, data: WaybillLabelData, startY: number, draw
     if (draw) doc.text(line, MARGIN, startY + y + addressLineBase * 0.78);
     y += addressLineSpacing;
   }
-  y += 0.8;
+  y += 0.5;
 
   const cityLine = data.city ? (data.cityPostalCode ? `${data.city} [${data.cityPostalCode}].` : `${data.city}.`) : "City";
-  doc.setFontSize(9.5);
+  doc.setFontSize(10);
   const cityDims = doc.getTextDimensions(cityLine);
   if (draw) doc.text(cityLine, MARGIN, startY + y + cityDims.h * 0.78);
-  y += cityDims.h + 1.3;
+  y += cityDims.h + 1.0;
 
   const phonesText = data.phones.filter(Boolean).join(" / ") || "Telephone Number";
-  doc.setFontSize(8.5);
+  doc.setFontSize(9.5);
   const phoneDims = doc.getTextDimensions(phonesText);
   if (draw) doc.text(phonesText, MARGIN, startY + y + phoneDims.h * 0.78);
   y += phoneDims.h;
@@ -197,13 +204,13 @@ function layoutBottomGroup(doc: jsPDF, data: WaybillLabelData, startY: number, d
   y += bcHeight + 2.5;
 
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(10);
+  doc.setFontSize(11);
   const trackingDims = doc.getTextDimensions(data.trackingNumber || "Tracking No:");
   if (draw) doc.text(data.trackingNumber || "Tracking No:", PAGE_W / 2, startY + y + trackingDims.h * 0.78, { align: "center" });
-  y += trackingDims.h + 3;
+  y += trackingDims.h + 2.5;
 
   if (draw) divider(doc, startY + y);
-  y += 4.5;
+  y += 4;
 
   const logoWidth = 22;
   const logoHeight = logoWidth / NAME_LOGO_ASPECT_RATIO;
@@ -258,7 +265,7 @@ export function generateWaybillLabelPdf(data: WaybillLabelData): jsPDF {
 
   const usableHeight = PAGE_H - MARGIN * 2;
   const fixedContent = topHeight + middleHeight + bottomHeight;
-  const baseGap = 4; // minimum breathing room between groups even when content is near the page limit
+  const baseGap = 3.7; // minimum breathing room between groups even when content is near the page limit
   const extraGap = Math.max(0, (usableHeight - fixedContent - baseGap * 2) / 2);
   const gap = baseGap + extraGap;
 

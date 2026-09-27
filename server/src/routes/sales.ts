@@ -122,6 +122,7 @@ salesRouter.get(
         `SELECT sale_items.*, inventory.sku, inventory.size, inventory.color, inventory.barcode,
                 inventory.selling_price AS original_selling_price,
                 COALESCE(products.product_title, sale_items.product_snapshot) as product_title,
+                products.id AS product_id,
                 products.brand, COALESCE(products.allow_returns, 1) as allow_returns,
                 (SELECT COUNT(*) FROM returns WHERE returns.sale_item_id = sale_items.id) as is_returned
          FROM sale_items

@@ -38,8 +38,12 @@ async function request<T>(
 
   if (!res.ok) {
     const message = data?.error || `Request failed (${res.status})`;
-    // A 401 anywhere means the session is gone — bounce to login.
-    if (res.status === 401) {
+    // A 401 on an already-authenticated request means the session is
+    // gone — bounce to login. A 401 from the login attempt itself is
+    // just wrong credentials, not an expired session, so it must NOT
+    // trigger this (a hard redirect here would wipe the page before
+    // the login form ever gets to show the error).
+    if (res.status === 401 && path !== "/auth/login") {
       localStorage.removeItem("mm_token");
       localStorage.removeItem("mm_user");
       window.location.href = "/login";

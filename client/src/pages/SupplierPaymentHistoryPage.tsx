@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { ArrowLeft, Receipt, Download } from "lucide-react";
+import { ArrowLeft, Receipt, Download, CreditCard } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
-import { Supplier } from "../lib/types";
+import { Supplier, BusinessInfo, ChequeInfo } from "../lib/types";
 import { downloadTabularReport, rangeLabelFor } from "../lib/reportPdf";
 import { PageHeader, Card, Table, Th, Td, EmptyState, ErrorText, DateRangePicker, Button } from "../components/ui";
+import ChequePreviewModal from "../components/ChequePreviewModal";
 
 interface LedgerEntry {
   date: string;
@@ -13,6 +14,8 @@ interface LedgerEntry {
   amount: number;
   effect: number;
   running_balance: number;
+  id?: number;
+  cheque?: ChequeInfo;
 }
 
 function typeTone(type: LedgerEntry["type"]): string {
@@ -73,6 +76,9 @@ export default function SupplierPaymentHistoryPage() {
   const [startDate, setStartDate] = useState<string | null>(ninetyDaysAgoISO());
   const [endDate, setEndDate] = useState<string | null>(toISODate(new Date()));
 
+  const [businessInfo, setBusinessInfo] = useState<BusinessInfo | null>(null);
+  const [chequePreview, setChequePreview] = useState<LedgerEntry | null>(null);
+
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
@@ -98,6 +104,13 @@ export default function SupplierPaymentHistoryPage() {
       cancelled = true;
     };
   }, [id]);
+
+  useEffect(() => {
+    api
+      .get<BusinessInfo | null>("/business-info")
+      .then((info) => setBusinessInfo(info))
+      .catch(() => {});
+  }, []);
 
   // Entries within the active date filter — the running_balance on each
   // row is untouched, still the true cumulative figure from the backend.
@@ -227,17 +240,41 @@ export default function SupplierPaymentHistoryPage() {
               </tr>
             </thead>
             <tbody>
-              {displayEntries.map((entry, i) => (
-                <tr key={i} className={i % 2 === 1 ? "bg-gray-50/60" : ""}>
-                  <Td>{entry.date.slice(0, 10)}</Td>
-                  <Td>{entry.label}</Td>
-                  <Td className={`font-medium ${typeTone(entry.type)}`}>{formatEntryAmount(entry)}</Td>
-                  <Td>Rs. {entry.running_balance.toLocaleString()}</Td>
-                </tr>
-              ))}
+              {displayEntries.map((entry, i) => {
+                const clickable = !!entry.cheque;
+                return (
+                  <tr
+                    key={entry.id ?? `${entry.type}-${entry.date}-${i}`}
+                    className={`${i % 2 === 1 ? "bg-gray-50/60" : ""} ${clickable ? "cursor-pointer hover:bg-sky-50/60" : ""}`}
+                    onClick={clickable ? () => setChequePreview(entry) : undefined}
+                  >
+                    <Td>{entry.date.slice(0, 10)}</Td>
+                    <Td>
+                      {entry.label}
+                      {clickable && (
+                        <span className="inline-flex items-center gap-1 ml-2 text-[11px] text-sky-600 align-middle">
+                          <CreditCard size={12} />
+                          View cheque
+                        </span>
+                      )}
+                    </Td>
+                    <Td className={`font-medium ${typeTone(entry.type)}`}>{formatEntryAmount(entry)}</Td>
+                    <Td>Rs. {entry.running_balance.toLocaleString()}</Td>
+                  </tr>
+                );
+              })}
             </tbody>
           </Table>
         </Card>
+      )}
+
+      {chequePreview?.cheque && supplier && (
+        <ChequePreviewModal
+          cheque={chequePreview.cheque}
+          supplierName={supplier.name}
+          businessName={businessInfo?.business_name || "M&M Clothing"}
+          onClose={() => setChequePreview(null)}
+        />
       )}
     </div>
   );

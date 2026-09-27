@@ -15,10 +15,12 @@ import {
   Smartphone,
   CheckCircle,
   Edit2,
+  Plus,
+  Minus,
 } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { InventoryUnit, Customer, SaleType, CustomerAddress, Coupon } from "../lib/types";
-import { Input, Label, FormGroup, ErrorText, SuccessText, Button, Dropdown, HelpHint } from "../components/ui";
+import { Input, Label, FormGroup, ErrorText, SuccessText, Button, Dropdown, HelpHint, RefLink } from "../components/ui";
 import { CityPicker } from "../components/CityPicker";
 import { useAuth } from "../context/AuthContext";
 import { DELIVERY_PARTNERS, DeliveryPartner, calculateDeliveryFee, calculateCodAmount } from "../lib/delivery";
@@ -397,17 +399,37 @@ export default function PosPage() {
       if (!confirm(`Remove ${line.units[0].product_title} from the cart?`)) return;
     }
     setCart((c) => {
-      const removedUnitId = c.find((l) => cartLineKey(l.units[0]) === lineKey)?.units.slice(-1)[0]?.id;
-      if (removedUnitId != null) {
+      const removedUnit = c.find((l) => cartLineKey(l.units[0]) === lineKey)?.units.slice(-1)[0];
+      if (removedUnit != null) {
         setStaleUnitIds((prev) => {
-          if (!prev.has(removedUnitId)) return prev;
+          if (!prev.has(removedUnit.id)) return prev;
           const next = new Set(prev);
-          next.delete(removedUnitId);
+          next.delete(removedUnit.id);
           return next;
         });
+        // It's genuinely back in stock, not sold — put it back in the
+        // available pool so the + stepper and search/browse can offer
+        // it again instead of wrongly treating it as gone for the rest
+        // of this session.
+        setAllAvailableUnits((prev) => (prev ? [...prev, removedUnit] : prev));
       }
       return c.map((l) => (cartLineKey(l.units[0]) === lineKey ? { ...l, units: l.units.slice(0, -1) } : l)).filter((l) => l.units.length > 0);
     });
+  }
+
+  // How many more units of this exact product+color+size are still free
+  // to add — same pool the search/browse panels already draw from, so
+  // the + button follows the identical stock rule they enforce.
+  function remainingAvailable(lineKey: string): number {
+    const cartIds = new Set(cart.flatMap((l) => l.units.map((u) => u.id)));
+    return (allAvailableUnits ?? []).filter((u) => cartLineKey(u) === lineKey && !cartIds.has(u.id)).length;
+  }
+
+  function incrementCartLine(lineKey: string) {
+    const cartIds = new Set(cart.flatMap((l) => l.units.map((u) => u.id)));
+    const nextUnit = (allAvailableUnits ?? []).find((u) => cartLineKey(u) === lineKey && !cartIds.has(u.id));
+    if (!nextUnit) return;
+    addToCart(nextUnit);
   }
 
   async function ensureCustomersLoaded() {
@@ -899,6 +921,28 @@ export default function PosPage() {
                   const isEditing = editingLineKey === lineKey;
                   const qty = line.units.length;
                   const hasStaleUnit = line.units.some((u) => staleUnitIds.has(u.id));
+                  const canAddMore = remainingAvailable(lineKey) > 0;
+                  const stepper = (
+                    <div className="inline-flex items-center gap-1.5">
+                      <button
+                        onClick={() => removeFromCart(lineKey)}
+                        className="w-5 h-5 flex items-center justify-center rounded-full border border-gray-300 text-gray-500 hover:border-gray-900 hover:text-gray-900 transition flex-shrink-0"
+                        aria-label="Decrease quantity"
+                      >
+                        <Minus size={11} />
+                      </button>
+                      <span className="w-4 text-center text-xs font-semibold text-gray-700">{qty}</span>
+                      <button
+                        onClick={() => incrementCartLine(lineKey)}
+                        disabled={!canAddMore}
+                        title={canAddMore ? undefined : "No more in stock"}
+                        className="w-5 h-5 flex items-center justify-center rounded-full border border-gray-300 text-gray-500 hover:border-gray-900 hover:text-gray-900 transition flex-shrink-0 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:border-gray-300 disabled:hover:text-gray-500"
+                        aria-label="Increase quantity"
+                      >
+                        <Plus size={11} />
+                      </button>
+                    </div>
+                  );
                   return (
                     <div
                       key={lineKey}
@@ -908,9 +952,9 @@ export default function PosPage() {
                           : "bg-white border-gray-100 hover:shadow-sm"
                       }`}
                     >
-                      <div className="col-span-9 lg:col-span-5 min-w-0 order-1 lg:order-none">
+                      <div className="col-span-9 lg:col-span-4 min-w-0 order-1 lg:order-none">
                         <p className={`font-medium text-sm truncate ${hasStaleUnit ? "text-gray-400 line-through" : "text-gray-900"}`}>
-                          {sample.product_title}
+                          {sample.product_id ? <RefLink to={`/products/${sample.product_id}`}>{sample.product_title}</RefLink> : sample.product_title}
                         </p>
                         <p className={`text-xs mt-0.5 truncate ${hasStaleUnit ? "text-gray-400 line-through" : "text-gray-500"}`}>
                           {sample.color ?? "—"} / {sample.size ?? "—"} | SKU: {sample.sku}
@@ -919,21 +963,8 @@ export default function PosPage() {
                           <p className="text-xs text-red-600 mt-0.5 font-medium">No longer in stock — remove before checkout</p>
                         )}
                       </div>
-                      <div className="col-span-3 lg:col-span-1 text-center order-2 lg:order-none">
-                        <button
-                          onClick={() => removeFromCart(lineKey)}
-                          className="lg:hidden text-gray-400 hover:text-red-500 transition float-right"
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                        <span className="hidden lg:inline-flex items-center justify-center w-6 h-6 bg-gray-100 rounded-full text-xs font-semibold text-gray-700">
-                          {qty}
-                        </span>
-                      </div>
-                      <div className="col-span-3 lg:hidden order-3 flex items-center">
-                        <span className="inline-flex items-center justify-center w-6 h-6 bg-gray-100 rounded-full text-xs font-semibold text-gray-700">
-                          {qty}
-                        </span>
+                      <div className="col-span-3 lg:col-span-2 text-center order-2 lg:order-none flex items-center justify-center">
+                        {stepper}
                       </div>
                       <div className={`${isEditing ? "col-span-12" : "col-span-5"} lg:col-span-3 order-4 lg:order-none`}>
                         {isEditing ? (

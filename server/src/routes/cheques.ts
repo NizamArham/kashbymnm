@@ -88,6 +88,9 @@ const editReceiptInput = z.object({
   bank_name: z.string().min(1).optional(),
   cheque_date: z.string().optional(),
   amount: z.number().positive().optional(),
+  branch: z.string().optional(),
+  is_crossed: z.boolean().optional(),
+  payee_name: z.string().optional(),
 });
 
 // PUT /api/cheques/:id — fix a mistake on a received cheque. Only
@@ -130,13 +133,16 @@ chequesRouter.put(
       }
 
       db.prepare(
-        `UPDATE cheque_receipts SET cheque_number = ?, bank_name = ?, cheque_date = ?, amount = ?, sale_allocations = ? WHERE id = ?`
+        `UPDATE cheque_receipts SET cheque_number = ?, bank_name = ?, cheque_date = ?, amount = ?, sale_allocations = ?, branch = ?, is_crossed = ?, payee_name = ? WHERE id = ?`
       ).run(
         data.cheque_number?.trim() ?? receipt.cheque_number,
         data.bank_name?.trim() ?? receipt.bank_name,
         data.cheque_date ?? receipt.cheque_date,
         data.amount ?? receipt.amount,
         newAllocationsJson,
+        data.branch !== undefined ? data.branch.trim() || null : receipt.branch,
+        data.is_crossed !== undefined ? (data.is_crossed ? 1 : 0) : receipt.is_crossed,
+        data.payee_name !== undefined ? data.payee_name.trim() || null : receipt.payee_name,
         req.params.id
       );
     });
@@ -245,6 +251,11 @@ const batchOwnChequeInput = z.object({
   bank_name: z.string().min(1),
   amount: z.number().positive(),
   cheque_date: z.string(),
+  branch: z.string().optional(),
+  is_crossed: z.boolean().optional(),
+  // Who this cheque is made out to — left unset means "Cash", which is
+  // the common case, not the named supplier by default.
+  payee_name: z.string().optional(),
 });
 
 const batchPaySupplierInput = z.object({
@@ -346,9 +357,20 @@ chequesRouter.post(
         applyToPurchase(c.amount);
 
         db.prepare(
-          `INSERT INTO cheques_issued (cheque_number, bank_name, amount, cheque_date, supplier_id, supplier_payment_id, notes)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
-        ).run(c.cheque_number.trim(), c.bank_name.trim(), c.amount, c.cheque_date, data.supplier_id, paymentResult.lastInsertRowid, data.notes ?? null);
+          `INSERT INTO cheques_issued (cheque_number, bank_name, amount, cheque_date, supplier_id, supplier_payment_id, notes, branch, is_crossed, payee_name)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).run(
+          c.cheque_number.trim(),
+          c.bank_name.trim(),
+          c.amount,
+          c.cheque_date,
+          data.supplier_id,
+          paymentResult.lastInsertRowid,
+          data.notes ?? null,
+          c.branch?.trim() || null,
+          c.is_crossed === false ? 0 : 1,
+          c.payee_name?.trim() || null
+        );
       }
     });
 
@@ -483,6 +505,11 @@ const issueChequeInput = z.object({
   supplier_id: z.number().int().positive(),
   purchase_id: z.number().int().positive().optional(),
   notes: z.string().optional(),
+  branch: z.string().optional(),
+  is_crossed: z.boolean().optional(),
+  // Left unset means made out to "Cash" — the common case for a
+  // self-written cheque, not the named supplier by default.
+  payee_name: z.string().optional(),
 });
 
 // GET /api/cheques/issued — every self-written cheque, newest first.
@@ -538,8 +565,8 @@ chequesRouter.post(
 
       const issuedResult = db
         .prepare(
-          `INSERT INTO cheques_issued (cheque_number, bank_name, amount, cheque_date, supplier_id, supplier_payment_id, notes)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO cheques_issued (cheque_number, bank_name, amount, cheque_date, supplier_id, supplier_payment_id, notes, branch, is_crossed, payee_name)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           data.cheque_number,
@@ -548,7 +575,10 @@ chequesRouter.post(
           data.cheque_date,
           data.supplier_id,
           paymentResult.lastInsertRowid,
-          data.notes ?? null
+          data.notes ?? null,
+          data.branch?.trim() || null,
+          data.is_crossed === false ? 0 : 1,
+          data.payee_name?.trim() || null
         );
 
       return issuedResult.lastInsertRowid;
@@ -571,6 +601,9 @@ const editIssuedInput = z.object({
   bank_name: z.string().min(1).optional(),
   cheque_date: z.string().optional(),
   amount: z.number().positive().optional(),
+  branch: z.string().optional(),
+  is_crossed: z.boolean().optional(),
+  payee_name: z.string().optional(),
 });
 
 // PUT /api/cheques/issued/:id — fix a mistake on a self-written cheque.
@@ -611,12 +644,15 @@ chequesRouter.put(
       }
 
       db.prepare(
-        `UPDATE cheques_issued SET cheque_number = ?, bank_name = ?, cheque_date = ?, amount = ? WHERE id = ?`
+        `UPDATE cheques_issued SET cheque_number = ?, bank_name = ?, cheque_date = ?, amount = ?, branch = ?, is_crossed = ?, payee_name = ? WHERE id = ?`
       ).run(
         data.cheque_number?.trim() ?? issued.cheque_number,
         data.bank_name?.trim() ?? issued.bank_name,
         data.cheque_date ?? issued.cheque_date,
         data.amount ?? issued.amount,
+        data.branch !== undefined ? data.branch.trim() || null : issued.branch,
+        data.is_crossed !== undefined ? (data.is_crossed ? 1 : 0) : issued.is_crossed,
+        data.payee_name !== undefined ? data.payee_name.trim() || null : issued.payee_name,
         req.params.id
       );
     });
