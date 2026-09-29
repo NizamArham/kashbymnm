@@ -1,5 +1,5 @@
 import jsPDF from "jspdf";
-import { Sale, BusinessInfo } from "./types";
+import { Sale, SaleItem, BusinessInfo } from "./types";
 import { NAME_LOGO_PNG_BASE64, NAME_LOGO_ASPECT_RATIO } from "./logoAsset";
 import { barcodePng } from "./waybillLabelPdf";
 import { DELIVERY_PARTNERS, waybillShopCode } from "./delivery";
@@ -8,6 +8,62 @@ import { api } from "./api";
 // ---------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------
+
+export interface GroupedSaleItem {
+  ids: number[];
+  sku?: string;
+  barcode?: string | null;
+  product_id?: number | null;
+  product_title?: string;
+  size?: string | null;
+  color?: string | null;
+  unit_price: number;
+  original_selling_price?: number;
+  quantity: number;
+  line_total: number;
+  is_returned: boolean;
+}
+
+// Same product + color + size, sold at the same price with the same
+// discount and return status, printed/displayed as one row with a
+// combined quantity — never one row per physical unit. The underlying
+// sale_items stay one row per inventory_id (one per physical
+// unit/batch) untouched everywhere else, since that's what returns and
+// stock restocking key off; this only reshapes what a receipt, invoice,
+// or item table shows. Anything that differs (price, discount, whether
+// it's been returned) is kept on its own line rather than merged, so a
+// partial return or a mid-sale price change never gets silently hidden.
+export function groupSaleItemsForDisplay(items: SaleItem[]): GroupedSaleItem[] {
+  const groups = new Map<string, GroupedSaleItem>();
+  const order: string[] = [];
+  for (const item of items) {
+    const returned = !!item.is_returned;
+    const key = [item.product_id ?? item.product_title ?? "", item.color ?? "", item.size ?? "", item.unit_price, item.original_selling_price ?? "", returned].join("::");
+    const existing = groups.get(key);
+    if (existing) {
+      existing.quantity += item.quantity;
+      existing.line_total += item.line_total;
+      existing.ids.push(item.id);
+    } else {
+      groups.set(key, {
+        ids: [item.id],
+        sku: item.sku,
+        barcode: item.barcode,
+        product_id: item.product_id,
+        product_title: item.product_title,
+        size: item.size,
+        color: item.color,
+        unit_price: item.unit_price,
+        original_selling_price: item.original_selling_price,
+        quantity: item.quantity,
+        line_total: item.line_total,
+        is_returned: returned,
+      });
+      order.push(key);
+    }
+  }
+  return order.map((k) => groups.get(k)!);
+}
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
@@ -198,7 +254,7 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
   doc.setLineWidth(0.3);
   doc.line(marginX, y, rightX, y);
 
-  const items = sale.items ?? [];
+  const items = groupSaleItemsForDisplay(sale.items ?? []);
   // Main line (name, qty, price, total) at 10.5pt, the color/size
   // subline at 9pt — bigger than before on both, but the same 1.5pt
   // gap between them, so the subline stays clearly secondary rather
@@ -416,7 +472,7 @@ export function generateThermalPdf(sale: Sale): jsPDF {
   const widthMm = 80;
   const marginX = 4;
   const contentWidth = widthMm - marginX * 2;
-  const items = sale.items ?? [];
+  const items = groupSaleItemsForDisplay(sale.items ?? []);
   const addr = sale.delivery_address;
   const hasAddress = sale.sale_type === "online" && addr && (addr.address_line1 || addr.city);
 
@@ -540,7 +596,7 @@ export function downloadThermalPdf(sale: Sale) {
 // pre-filled and ready to send to the customer's saved phone number.
 // ---------------------------------------------------------------------
 export function buildWhatsAppMessage(sale: Sale, businessInfo?: BusinessInfo | null): string {
-  const items = sale.items ?? [];
+  const items = groupSaleItemsForDisplay(sale.items ?? []);
   const lines: string[] = [];
 
   lines.push(`*${businessInfo?.business_name || "M&M Clothing"} — Receipt*`);

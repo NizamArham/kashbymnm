@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Package, Clock, Trash2, Download } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Supplier, Purchase, AvailableUnit } from "../lib/types";
-import { downloadTabularReport, rangeLabelFor } from "../lib/reportPdf";
+import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
 import {
   PageHeader,
   Card,
@@ -372,10 +372,15 @@ export default function PurchasesPage() {
     const totalCost = filteredPurchases.reduce((sum, p) => sum + p.total_cost, 0);
     const totalPaid = filteredPurchases.reduce((sum, p) => sum + p.amount_paid, 0);
 
+    const rangeLabel = rangeLabelFor(historyStart, historyEnd);
     downloadTabularReport({
       headerLabel: "M&M Clothing — Purchases Report",
-      title: "Purchases",
-      rangeLabel: rangeLabelFor(historyStart, historyEnd),
+      headerFields: [
+        { label: "Report", value: "Purchases" },
+        { label: "Period", value: rangeLabel },
+        { label: "Generated", value: todayLongDate() },
+      ],
+      rangeLabel,
       columns: [
         { label: "Code", width: 90 },
         { label: "Date", width: 80 },
@@ -394,10 +399,12 @@ export default function PurchasesPage() {
           p.payment_status,
         ],
       })),
-      summaryLines: [
-        { text: `Total cost: Rs. ${totalCost.toLocaleString()}  ·  Total paid: Rs. ${totalPaid.toLocaleString()}`, bold: true },
-      ],
-      filename: `purchases-${historyStart || "all"}-to-${historyEnd || "now"}.pdf`,
+      totalSummary: {
+        label: "Total cost",
+        amount: `Rs. ${totalCost.toLocaleString()}`,
+        note: `Rs. ${totalPaid.toLocaleString()} paid`,
+      },
+      filename: buildReportFilename("Purchases", `${historyStart || "all"}-to-${historyEnd || "now"}`),
     });
   }
 

@@ -39,8 +39,46 @@ export function nextProductCode(): string {
   return nextSequentialCode("products", "id", "P");
 }
 
-export function nextCustomerCode(): string {
-  return nextSequentialCode("customers", "customer_code", "C");
+export type CustomerGender = "male" | "female" | "unspecified";
+
+const GENDER_LETTER: Record<CustomerGender, string> = { male: "M", female: "F", unspecified: "U" };
+
+// M&M Clothing opened in 2024 — "Year 1" for the customer-code shop-year
+// digit below. A single digit only covers years 1-9 (2024-2032); if the
+// shop's still running in 2033, that digit needs to become 2 digits (or
+// switch to a letter) — a one-time format bump, same kind of change as
+// this feature itself.
+const SHOP_EPOCH_YEAR = 2024;
+
+// Format: C{shopYear}{MM}{sequence}{GenderLetter}, e.g. C3090001M — the
+// single leading digit is the shop's OWN age (2024 = year 1, 2025 = year
+// 2, ...) rather than the calendar year, then MM is the join month, so
+// the code shows how long someone's been a customer at a glance without
+// revealing the actual calendar year. The 4-digit sequence is a lifetime
+// running number shared across every gender — same "never resets" design
+// as invoice/purchase codes, see nextInvoiceCode — and the trailing
+// letter (M/F/U) makes gender visible in the code for quick campaign
+// segmentation.
+//
+// Older customers (before this format) look like C-0001 — the regex
+// below requires a fixed run of digits right after "C" with no dash, so
+// those are safely skipped rather than mismatched.
+export function nextCustomerCode(gender: CustomerGender, joinedAt: Date = new Date()): string {
+  const shopYear = joinedAt.getFullYear() - SHOP_EPOCH_YEAR + 1;
+  const mm = String(joinedAt.getMonth() + 1).padStart(2, "0");
+
+  const rows = db.prepare(`SELECT customer_code FROM customers WHERE customer_code LIKE 'C%'`).all() as {
+    customer_code: string;
+  }[];
+  let nextNum = 1;
+  for (const { customer_code } of rows) {
+    const match = customer_code.match(/^C\d{3}(\d{4})[MFU]$/);
+    if (!match) continue;
+    const n = parseInt(match[1], 10);
+    if (!isNaN(n) && n + 1 > nextNum) nextNum = n + 1;
+  }
+
+  return `C${shopYear}${mm}${String(nextNum).padStart(4, "0")}${GENDER_LETTER[gender]}`;
 }
 
 export function nextSupplierCode(): string {

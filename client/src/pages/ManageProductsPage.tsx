@@ -1,12 +1,13 @@
 import { useEffect, useState, Fragment, useRef } from "react";
-import { Package, ChevronDown, ChevronRight, Plus, X, Pencil, AlertTriangle, MinusCircle, CheckCircle, Search, Trash2 } from "lucide-react";
+import { Package, ChevronDown, ChevronRight, Plus, X, Pencil, AlertTriangle, MinusCircle, CheckCircle, Search, Trash2, Settings } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
-import { Product, InventoryUnit, Supplier, RemovalReason, Purchase } from "../lib/types";
+import { Product, InventoryUnit, Supplier, RemovalReason, Purchase, Category, SubCategory } from "../lib/types";
 import { compareSizes } from "../lib/sizeSort";
-import { mainCategories } from "../lib/categories";
+import { splitCategory, extractGenderSuffix, composeCategory } from "../lib/categoryTree";
 import {
   PageHeader,
   Card,
+  StatCard,
   Table,
   Th,
   Td,
@@ -21,6 +22,8 @@ import {
   Label,
   FormGroup,
   NewSupplierModal,
+  NewCategoryModal,
+  NewSubCategoryModal,
   HelpHint,
 } from "../components/ui";
 
@@ -226,6 +229,296 @@ function ComboPicker({
   );
 }
 
+// One row of the categories management modal — a category with its
+// sub-categories nested under it, each independently renameable/
+// deletable in place (no separate edit page for something this small).
+function CategoryRow({
+  category,
+  onRenamed,
+  onDeleted,
+  onSubRenamed,
+  onSubDeleted,
+  onAddSub,
+}: {
+  category: Category;
+  onRenamed: (id: number, name: string) => Promise<void>;
+  onDeleted: (id: number) => Promise<void>;
+  onSubRenamed: (id: number, name: string) => Promise<void>;
+  onSubDeleted: (id: number) => Promise<void>;
+  onAddSub: (category: Category) => void;
+}) {
+  const [renaming, setRenaming] = useState(false);
+  const [nameDraft, setNameDraft] = useState(category.name);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [renamingSubId, setRenamingSubId] = useState<number | null>(null);
+  const [subNameDraft, setSubNameDraft] = useState("");
+  const [subError, setSubError] = useState<string | null>(null);
+
+  async function saveRename() {
+    if (!nameDraft.trim() || nameDraft.trim() === category.name) {
+      setRenaming(false);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await onRenamed(category.id, nameDraft.trim());
+      setRenaming(false);
+    } catch (err) {
+      setError(err instanceof ApiRequestError ? err.message : "Failed to rename");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!confirm(`Delete category "${category.name}"? This only works if no product currently uses it.`)) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onDeleted(category.id);
+    } catch (err) {
+      setError(err instanceof ApiRequestError ? err.message : "Failed to delete");
+      setBusy(false);
+    }
+  }
+
+  async function saveSubRename(sub: SubCategory) {
+    if (!subNameDraft.trim() || subNameDraft.trim() === sub.name) {
+      setRenamingSubId(null);
+      return;
+    }
+    setBusy(true);
+    setSubError(null);
+    try {
+      await onSubRenamed(sub.id, subNameDraft.trim());
+      setRenamingSubId(null);
+    } catch (err) {
+      setSubError(err instanceof ApiRequestError ? err.message : "Failed to rename");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSubDelete(sub: SubCategory) {
+    if (!confirm(`Delete sub-category "${sub.name}"? This only works if no product currently uses it.`)) return;
+    setBusy(true);
+    setSubError(null);
+    try {
+      await onSubDeleted(sub.id);
+    } catch (err) {
+      setSubError(err instanceof ApiRequestError ? err.message : "Failed to delete");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="border border-gray-200 rounded-xl p-3">
+      <div className="flex items-center justify-between gap-2">
+        {renaming ? (
+          <div className="flex items-center gap-2 flex-1">
+            <Input value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} autoFocus />
+            <Button size="sm" variant="primary" disabled={busy} onClick={saveRename}>
+              Save
+            </Button>
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={() => {
+                setNameDraft(category.name);
+                setRenaming(false);
+                setError(null);
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+        ) : (
+          <>
+            <p className="text-sm font-semibold text-gray-900">{category.name}</p>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setRenaming(true)}
+                className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
+                title="Rename"
+              >
+                <Pencil size={13} />
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={busy}
+                className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50"
+                title="Delete"
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+      {error && <ErrorText>{error}</ErrorText>}
+
+      <div className="mt-2 pl-3 border-l-2 border-gray-100 space-y-1.5">
+        {category.sub_categories.map((sub) => (
+          <div key={sub.id} className="flex items-center justify-between gap-2">
+            {renamingSubId === sub.id ? (
+              <div className="flex items-center gap-2 flex-1">
+                <Input value={subNameDraft} onChange={(e) => setSubNameDraft(e.target.value)} autoFocus />
+                <Button size="sm" variant="primary" disabled={busy} onClick={() => saveSubRename(sub)}>
+                  Save
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => {
+                    setRenamingSubId(null);
+                    setSubError(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            ) : (
+              <>
+                <p className="text-sm text-gray-600">{sub.name}</p>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => {
+                      setRenamingSubId(sub.id);
+                      setSubNameDraft(sub.name);
+                    }}
+                    className="p-1 text-gray-300 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
+                    title="Rename"
+                  >
+                    <Pencil size={12} />
+                  </button>
+                  <button
+                    onClick={() => handleSubDelete(sub)}
+                    disabled={busy}
+                    className="p-1 text-gray-300 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50"
+                    title="Delete"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        ))}
+        {subError && <ErrorText>{subError}</ErrorText>}
+        <button onClick={() => onAddSub(category)} className="text-xs text-gray-400 hover:text-gray-700 flex items-center gap-1 mt-1">
+          <Plus size={11} />
+          Add sub-category
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Full add/rename/delete screen for the category picklist — separate from
+// the per-product edit form's dropdown, since this manages the master
+// list itself rather than what one product is tagged with.
+function ManageCategoriesModal({
+  categories,
+  onClose,
+  onReload,
+}: {
+  categories: Category[];
+  onClose: () => void;
+  // Reloads the whole page's data, not just the categories list — a
+  // rename here rewrites products.category on every product that used
+  // the old name, so the product table behind this modal needs a fresh
+  // fetch too, not just the picklist.
+  onReload: () => Promise<void>;
+}) {
+  const [showNewCategoryModal, setShowNewCategoryModal] = useState(false);
+  const [addSubFor, setAddSubFor] = useState<Category | null>(null);
+
+  async function refresh() {
+    await onReload();
+  }
+
+  async function renameCategory(id: number, name: string) {
+    await api.put(`/categories/${id}`, { name });
+    await refresh();
+  }
+  async function deleteCategory(id: number) {
+    await api.delete(`/categories/${id}`);
+    await refresh();
+  }
+  async function renameSub(id: number, name: string) {
+    await api.put(`/categories/sub-categories/${id}`, { name });
+    await refresh();
+  }
+  async function deleteSub(id: number) {
+    await api.delete(`/categories/sub-categories/${id}`);
+    await refresh();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl border border-gray-200 shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="p-5 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900">Manage categories</h3>
+            <p className="text-xs text-gray-400 mt-0.5">Renaming or deleting here is blocked while a product still uses it.</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="p-5 overflow-y-auto space-y-3">
+          {categories.map((c) => (
+            <CategoryRow
+              key={c.id}
+              category={c}
+              onRenamed={renameCategory}
+              onDeleted={deleteCategory}
+              onSubRenamed={renameSub}
+              onSubDeleted={deleteSub}
+              onAddSub={setAddSubFor}
+            />
+          ))}
+        </div>
+
+        <div className="p-5 border-t border-gray-100 flex-shrink-0">
+          <Button variant="primary" size="sm" onClick={() => setShowNewCategoryModal(true)} className="inline-flex items-center gap-1.5">
+            <Plus size={14} />
+            Add category
+          </Button>
+        </div>
+      </div>
+
+      {showNewCategoryModal && (
+        <NewCategoryModal
+          onClose={() => setShowNewCategoryModal(false)}
+          onCreated={async () => {
+            await refresh();
+            setShowNewCategoryModal(false);
+          }}
+        />
+      )}
+
+      {addSubFor && (
+        <NewSubCategoryModal
+          categoryId={addSubFor.id}
+          categoryName={addSubFor.name}
+          onClose={() => setAddSubFor(null)}
+          onCreated={async () => {
+            await refresh();
+            setAddSubFor(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
 export default function ManageProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
@@ -240,12 +533,22 @@ export default function ManageProductsPage() {
     product_title: "",
     brand: "",
     category: "",
+    subCategory: "",
     cost_price: "",
     selling_price: "",
     allow_returns: true,
   });
+  // The existing "(Gender)" tag on the product being edited — preserved
+  // as-is on save since this form only lets you fix category/sub-category,
+  // not gender.
+  const [editGenderSuffix, setEditGenderSuffix] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
   const [editSuccess, setEditSuccess] = useState<string | null>(null);
+
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [showManageCategoriesModal, setShowManageCategoriesModal] = useState(false);
+  const [showNewCategoryModal, setShowNewCategoryModal] = useState(false);
+  const [showNewSubCategoryModal, setShowNewSubCategoryModal] = useState(false);
 
   const [restockColors, setRestockColors] = useState<string[]>([]);
   const [restockSizes, setRestockSizes] = useState<string[]>([]);
@@ -273,14 +576,16 @@ export default function ManageProductsPage() {
   async function load() {
     setLoading(true);
     try {
-      const [prods, supps, pending] = await Promise.all([
+      const [prods, supps, pending, cats] = await Promise.all([
         api.get<Product[]>("/products"),
         api.get<Supplier[]>("/suppliers"),
         api.get<Purchase[]>("/purchases/pending"),
+        api.get<Category[]>("/categories"),
       ]);
       setProducts(prods);
       setSuppliers(supps);
       setPendingPurchases(pending);
+      setCategories(cats);
     } catch (err) {
       setError(err instanceof ApiRequestError ? err.message : "Failed to load products");
     } finally {
@@ -344,14 +649,17 @@ export default function ManageProductsPage() {
     setRestockError(null);
     setRestockSuccess(null);
     setFulfillsLineId("");
+    const parts = splitCategory(p.category);
     setEditForm({
       product_title: p.product_title,
       brand: p.brand ?? "",
-      category: p.category ?? "",
+      category: parts.category,
+      subCategory: parts.subCategory,
       cost_price: String(p.cost_price ?? ""),
       selling_price: String(p.selling_price),
       allow_returns: p.allow_returns !== 0,
     });
+    setEditGenderSuffix(extractGenderSuffix(p.category));
     setEditError(null);
     setEditSuccess(null);
     loadInventoryFor(p.id);
@@ -364,7 +672,7 @@ export default function ManageProductsPage() {
       await api.put(`/products/${id}`, {
         product_title: editForm.product_title,
         brand: editForm.brand || undefined,
-        category: editForm.category || undefined,
+        category: editForm.category ? composeCategory(editForm.category, editForm.subCategory, editGenderSuffix) : undefined,
         cost_price: parseFloat(editForm.cost_price),
         selling_price: parseFloat(editForm.selling_price),
         allow_returns: editForm.allow_returns,
@@ -409,14 +717,17 @@ export default function ManageProductsPage() {
 
   function cancelEdit(p: Product) {
     setIsEditingDetails(false);
+    const parts = splitCategory(p.category);
     setEditForm({
       product_title: p.product_title,
       brand: p.brand ?? "",
-      category: p.category ?? "",
+      category: parts.category,
+      subCategory: parts.subCategory,
       cost_price: String(p.cost_price ?? ""),
       selling_price: String(p.selling_price),
       allow_returns: p.allow_returns !== 0,
     });
+    setEditGenderSuffix(extractGenderSuffix(p.category));
     setEditError(null);
     setEditSuccess(null);
   }
@@ -528,11 +839,32 @@ export default function ManageProductsPage() {
     );
   });
 
+  const totalUnitsInStock = products.reduce((sum, p) => sum + p.qty, 0);
+  const distinctCategoryCount = new Set(products.map((p) => splitCategory(p.category).category).filter(Boolean)).size;
+  const editSelectedCategory = categories.find((c) => c.name === editForm.category);
+
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Fixed top section — never scrolls */}
       <div className="flex-shrink-0">
-        <PageHeader title="Manage products" subtitle="Click any product to manage it." />
+        <PageHeader
+          title="Manage products"
+          subtitle="Click any product to manage it."
+          action={
+            <Button onClick={() => setShowManageCategoriesModal(true)} className="inline-flex items-center gap-1.5">
+              <Settings size={14} />
+              Manage categories
+            </Button>
+          }
+        />
+
+        {!loading && products.length > 0 && (
+          <div className="grid grid-cols-3 gap-3 mb-4">
+            <StatCard label="Products" value={products.length.toLocaleString()} />
+            <StatCard label="Units in stock" value={totalUnitsInStock.toLocaleString()} />
+            <StatCard label="Categories" value={distinctCategoryCount.toLocaleString()} />
+          </div>
+        )}
 
         {error && <ErrorText>{error}</ErrorText>}
 
@@ -948,9 +1280,27 @@ export default function ManageProductsPage() {
                                             <Label>Category</Label>
                                             <Dropdown
                                               value={editForm.category}
-                                              onChange={(v) => setEditForm((f) => ({ ...f, category: v }))}
+                                              onChange={(v) => setEditForm((f) => ({ ...f, category: v, subCategory: "" }))}
                                               placeholder="— Select —"
-                                              options={mainCategories.map((c) => ({ value: c, label: c }))}
+                                              searchable
+                                              onCreateNew={() => setShowNewCategoryModal(true)}
+                                              createNewLabel="New category"
+                                              options={categories.map((c) => ({ value: c.name, label: c.name }))}
+                                            />
+                                          </FormGroup>
+                                          <FormGroup>
+                                            <Label>Sub-category</Label>
+                                            <Dropdown
+                                              value={editForm.subCategory}
+                                              onChange={(v) => setEditForm((f) => ({ ...f, subCategory: v }))}
+                                              placeholder={editForm.category ? "— Select —" : "Pick a category first"}
+                                              disabled={!editForm.category}
+                                              searchable
+                                              onCreateNew={
+                                                editSelectedCategory ? () => setShowNewSubCategoryModal(true) : undefined
+                                              }
+                                              createNewLabel="New sub-category"
+                                              options={(editSelectedCategory?.sub_categories ?? []).map((s) => ({ value: s.name, label: s.name }))}
                                             />
                                           </FormGroup>
                                           <FormGroup>
@@ -1052,6 +1402,44 @@ export default function ManageProductsPage() {
             setRestockSupplierId(String(supplier.id));
             setShowNewSupplierModal(false);
           }}
+        />
+      )}
+
+      {showNewCategoryModal && (
+        <NewCategoryModal
+          onClose={() => setShowNewCategoryModal(false)}
+          onCreated={(category) => {
+            setCategories((prev) => [...prev, category].sort((a, b) => a.name.localeCompare(b.name)));
+            setEditForm((f) => ({ ...f, category: category.name, subCategory: "" }));
+            setShowNewCategoryModal(false);
+          }}
+        />
+      )}
+
+      {showNewSubCategoryModal && editSelectedCategory && (
+        <NewSubCategoryModal
+          categoryId={editSelectedCategory.id}
+          categoryName={editSelectedCategory.name}
+          onClose={() => setShowNewSubCategoryModal(false)}
+          onCreated={(sub) => {
+            setCategories((prev) =>
+              prev.map((c) =>
+                c.id === sub.category_id
+                  ? { ...c, sub_categories: [...c.sub_categories, sub].sort((a, b) => a.name.localeCompare(b.name)) }
+                  : c
+              )
+            );
+            setEditForm((f) => ({ ...f, subCategory: sub.name }));
+            setShowNewSubCategoryModal(false);
+          }}
+        />
+      )}
+
+      {showManageCategoriesModal && (
+        <ManageCategoriesModal
+          categories={categories}
+          onClose={() => setShowManageCategoriesModal(false)}
+          onReload={load}
         />
       )}
     </div>

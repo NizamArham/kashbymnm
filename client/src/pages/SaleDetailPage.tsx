@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Receipt, Printer } from "lucide-react";
+import { ArrowLeft, Receipt, Printer, FileText, MessageCircle } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Sale } from "../lib/types";
+import { downloadA4Pdf, downloadThermalPdf, sendWhatsAppBill, groupSaleItemsForDisplay } from "../lib/receipts";
 import { PageHeader, Card, Table, Th, Td, ErrorText, Badge, RefLink, Button } from "../components/ui";
-import ReceiptOptionsModal from "../components/ReceiptOptionsModal";
+import ReceiptOptionsModal, { ModalOption } from "../components/ReceiptOptionsModal";
 
 export default function SaleDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -14,6 +15,41 @@ export default function SaleDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showReceiptOptions, setShowReceiptOptions] = useState(false);
+  const [receiptError, setReceiptError] = useState<string | null>(null);
+
+  function receiptOptionsFor(sale: Sale): ModalOption[] {
+    return [
+      {
+        key: "a4",
+        icon: <FileText size={17} className="text-gray-700" />,
+        title: "A4 Invoice (PDF)",
+        subtitle: "Full-page printable invoice",
+        onClick: () => downloadA4Pdf(sale),
+      },
+      {
+        key: "thermal",
+        icon: <Receipt size={17} className="text-gray-700" />,
+        title: "80mm Receipt (PDF)",
+        subtitle: "For thermal till printers",
+        onClick: () => downloadThermalPdf(sale),
+      },
+      {
+        key: "whatsapp",
+        icon: <MessageCircle size={17} className="text-green-600" />,
+        iconBgClass: "bg-green-50",
+        title: "Send via WhatsApp",
+        subtitle: "Text summary to customer's phone",
+        onClick: () => {
+          if (!sale.customer_phone) {
+            setReceiptError("This customer has no saved phone number — add one on the Customers page first.");
+            return;
+          }
+          setReceiptError(null);
+          sendWhatsAppBill(sale, sale.customer_phone);
+        },
+      },
+    ];
+  }
 
   useEffect(() => {
     if (!id) return;
@@ -56,14 +92,29 @@ export default function SaleDetailPage() {
               sale.is_voided ? " · Voided" : ""
             }`}
             action={
-              <Button variant="primary" onClick={() => setShowReceiptOptions(true)} className="inline-flex items-center gap-1.5">
+              <Button
+                variant="primary"
+                onClick={() => {
+                  setReceiptError(null);
+                  setShowReceiptOptions(true);
+                }}
+                className="inline-flex items-center gap-1.5"
+              >
                 <Printer size={14} />
                 Get Receipt
               </Button>
             }
           />
 
-          {showReceiptOptions && <ReceiptOptionsModal sale={sale} onClose={() => setShowReceiptOptions(false)} />}
+          {showReceiptOptions && (
+            <ReceiptOptionsModal
+              heading="Get receipt"
+              subtitle={sale.invoice}
+              options={receiptOptionsFor(sale)}
+              error={receiptError}
+              onClose={() => setShowReceiptOptions(false)}
+            />
+          )}
 
           <Card className="mb-4">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
@@ -108,8 +159,8 @@ export default function SaleDetailPage() {
                 </tr>
               </thead>
               <tbody>
-                {sale.items?.map((item) => (
-                  <tr key={item.id} className={item.is_returned ? "opacity-60" : ""}>
+                {groupSaleItemsForDisplay(sale.items ?? []).map((item) => (
+                  <tr key={item.ids.join(",")} className={item.is_returned ? "opacity-60" : ""}>
                     <Td className={item.is_returned ? "line-through" : ""}>{item.sku}</Td>
                     <Td className={item.is_returned ? "line-through" : ""}>
                       {item.product_id ? (

@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { ArrowLeft, CheckCircle2, Download } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { CourierReconciliationOrder, CourierSettlement } from "../lib/types";
-import { downloadTabularReport, rangeLabelFor } from "../lib/reportPdf";
+import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
 import { Card, Button, DateRangePicker, ErrorText, HelpHint, PageHeader, Table, Td, Th, RefLink } from "../components/ui";
 
 type Summary = { courier_partner: string; cod_collected: number; courier_charges: number; expected_net: number; delivered_orders: number };
@@ -91,10 +91,16 @@ export default function CourierOrderHistoryPage() {
     const ordersForPartner = filteredOrders.filter((order) => order.courier_partner === courierPartner);
     const balance = balances.find((item) => item.courier_partner === courierPartner);
 
+    const rangeLabel = rangeLabelFor(orderDateStart, orderDateEnd);
     downloadTabularReport({
       headerLabel: `M&M Clothing — ${partnerLabel} Settlement Report`,
-      title: `Courier Orders — ${partnerLabel}`,
-      rangeLabel: rangeLabelFor(orderDateStart, orderDateEnd),
+      headerFields: [
+        { label: "Report", value: `Courier Settlement — ${partnerLabel}` },
+        { label: "Courier", value: partnerLabel },
+        { label: "Period", value: rangeLabel },
+        { label: "Generated", value: todayLongDate() },
+      ],
+      rangeLabel,
       columns: [
         { label: "Date", width: 65 },
         { label: "Order", width: 150 },
@@ -119,10 +125,14 @@ export default function CourierOrderHistoryPage() {
           styles: notDelivered ? [undefined, undefined, undefined, { color: 150, strikethrough: true }, undefined, undefined] : undefined,
         };
       }),
-      summaryLines: balance
-        ? [{ text: `${balance.balance >= 0 ? "Balance due" : "Credit"} ${money(Math.abs(balance.balance))}  (expected net owed: ${money(balance.expected_net)})`, bold: true }]
+      totalSummary: balance
+        ? {
+            label: balance.balance >= 0 ? "Balance due" : "Credit",
+            amount: money(Math.abs(balance.balance)),
+            note: `expected net owed: ${money(balance.expected_net)}`,
+          }
         : undefined,
-      filename: `courier-settlement-${courierPartner.toLowerCase()}-${orderDateStart || "all"}-to-${orderDateEnd || "now"}.pdf`,
+      filename: buildReportFilename(`${partnerLabel} Settlement`, `${orderDateStart || "all"}-to-${orderDateEnd || "now"}`),
     });
   }
 

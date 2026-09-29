@@ -8,7 +8,6 @@ import {
   RotateCcw,
   Truck,
   Landmark,
-  Search,
   Plus,
   Settings,
   ChevronDown,
@@ -25,6 +24,7 @@ import {
   Banknote,
   PackageCheck,
   Send,
+  LayoutGrid,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "../context/AuthContext";
@@ -83,7 +83,7 @@ export default function AppShell() {
       icon: Package,
       path: "/inventory",
       subItems: [
-        { id: "view-inventory", label: "View Inventory", path: "/inventory", icon: Search },
+        { id: "stocks", label: "Stocks", path: "/inventory", icon: LayoutGrid },
         { id: "manage-products", label: "Manage Products", path: "/products", icon: Settings, adminOnly: true },
         { id: "add-product", label: "Add Product", path: "/products/add", icon: Plus, adminOnly: true },
       ],

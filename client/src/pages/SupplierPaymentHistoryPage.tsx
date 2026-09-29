@@ -3,7 +3,7 @@ import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { ArrowLeft, Receipt, Download, CreditCard } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Supplier, BusinessInfo, ChequeInfo } from "../lib/types";
-import { downloadTabularReport, rangeLabelFor } from "../lib/reportPdf";
+import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
 import { PageHeader, Card, Table, Th, Td, EmptyState, ErrorText, DateRangePicker, Button } from "../components/ui";
 import ChequePreviewModal from "../components/ChequePreviewModal";
 
@@ -136,15 +136,15 @@ export default function SupplierPaymentHistoryPage() {
   function downloadPdf() {
     if (!supplier) return;
     downloadTabularReport({
-      headerLabel: "M&M Clothing — Payment History Statement",
-      headerRight: supplier.name,
-      title: "Payment History",
-      subjectLines: [
-        `for Supplier: ${supplier.name}`,
+      headerLabel: "M&M Clothing — Supplier Statement",
+      headerFields: [
+        { label: "Report", value: "Supplier Statement" },
         // Deliberately no phone number here — a supplier statement is
         // something that leaves the building, and their number isn't
         // something to print on a document that could end up anywhere.
-        `${supplier.supplier_code}${supplier.city ? ` · ${supplier.city}` : ""}`,
+        { label: "Supplier", value: `${supplier.name} (${supplier.supplier_code})${supplier.city ? ` · ${supplier.city}` : ""}` },
+        { label: "Period", value: rangeLabelFor(startDate, endDate) },
+        { label: "Generated", value: todayLongDate() },
       ],
       rangeLabel: rangeLabelFor(startDate, endDate),
       columns: [
@@ -166,7 +166,7 @@ export default function SupplierPaymentHistoryPage() {
         };
       }),
       summaryLines: [{ text: `Current balance owed: Rs. ${finalBalance.toLocaleString()}`, bold: true }],
-      filename: `payment-history-${supplier.supplier_code}-${toISODate(new Date())}.pdf`,
+      filename: buildReportFilename("Supplier Statement", `${supplier.supplier_code}-${toISODate(new Date())}`),
     });
   }
 

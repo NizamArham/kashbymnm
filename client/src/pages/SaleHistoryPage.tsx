@@ -1,10 +1,11 @@
 import { useEffect, useState, Fragment, useMemo, MouseEvent, useRef, ReactNode } from "react";
-import { ChevronDown, ChevronRight, Receipt, Printer, MoreVertical, Wallet, Download } from "lucide-react";
+import { ChevronDown, ChevronRight, Receipt, Printer, MoreVertical, Wallet, Download, FileText, MessageCircle } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Sale } from "../lib/types";
-import { downloadTabularReport, rangeLabelFor } from "../lib/reportPdf";
+import { downloadTabularReport, rangeLabelFor, buildReportFilename, formatLongDate, todayLongDate } from "../lib/reportPdf";
+import { downloadA4Pdf, downloadThermalPdf, sendWhatsAppBill, groupSaleItemsForDisplay } from "../lib/receipts";
 import { PageHeader, Card, Table, Th, Td, Badge, paymentStatusTone, EmptyState, ErrorText, DateRangePicker, Button, HelpHint, RowCard, RowCardStats, RowCardStat } from "../components/ui";
-import ReceiptOptionsModal from "../components/ReceiptOptionsModal";
+import ReceiptOptionsModal, { ModalOption } from "../components/ReceiptOptionsModal";
 import { useAuth } from "../context/AuthContext";
 
 type HistoryTab = "today" | "week" | "month" | "cash" | "credit_cod" | "voided";
@@ -22,6 +23,70 @@ function toISODate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+function formatShortDate(iso: string): string {
+  return new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+// Full month name for the "Report" field's value ("September", not
+// "Sep") — reads better spelled out than the compact form used in the
+// smaller "Generated ..." line and the filename. (formatLongDate for a
+// full day+month+year comes from reportPdf.ts — shared, not redefined.)
+function formatLongMonthYear(iso: string): string {
+  return new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+}
+
+// The title a standard business report actually has — the period baked
+// right into the heading ("Sales Report — September 2026") instead of
+// a bare "Sales Report" with the date only mentioned in small print
+// below. Whole-month stays just "Month Year" (the exact day cutoff
+// still shows in the smaller "Generated ..." line); a week or a custom
+// range spells out the day span; a single day gets its own full date.
+// This is the VALUE for the header block's "Report" row — "Report" is
+// the label now, so this no longer repeats the word itself (matching
+// how the invoice's own kvRow values never restate their label).
+function reportTitleFor(tab: HistoryTab, startDate: string | null, endDate: string | null): string {
+  if (startDate && endDate) {
+    return startDate === endDate ? `Sales — ${formatLongDate(startDate)}` : `Sales — ${formatShortDate(startDate)} to ${formatLongDate(endDate)}`;
+  }
+  if (tab === "today") return `Sales — ${formatLongDate(toISODate(new Date()))}`;
+  if (tab === "week") {
+    const weekAgo = new Date();
+    weekAgo.setDate(weekAgo.getDate() - 6);
+    return `Sales — ${formatShortDate(toISODate(weekAgo))} to ${formatLongDate(toISODate(new Date()))}`;
+  }
+  if (tab === "month") return `Sales — ${formatLongMonthYear(toISODate(new Date()))}`;
+  const label = TABS.find((t) => t.value === tab)?.label ?? "Sales";
+  return label;
+}
+
+// "This Month" on its own doesn't say what it actually covers — this
+// spells it out (e.g. "This Month (1–27 Sep 2026)") so the PDF is
+// self-explanatory without having to know this page's own tab logic.
+function formatPresetRange(startIso: string, endIso: string, presetLabel: string): string {
+  if (startIso === endIso) return `${presetLabel} (${formatShortDate(startIso)})`;
+  const start = new Date(startIso + "T00:00:00");
+  const end = new Date(endIso + "T00:00:00");
+  const sameMonth = start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear();
+  const startPart = sameMonth ? String(start.getDate()) : formatShortDate(startIso);
+  return `${presetLabel} (${startPart}–${formatShortDate(endIso)})`;
+}
+
+// A short, filename-safe identifier for what's in the download — e.g.
+// "Sep2026" for the whole current month, "28Sep2026" for a single day,
+// "22-28Sep2026" for a week. Deliberately terser than the on-page range
+// text above: a filename needs to stay short and stay unique across
+// repeats, not read like a sentence.
+function formatFilenameTag(iso: string): string {
+  return formatShortDate(iso).replace(/\s+/g, "");
+}
+function filenameRangeTag(startIso: string, endIso: string): string {
+  if (startIso === endIso) return formatFilenameTag(startIso);
+  const start = new Date(startIso + "T00:00:00");
+  const end = new Date(endIso + "T00:00:00");
+  const sameMonth = start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear();
+  return sameMonth ? `${start.getDate()}-${formatFilenameTag(endIso)}` : `${formatFilenameTag(startIso)}-${formatFilenameTag(endIso)}`;
+}
+
 export default function SaleHistoryPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
@@ -31,6 +96,7 @@ export default function SaleHistoryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [receiptSale, setReceiptSale] = useState<Sale | null>(null);
+  const [receiptError, setReceiptError] = useState<string | null>(null);
   const [voidingId, setVoidingId] = useState<number | null>(null);
   const [openMenuId, setOpenMenuId] = useState<number | null>(null);
   // Two separate refs, not one shared between the desktop row and the
@@ -120,11 +186,42 @@ export default function SaleHistoryPage() {
   // done client-side.
   function downloadSalesPdf() {
     const activeTabLabel = TABS.find((t) => t.value === activeTab)?.label ?? "Sales";
-    const rangeLabel = startDate && endDate ? rangeLabelFor(startDate, endDate) : activeTabLabel;
+    let rangeLabel: string;
+    // Short and filename-safe — deliberately separate from rangeLabel
+    // above, which is free to be as descriptive as the page needs.
+    let filenameTag: string;
+    if (startDate && endDate) {
+      rangeLabel = rangeLabelFor(startDate, endDate);
+      filenameTag = filenameRangeTag(startDate, endDate);
+    } else if (activeTab === "today") {
+      const today = toISODate(new Date());
+      rangeLabel = formatPresetRange(today, today, activeTabLabel);
+      filenameTag = filenameRangeTag(today, today);
+    } else if (activeTab === "week") {
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 6);
+      rangeLabel = formatPresetRange(toISODate(weekAgo), toISODate(new Date()), activeTabLabel);
+      filenameTag = filenameRangeTag(toISODate(weekAgo), toISODate(new Date()));
+    } else if (activeTab === "month") {
+      const now = new Date();
+      const monthStart = toISODate(new Date(now.getFullYear(), now.getMonth(), 1));
+      rangeLabel = formatPresetRange(monthStart, toISODate(now), activeTabLabel);
+      // The common case — a whole month's report — gets the plain
+      // "Sep2026" tag rather than a day-range, since that's what it
+      // actually is once you're downloading the current month's sales.
+      filenameTag = now.toLocaleDateString("en-GB", { month: "short", year: "numeric" }).replace(/\s+/g, "");
+    } else {
+      rangeLabel = activeTabLabel;
+      filenameTag = activeTabLabel.replace(/[^\w]+/g, "");
+    }
 
     downloadTabularReport({
-      headerLabel: "M&M Clothing — Sale History Report",
-      title: "Sale History",
+      headerLabel: "M&M Clothing — Sales Report",
+      headerFields: [
+        { label: "Report", value: reportTitleFor(activeTab, startDate, endDate) },
+        { label: "Period", value: rangeLabel },
+        { label: "Generated", value: todayLongDate() },
+      ],
       rangeLabel,
       orientation: "landscape",
       columns: [
@@ -150,8 +247,12 @@ export default function SaleHistoryPage() {
         ],
         styles: sale.is_voided ? [{ color: 150 }, { color: 150 }, { color: 150 }, { color: 150 }, { color: 150 }, { color: 150 }, { color: 150 }, { color: 150 }] : undefined,
       })),
-      summaryLines: [{ text: `Total for this view: Rs. ${periodTotal.toLocaleString()} (${filteredSales.length} sale${filteredSales.length !== 1 ? "s" : ""})`, bold: true }],
-      filename: `sale-history-${rangeLabel.replace(/[^\w-]+/g, "-").toLowerCase()}.pdf`,
+      totalSummary: {
+        label: "Total for this view",
+        amount: `Rs. ${periodTotal.toLocaleString()}`,
+        note: `${filteredSales.length} sale${filteredSales.length !== 1 ? "s" : ""}`,
+      },
+      filename: buildReportFilename("Sales Report", rangeLabel),
     });
   }
 
@@ -165,8 +266,43 @@ export default function SaleHistoryPage() {
 
   async function openReceipt(sale: Sale) {
     setOpenMenuId(null);
+    setReceiptError(null);
     const full = expanded?.id === sale.id ? expanded : await api.get<Sale>(`/sales/${sale.id}`);
     setReceiptSale(full);
+  }
+
+  function receiptOptionsFor(sale: Sale): ModalOption[] {
+    return [
+      {
+        key: "a4",
+        icon: <FileText size={17} className="text-gray-700" />,
+        title: "A4 Invoice (PDF)",
+        subtitle: "Full-page printable invoice",
+        onClick: () => downloadA4Pdf(sale),
+      },
+      {
+        key: "thermal",
+        icon: <Receipt size={17} className="text-gray-700" />,
+        title: "80mm Receipt (PDF)",
+        subtitle: "For thermal till printers",
+        onClick: () => downloadThermalPdf(sale),
+      },
+      {
+        key: "whatsapp",
+        icon: <MessageCircle size={17} className="text-green-600" />,
+        iconBgClass: "bg-green-50",
+        title: "Send via WhatsApp",
+        subtitle: "Text summary to customer's phone",
+        onClick: () => {
+          if (!sale.customer_phone) {
+            setReceiptError("This customer has no saved phone number — add one on the Customers page first.");
+            return;
+          }
+          setReceiptError(null);
+          sendWhatsAppBill(sale, sale.customer_phone);
+        },
+      },
+    ];
   }
 
   async function handleVoid(sale: Sale) {
@@ -237,12 +373,14 @@ export default function SaleHistoryPage() {
               <Th>SKU</Th>
               <Th>Product</Th>
               <Th>Size/Color</Th>
+              <Th>Qty</Th>
               <Th>Price</Th>
+              <Th>Total</Th>
             </tr>
           </thead>
           <tbody>
-            {sale.items?.map((item) => (
-              <tr key={item.id} className={item.is_returned ? "opacity-60" : ""}>
+            {groupSaleItemsForDisplay(sale.items ?? []).map((item) => (
+              <tr key={item.ids.join(",")} className={item.is_returned ? "opacity-60" : ""}>
                 <Td className={item.is_returned ? "line-through" : ""}>{item.sku}</Td>
                 <Td className={item.is_returned ? "line-through" : ""}>
                   {item.product_title}
@@ -255,7 +393,9 @@ export default function SaleHistoryPage() {
                 <Td className={item.is_returned ? "line-through" : ""}>
                   {item.size ?? "—"} / {item.color ?? "—"}
                 </Td>
+                <Td className={item.is_returned ? "line-through" : ""}>{item.quantity}</Td>
                 <Td className={item.is_returned ? "line-through" : ""}>Rs. {item.unit_price.toLocaleString()}</Td>
+                <Td className={item.is_returned ? "line-through" : ""}>Rs. {item.line_total.toLocaleString()}</Td>
               </tr>
             ))}
           </tbody>
@@ -542,7 +682,15 @@ export default function SaleHistoryPage() {
         </>
       )}
 
-      {receiptSale && <ReceiptOptionsModal sale={receiptSale} onClose={() => setReceiptSale(null)} />}
+      {receiptSale && (
+        <ReceiptOptionsModal
+          heading="Get receipt"
+          subtitle={receiptSale.invoice}
+          options={receiptOptionsFor(receiptSale)}
+          error={receiptError}
+          onClose={() => setReceiptSale(null)}
+        />
+      )}
 
       {codConfirmSale && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">

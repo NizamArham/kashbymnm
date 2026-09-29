@@ -3,7 +3,7 @@ import { RotateCcw, AlertTriangle, ChevronDown, ChevronRight, Download } from "l
 import { api, ApiRequestError } from "../lib/api";
 import { Sale, ReturnRequest } from "../lib/types";
 import { useAuth } from "../context/AuthContext";
-import { downloadTabularReport, rangeLabelFor } from "../lib/reportPdf";
+import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
 import {
   PageHeader,
   Card,
@@ -790,10 +790,15 @@ function AllReturnsTab({ isAdmin }: { isAdmin: boolean }) {
   }
 
   function downloadReturnsPdf() {
+    const rangeLabel = rangeLabelFor(startDate, endDate);
     downloadTabularReport({
       headerLabel: "M&M Clothing — Returns Report",
-      title: "Returns",
-      rangeLabel: rangeLabelFor(startDate, endDate),
+      headerFields: [
+        { label: "Report", value: "Returns" },
+        { label: "Period", value: rangeLabel },
+        { label: "Generated", value: todayLongDate() },
+      ],
+      rangeLabel,
       columns: [
         { label: "Date", width: 70 },
         { label: "Customer", width: 105 },
@@ -811,8 +816,8 @@ function AllReturnsTab({ isAdmin }: { isAdmin: boolean }) {
         ],
         detail: `Reason: ${r.reason}`,
       })),
-      summaryLines: [{ text: `${filtered.length} request${filtered.length !== 1 ? "s" : ""} in this view`, bold: true }],
-      filename: `returns-${startDate || "all"}-to-${endDate || "now"}.pdf`,
+      totalSummary: { label: "Requests in this view", amount: `${filtered.length}` },
+      filename: buildReportFilename("Returns", `${startDate || "all"}-to-${endDate || "now"}`),
     });
   }
 

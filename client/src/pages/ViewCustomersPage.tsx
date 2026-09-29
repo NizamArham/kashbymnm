@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, Fragment, useRef } from "react";
 import { Users, Search, MessageCircle, Pencil, Plus, Star, X, ChevronDown, ChevronRight, Wallet, UserX, UserCheck, Trash2, AlertTriangle, ArrowLeft, Building2, FileText, MoreHorizontal, ShoppingBag, Receipt } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
-import { Customer, CustomerAddress, BankAccount } from "../lib/types";
+import { Customer, CustomerAddress, BankAccount, CustomerGender } from "../lib/types";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { PageHeader, Card, Table, Th, Td, Input, Button, EmptyState, ErrorText, SuccessText, Label, FormGroup, Dropdown, DatePicker, HelpHint, TabToggle } from "../components/ui";
@@ -131,7 +131,12 @@ export default function ViewCustomersPage() {
   const [query, setQuery] = useState("");
 
   const [isEditing, setIsEditing] = useState(false);
-  const [editForm, setEditForm] = useState({ name: "", phone: "", phone2: "" });
+  const [editForm, setEditForm] = useState<{ name: string; phone: string; phone2: string; gender: CustomerGender }>({
+    name: "",
+    phone: "",
+    phone2: "",
+    gender: "unspecified",
+  });
   const [editError, setEditError] = useState<string | null>(null);
   const [editSuccess, setEditSuccess] = useState<string | null>(null);
 
@@ -259,7 +264,7 @@ export default function ViewCustomersPage() {
     setEditSuccess(null);
     const full = await api.get<Customer>(`/customers/${c.id}`);
     setExpandedDetail(full);
-    setEditForm({ name: full.name, phone: full.phone ?? "", phone2: full.phone2 ?? "" });
+    setEditForm({ name: full.name, phone: full.phone ?? "", phone2: full.phone2 ?? "", gender: full.gender });
     if (full.store_credit_balance > 0) {
       const breakdown = await api.get<{ amount: number; reason: string; expires_at: string | null }[]>(
         `/customers/${c.id}/credit-breakdown`
@@ -421,7 +426,12 @@ export default function ViewCustomersPage() {
   function cancelEdit() {
     if (!expandedDetail) return;
     setIsEditing(false);
-    setEditForm({ name: expandedDetail.name, phone: expandedDetail.phone ?? "", phone2: expandedDetail.phone2 ?? "" });
+    setEditForm({
+      name: expandedDetail.name,
+      phone: expandedDetail.phone ?? "",
+      phone2: expandedDetail.phone2 ?? "",
+      gender: expandedDetail.gender,
+    });
     setEditError(null);
   }
 
@@ -541,6 +551,7 @@ export default function ViewCustomersPage() {
         name: editForm.name.trim(),
         phone: editForm.phone.trim() || undefined,
         phone2: editForm.phone2.trim() || undefined,
+        gender: editForm.gender,
       });
       setEditSuccess("Saved.");
       setIsEditing(false);
@@ -1020,6 +1031,18 @@ export default function ViewCustomersPage() {
                                         <Label>Phone 2</Label>
                                         <Input value={editForm.phone2} onChange={(e) => setEditForm((f) => ({ ...f, phone2: e.target.value }))} />
                                       </FormGroup>
+                                      <FormGroup>
+                                        <Label>Gender</Label>
+                                        <Dropdown
+                                          value={editForm.gender}
+                                          onChange={(v) => setEditForm((f) => ({ ...f, gender: v as CustomerGender }))}
+                                          options={[
+                                            { value: "unspecified", label: "Unspecified" },
+                                            { value: "male", label: "Male" },
+                                            { value: "female", label: "Female" },
+                                          ]}
+                                        />
+                                      </FormGroup>
                                     </div>
                                     {editError && <ErrorText>{editError}</ErrorText>}
                                     {editSuccess && <SuccessText>{editSuccess}</SuccessText>}
@@ -1045,6 +1068,10 @@ export default function ViewCustomersPage() {
                                     <div>
                                       <p className="text-xs text-gray-400">Phone 2</p>
                                       <p className="text-gray-900">{expandedDetail.phone2 ?? "—"}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-xs text-gray-400">Gender</p>
+                                      <p className="text-gray-900 capitalize">{expandedDetail.gender}</p>
                                     </div>
                                   </div>
                                 )}

@@ -2,7 +2,7 @@ import { useEffect, useState, FormEvent, Fragment } from "react";
 import { Landmark, Pencil, X, ArrowLeftRight, Plus, TrendingUp, TrendingDown, Wallet, Building2, ArrowUpRight, ArrowDownLeft, ChevronDown, ChevronRight, Download } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { CashBookEntry } from "../lib/types";
-import { downloadTabularReport, rangeLabelFor } from "../lib/reportPdf";
+import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
 import { PageHeader, Card, Input, Select, Label, FormGroup, ErrorText, SuccessText, Button, Table, Th, Td, EmptyState, Dropdown, DateRangePicker, HelpHint, RefLink } from "../components/ui";
 
 const PAYMENT_METHOD_OPTIONS = [
@@ -184,7 +184,11 @@ export default function CashBookPage() {
 
       downloadTabularReport({
         headerLabel: "M&M Clothing — Cash Book Report",
-        title: "Cash Book",
+        headerFields: [
+          { label: "Report", value: "Cash Book" },
+          { label: "Period", value: rangeLabel },
+          { label: "Generated", value: todayLongDate() },
+        ],
         rangeLabel,
         columns: [
           { label: "Date", width: 95 },
@@ -203,11 +207,14 @@ export default function CashBookPage() {
           ],
           styles: [undefined, undefined, undefined, { color: entry.type === "income" ? ([21, 128, 61] as [number, number, number]) : ([220, 38, 38] as [number, number, number]) }, undefined],
         })),
-        summaryLines: [
-          ...(truncated ? [{ text: `Showing the latest ${result.rows.length} of ${result.total} entries — narrow the date range for a complete report.` }] : []),
-          { text: `Closing balance for this range: Rs. ${(result.rows[0]?.running_balance ?? 0).toLocaleString()}`, bold: true },
-        ],
-        filename: `cash-book-${dateStart || "all"}-to-${dateEnd || "now"}.pdf`,
+        summaryLines: truncated
+          ? [{ text: `Showing the latest ${result.rows.length} of ${result.total} entries — narrow the date range for a complete report.` }]
+          : undefined,
+        totalSummary: {
+          label: "Closing balance for this range",
+          amount: `Rs. ${(result.rows[0]?.running_balance ?? 0).toLocaleString()}`,
+        },
+        filename: buildReportFilename("Cash Book", `${dateStart || "all"}-to-${dateEnd || "now"}`),
       });
     } catch (err) {
       setDownloadError(err instanceof ApiRequestError ? err.message : "Failed to generate report");

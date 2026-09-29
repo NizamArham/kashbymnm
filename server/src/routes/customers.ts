@@ -16,6 +16,7 @@ const customerInput = z.object({
   phone: z.string().optional(),
   phone2: z.string().optional(),
   bonus_points: z.number().int().nonnegative().optional(),
+  gender: z.enum(["male", "female", "unspecified"]).default("unspecified"),
 });
 
 const addressInput = z.object({
@@ -164,11 +165,13 @@ customersRouter.post(
   "/",
   asyncHandler(async (req, res) => {
     const data = customerInput.parse(req.body);
-    const customer_code = nextCustomerCode();
+    const customer_code = nextCustomerCode(data.gender);
 
     const result = db
-      .prepare(`INSERT INTO customers (customer_code, name, phone, phone2, bonus_points) VALUES (?, ?, ?, ?, ?)`)
-      .run(customer_code, data.name, data.phone ?? null, data.phone2 ?? null, data.bonus_points ?? 0);
+      .prepare(
+        `INSERT INTO customers (customer_code, name, phone, phone2, bonus_points, gender) VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .run(customer_code, data.name, data.phone ?? null, data.phone2 ?? null, data.bonus_points ?? 0, data.gender);
 
     const created = db.prepare(`SELECT * FROM customers WHERE id = ?`).get(result.lastInsertRowid);
     res.status(201).json(created);
@@ -184,10 +187,14 @@ customersRouter.put(
     if (!existing) throw new ApiError(404, "Customer not found");
 
     const merged = { ...existing, ...data };
-    db.prepare(`UPDATE customers SET name = ?, phone = ?, phone2 = ? WHERE id = ?`).run(
+    // Correcting gender here only affects new filtering/segmentation —
+    // it never regenerates customer_code, same as an invoice's category
+    // is fixed forever once issued (see nextInvoiceCode).
+    db.prepare(`UPDATE customers SET name = ?, phone = ?, phone2 = ?, gender = ? WHERE id = ?`).run(
       merged.name,
       merged.phone,
       merged.phone2,
+      merged.gender,
       req.params.id
     );
 

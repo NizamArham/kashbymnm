@@ -114,6 +114,80 @@ export function groupByProduct<T extends SortableUnit & { product_id: number; pr
   return groups;
 }
 
+export interface VariantSummary {
+  color: string;
+  size: string;
+  count: number;
+  skuSample: string;
+  barcodeRange: string;
+  status: string;
+  // The supplier that actually delivered this batch, shown ONLY when
+  // every unit in this variant/status group traces back to the same
+  // known supplier — never a guess from the product's general
+  // supplier_id, since that can be wrong once a product's been
+  // restocked from more than one source.
+  batchSupplierCode: string | null;
+}
+
+/**
+ * Groups a product's units into one row per color+size+status, with a
+ * start–end barcode range (barcodes are generated sequentially per batch)
+ * and a sample SKU. This is the shared shape behind every "expand a
+ * product row to see its variants" view in the app (Inventory, Browse
+ * Categories) — kept in one place so that view looks and reads the same
+ * everywhere a person expands a row, rather than drifting per page.
+ */
+export function summarizeProductVariants<
+  T extends SortableUnit & { sku: string; barcode?: string | null; status: string; batch_supplier_code?: string | null }
+>(productUnits: T[]): VariantSummary[] {
+  const map = new Map<string, T[]>();
+  for (const u of productUnits) {
+    // Units of different status are kept separate even within the same
+    // color+size, so an "available" row is never merged with a "damaged"
+    // one under one misleading count.
+    const key = `${u.color ?? ""}|${u.size ?? ""}|${u.status}`;
+    const list = map.get(key) ?? [];
+    list.push(u);
+    map.set(key, list);
+  }
+
+  const summaries: VariantSummary[] = [];
+  for (const list of map.values()) {
+    const sorted = [...list].sort((a, b) => (a.barcode ?? "").localeCompare(b.barcode ?? ""));
+    const barcodes = sorted.map((u) => u.barcode).filter((b): b is string => !!b);
+
+    let barcodeRange = "—";
+    if (barcodes.length === 1) {
+      barcodeRange = barcodes[0];
+    } else if (barcodes.length > 1) {
+      barcodeRange = `${barcodes[0]} – ${barcodes[barcodes.length - 1]}`;
+    }
+
+    const supplierCodes = new Set(sorted.map((u) => u.batch_supplier_code ?? null));
+    const batchSupplierCode = supplierCodes.size === 1 ? [...supplierCodes][0] ?? null : null;
+
+    summaries.push({
+      color: sorted[0].color ?? "—",
+      size: sorted[0].size ?? "—",
+      count: sorted.length,
+      skuSample: sorted[0].sku,
+      barcodeRange,
+      status: sorted[0].status,
+      batchSupplierCode,
+    });
+  }
+
+  // Size is the primary axis (small → large); color is the tiebreaker
+  // within each size, so all "M" rows cluster together regardless of
+  // color, in alphabetical color order. Matches how you'd physically
+  // scan a rack: one size at a time, all its colors together.
+  return summaries.sort((a, b) => {
+    const sizeCompare = compareSizes(a.size, b.size);
+    if (sizeCompare !== 0) return sizeCompare;
+    return a.color.localeCompare(b.color);
+  });
+}
+
 export interface ProductGroup<T> {
   product_id: number;
   product_title: string;

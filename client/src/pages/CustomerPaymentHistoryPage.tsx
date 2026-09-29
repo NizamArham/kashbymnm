@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Receipt, Download } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Customer } from "../lib/types";
-import { downloadTabularReport, rangeLabelFor } from "../lib/reportPdf";
+import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
 import { PageHeader, Card, Table, Th, Td, EmptyState, ErrorText, DateRangePicker, Button, RefLink } from "../components/ui";
 
 interface LedgerEntry {
@@ -88,12 +88,12 @@ export default function CustomerPaymentHistoryPage() {
   function downloadPdf() {
     if (!customer) return;
     downloadTabularReport({
-      headerLabel: "M&M Clothing — Payment History Statement",
-      headerRight: customer.name,
-      title: "Payment History",
-      subjectLines: [
-        `for Customer: ${customer.name}`,
-        `${customer.customer_code}${customer.phone ? ` · ${customer.phone}` : ""}`,
+      headerLabel: "M&M Clothing — Customer Statement",
+      headerFields: [
+        { label: "Report", value: "Customer Statement" },
+        { label: "Customer", value: `${customer.name} (${customer.customer_code})${customer.phone ? ` · ${customer.phone}` : ""}` },
+        { label: "Period", value: rangeLabelFor(startDate, endDate) },
+        { label: "Generated", value: todayLongDate() },
       ],
       rangeLabel: rangeLabelFor(startDate, endDate),
       columns: [
@@ -115,7 +115,7 @@ export default function CustomerPaymentHistoryPage() {
         };
       }),
       summaryLines: [{ text: `Current balance owed: Rs. ${finalBalance.toLocaleString()}`, bold: true }],
-      filename: `payment-history-${customer.customer_code}-${toISODate(new Date())}.pdf`,
+      filename: buildReportFilename("Customer Statement", `${customer.customer_code}-${toISODate(new Date())}`),
     });
   }
 

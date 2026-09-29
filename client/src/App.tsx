@@ -5,7 +5,7 @@ import AppShell from "./components/AppShell";
 
 import LoginPage from "./pages/LoginPage";
 import DashboardPage from "./pages/DashboardPage";
-import InventoryPage from "./pages/InventoryPage";
+import InventoryCategoriesPage from "./pages/InventoryCategoriesPage";
 import AddProductPage from "./pages/AddProductPage";
 import ManageProductsPage from "./pages/ManageProductsPage";
 import AddCustomerPage from "./pages/AddCustomerPage";
@@ -56,7 +56,8 @@ export default function App() {
       >
         <Route path="/" element={<RoleAwareHome />} />
         <Route path="/pos" element={<PosPage />} />
-        <Route path="/inventory" element={<InventoryPage />} />
+        <Route path="/inventory" element={<InventoryCategoriesPage />} />
+        <Route path="/inventory/categories" element={<Navigate to="/inventory" replace />} />
 
         <Route
           path="/products/add"

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Banknote, CheckCircle2, XCircle, Plus, Pencil, Trash2, X, Download } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Supplier } from "../lib/types";
-import { downloadTabularReport } from "../lib/reportPdf";
+import { downloadTabularReport, buildReportFilename, todayLongDate } from "../lib/reportPdf";
 import { PageHeader, Card, Table, Th, Td, Button, EmptyState, ErrorText, Badge, TabToggle, Input, Label, FormGroup, Dropdown, DatePicker, HelpHint } from "../components/ui";
 
 interface ChequeRow {
@@ -287,7 +287,11 @@ export default function ChequesPage() {
       const total = issuedCheques.reduce((sum, c) => sum + c.amount, 0);
       downloadTabularReport({
         headerLabel: "M&M Clothing — Cheque Register",
-        title: "Cheques Written by Me",
+        headerFields: [
+          { label: "Report", value: "Cheques Written by Me" },
+          { label: "Period", value: "All records" },
+          { label: "Generated", value: todayLongDate() },
+        ],
         rangeLabel: "All records",
         columns: [
           { label: "Issued", width: 75 },
@@ -300,14 +304,22 @@ export default function ChequesPage() {
         rows: issuedCheques.map((c) => ({
           cells: [c.date_issued.slice(0, 10), c.cheque_number, c.bank_name, c.cheque_date.slice(0, 10), `Rs. ${c.amount.toLocaleString()}`, c.supplier_name],
         })),
-        summaryLines: [{ text: `Total: Rs. ${total.toLocaleString()} (${issuedCheques.length} cheque${issuedCheques.length !== 1 ? "s" : ""})`, bold: true }],
-        filename: `cheques-issued-${new Date().toISOString().slice(0, 10)}.pdf`,
+        totalSummary: {
+          label: "Total",
+          amount: `Rs. ${total.toLocaleString()}`,
+          note: `${issuedCheques.length} cheque${issuedCheques.length !== 1 ? "s" : ""}`,
+        },
+        filename: buildReportFilename("Cheques Written By Me", new Date().toISOString().slice(0, 10)),
       });
     } else {
       const total = cheques.reduce((sum, c) => sum + c.amount, 0);
       downloadTabularReport({
         headerLabel: "M&M Clothing — Cheque Register",
-        title: `Cheques — ${tabLabel[activeTab]}`,
+        headerFields: [
+          { label: "Report", value: `Cheques — ${tabLabel[activeTab]}` },
+          { label: "Period", value: "All records" },
+          { label: "Generated", value: todayLongDate() },
+        ],
         rangeLabel: "All records",
         columns: [
           { label: "Received", width: 75 },
@@ -320,8 +332,12 @@ export default function ChequesPage() {
         rows: cheques.map((c) => ({
           cells: [c.date_received.slice(0, 10), c.cheque_number, c.bank_name, c.cheque_date.slice(0, 10), `Rs. ${c.amount.toLocaleString()}`, `${c.customer_name} (${c.customer_code})`],
         })),
-        summaryLines: [{ text: `Total: Rs. ${total.toLocaleString()} (${cheques.length} cheque${cheques.length !== 1 ? "s" : ""})`, bold: true }],
-        filename: `cheques-${activeTab}-${new Date().toISOString().slice(0, 10)}.pdf`,
+        totalSummary: {
+          label: "Total",
+          amount: `Rs. ${total.toLocaleString()}`,
+          note: `${cheques.length} cheque${cheques.length !== 1 ? "s" : ""}`,
+        },
+        filename: buildReportFilename(`Cheques ${tabLabel[activeTab]}`, new Date().toISOString().slice(0, 10)),
       });
     }
   }

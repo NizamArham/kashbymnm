@@ -10,6 +10,8 @@ import {
   AlertTriangle,
   Package,
   Phone,
+  MapPin,
+  UserRound,
   Wallet,
   CreditCard,
   Smartphone,
@@ -19,7 +21,8 @@ import {
   Minus,
 } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
-import { InventoryUnit, Customer, SaleType, CustomerAddress, Coupon } from "../lib/types";
+import { InventoryUnit, Customer, SaleType, CustomerAddress, Coupon, CustomerGender } from "../lib/types";
+import { createProductSearchIndex, searchProductUnits } from "../lib/productSearch";
 import { Input, Label, FormGroup, ErrorText, SuccessText, Button, Dropdown, HelpHint, RefLink } from "../components/ui";
 import { CityPicker } from "../components/CityPicker";
 import { useAuth } from "../context/AuthContext";
@@ -97,6 +100,7 @@ export default function PosPage() {
   const [newCustomerName, setNewCustomerName] = useState("");
   const [newCustomerPhone, setNewCustomerPhone] = useState("");
   const [newCustomerPhone2, setNewCustomerPhone2] = useState("");
+  const [newCustomerGender, setNewCustomerGender] = useState<CustomerGender>("unspecified");
   const [newCustomerAddr1, setNewCustomerAddr1] = useState("");
   const [newCustomerAddr2, setNewCustomerAddr2] = useState("");
   const [newCustomerCity, setNewCustomerCity] = useState("");
@@ -346,14 +350,8 @@ export default function PosPage() {
     }
     const units = await ensureUnitsLoaded();
     const alreadyInCart = new Set(cart.flatMap((l) => l.units.map((u) => u.id)));
-    const matches = units.filter(
-      (u) =>
-        !alreadyInCart.has(u.id) &&
-        ((u.product_title ?? "").toLowerCase().includes(trimmed) ||
-          (u.brand ?? "").toLowerCase().includes(trimmed) ||
-          u.sku.toLowerCase().includes(trimmed) ||
-          (u.barcode ?? "").toLowerCase().includes(trimmed))
-    );
+    const availableForSearch = units.filter((u) => !alreadyInCart.has(u.id));
+    const matches = searchProductUnits(createProductSearchIndex(availableForSearch), trimmed);
     setProductResults(matches);
   }
 
@@ -505,6 +503,7 @@ export default function PosPage() {
     setNewCustomerName(looksLikePhone ? "" : trimmedQuery);
     setNewCustomerPhone(looksLikePhone ? trimmedQuery : "");
     setNewCustomerPhone2("");
+    setNewCustomerGender("unspecified");
     setNewCustomerAddr1("");
     setNewCustomerAddr2("");
     setNewCustomerCity("");
@@ -528,6 +527,7 @@ export default function PosPage() {
         name: newCustomerName.trim(),
         phone: newCustomerPhone.trim(),
         phone2: newCustomerPhone2.trim() || undefined,
+        gender: newCustomerGender,
       });
 
       if (newCustomerAddr1.trim() || newCustomerCity.trim()) {
@@ -545,6 +545,7 @@ export default function PosPage() {
       setNewCustomerName("");
       setNewCustomerPhone("");
       setNewCustomerPhone2("");
+      setNewCustomerGender("unspecified");
       setNewCustomerAddr1("");
       setNewCustomerAddr2("");
       setNewCustomerCity("");
@@ -1655,7 +1656,7 @@ export default function PosPage() {
           phone2 (optional), address line 1/2, and city. */}
       {showAddCustomer && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] flex flex-col shadow-2xl">
+          <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] flex flex-col shadow-2xl">
             <div className="p-5 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
               <h3 className="text-base font-semibold text-gray-900">New customer</h3>
               <button onClick={() => setShowAddCustomer(false)} className="text-gray-400 hover:text-gray-600">
@@ -1663,34 +1664,91 @@ export default function PosPage() {
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-5 space-y-3">
-              <FormGroup>
-                <Label>Name</Label>
-                <Input value={newCustomerName} onChange={(e) => setNewCustomerName(e.target.value)} autoFocus />
-              </FormGroup>
-              <div className="grid grid-cols-2 gap-3">
-                <FormGroup>
-                  <Label>Phone</Label>
-                  <Input value={newCustomerPhone} onChange={(e) => setNewCustomerPhone(e.target.value)} placeholder="Required" />
-                </FormGroup>
-                <FormGroup>
-                  <Label>Phone 2 (optional)</Label>
-                  <Input value={newCustomerPhone2} onChange={(e) => setNewCustomerPhone2(e.target.value)} />
-                </FormGroup>
+            <div className="flex-1 overflow-y-auto p-5">
+              <div className="grid grid-cols-1 sm:grid-cols-[1.5fr_1fr] gap-5">
+                <div className="space-y-3">
+                  <FormGroup>
+                    <Label>Name</Label>
+                    <Input value={newCustomerName} onChange={(e) => setNewCustomerName(e.target.value)} autoFocus />
+                  </FormGroup>
+                  <div className="grid grid-cols-2 gap-3">
+                    <FormGroup>
+                      <Label>Phone</Label>
+                      <Input value={newCustomerPhone} onChange={(e) => setNewCustomerPhone(e.target.value)} placeholder="Required" />
+                    </FormGroup>
+                    <FormGroup>
+                      <Label>Phone 2 (optional)</Label>
+                      <Input value={newCustomerPhone2} onChange={(e) => setNewCustomerPhone2(e.target.value)} />
+                    </FormGroup>
+                  </div>
+                  <FormGroup>
+                    <Label>Gender</Label>
+                    <Dropdown
+                      value={newCustomerGender}
+                      onChange={(v) => setNewCustomerGender(v as CustomerGender)}
+                      options={[
+                        { value: "unspecified", label: "Unspecified" },
+                        { value: "male", label: "Male" },
+                        { value: "female", label: "Female" },
+                      ]}
+                    />
+                  </FormGroup>
+                  <FormGroup>
+                    <Label>Address line 1</Label>
+                    <Input value={newCustomerAddr1} onChange={(e) => setNewCustomerAddr1(e.target.value)} />
+                  </FormGroup>
+                  <FormGroup>
+                    <Label>Address line 2</Label>
+                    <Input value={newCustomerAddr2} onChange={(e) => setNewCustomerAddr2(e.target.value)} />
+                  </FormGroup>
+                  {addCustomerError && <ErrorText>{addCustomerError}</ErrorText>}
+                </div>
+
+                <div>
+                  <div className="bg-gray-50 border border-gray-100 rounded-xl p-4 h-fit">
+                    <h4 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                      <UserRound size={16} className="text-gray-600" />
+                      Customer Preview
+                    </h4>
+                    <div className="mb-4 pb-4 border-b border-gray-200">
+                      <p className="text-base font-semibold text-gray-900">{newCustomerName.trim() || "New customer"}</p>
+                      <p className="text-xs text-gray-400 mt-1">Preview updates as you type</p>
+                    </div>
+                    <div className="space-y-3 text-sm">
+                      <div className="flex items-center gap-2">
+                        <Phone size={15} className="text-gray-400" />
+                        <span className="text-gray-700">{newCustomerPhone.trim() || "No primary phone"}</span>
+                      </div>
+                      {newCustomerPhone2.trim() && (
+                        <div className="flex items-center gap-2">
+                          <Phone size={15} className="text-gray-400" />
+                          <span className="text-gray-700">{newCustomerPhone2.trim()}</span>
+                        </div>
+                      )}
+                      <div className="flex items-start gap-2">
+                        <MapPin size={15} className="text-gray-400 mt-0.5" />
+                        <span className="text-gray-700">
+                          {[newCustomerAddr1.trim(), newCustomerAddr2.trim(), newCustomerCity.trim()].filter(Boolean).join(", ") ||
+                            "No address added"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* City sits below the preview card, not in the field list
+                      on the left — it's the last field there, so opening its
+                      ~2,100-option dropdown gets cramped against the modal's
+                      edge. This column stretches to match the taller left
+                      column, so there's already clear room below for that
+                      dropdown to open into without extra spacing. */}
+                  <FormGroup>
+                    <div className="mt-4">
+                      <Label>City</Label>
+                      <CityPicker value={newCustomerCity} onChange={setNewCustomerCity} />
+                    </div>
+                  </FormGroup>
+                </div>
               </div>
-              <FormGroup>
-                <Label>Address line 1</Label>
-                <Input value={newCustomerAddr1} onChange={(e) => setNewCustomerAddr1(e.target.value)} />
-              </FormGroup>
-              <FormGroup>
-                <Label>Address line 2</Label>
-                <Input value={newCustomerAddr2} onChange={(e) => setNewCustomerAddr2(e.target.value)} />
-              </FormGroup>
-              <FormGroup>
-                <Label>City</Label>
-                <CityPicker value={newCustomerCity} onChange={setNewCustomerCity} />
-              </FormGroup>
-              {addCustomerError && <ErrorText>{addCustomerError}</ErrorText>}
             </div>
 
             <div className="p-5 border-t border-gray-100 flex gap-3 flex-shrink-0">

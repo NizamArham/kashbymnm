@@ -105,6 +105,17 @@ export interface CategoryLowStock {
   low_stock: boolean;
 }
 
+export interface SubCategory {
+  id: number;
+  name: string;
+}
+
+export interface Category {
+  id: number;
+  name: string;
+  sub_categories: SubCategory[];
+}
+
 export type InventoryStatus = "available" | "sold" | "damaged" | "gifted" | "stolen" | "lost" | "removed";
 
 export type RemovalReason = "Damaged" | "Gifted" | "Staff Use" | "Stolen" | "Lost" | "Other";
@@ -150,12 +161,15 @@ export interface BankAccount {
   is_default: number;
 }
 
+export type CustomerGender = "male" | "female" | "unspecified";
+
 export interface Customer {
   id: number;
   customer_code: string;
   name: string;
   phone: string | null;
   phone2: string | null;
+  gender: CustomerGender;
   loyalty_points: number;
   balance_due: number;
   store_credit_balance: number;

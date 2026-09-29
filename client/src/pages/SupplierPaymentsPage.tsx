@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { SupplierPayment, SupplierBalance, Supplier, Purchase, BankAccount } from "../lib/types";
-import { downloadTabularReport, rangeLabelFor } from "../lib/reportPdf";
+import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
 import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Table, Th, Td, Dropdown, EmptyState, DateRangePicker, DatePicker, HelpHint, TabToggle } from "../components/ui";
 
 type ExpandedTab = "activity";
@@ -153,11 +153,16 @@ export default function SupplierPaymentsPage() {
       const result = await api.get<{ rows: SupplierPayment[]; total: number }>(`/supplier-payments?${params.toString()}`);
       const truncated = result.total > result.rows.length;
       const totalPaid = result.rows.reduce((sum, p) => sum + p.amount, 0);
+      const rangeLabel = rangeLabelFor(dateStart || null, dateEnd || null);
 
       downloadTabularReport({
         headerLabel: "M&M Clothing — Supplier Payments Report",
-        title: "Supplier Payments",
-        rangeLabel: rangeLabelFor(dateStart || null, dateEnd || null),
+        headerFields: [
+          { label: "Report", value: "Supplier Payments" },
+          { label: "Period", value: rangeLabel },
+          { label: "Generated", value: todayLongDate() },
+        ],
+        rangeLabel,
         columns: [
           { label: "Date", width: 90 },
           { label: "Supplier", width: 140 },
@@ -174,11 +179,14 @@ export default function SupplierPaymentsPage() {
             p.notes ?? "—",
           ],
         })),
-        summaryLines: [
-          ...(truncated ? [{ text: `Showing the latest ${result.rows.length} of ${result.total} payments — narrow the date range for a complete report.` }] : []),
-          { text: `Total paid in this range: Rs. ${totalPaid.toLocaleString()}`, bold: true },
-        ],
-        filename: `supplier-payments-${dateStart || "all"}-to-${dateEnd || "now"}.pdf`,
+        summaryLines: truncated
+          ? [{ text: `Showing the latest ${result.rows.length} of ${result.total} payments — narrow the date range for a complete report.` }]
+          : undefined,
+        totalSummary: {
+          label: "Total paid in this range",
+          amount: `Rs. ${totalPaid.toLocaleString()}`,
+        },
+        filename: buildReportFilename("Supplier Payments", `${dateStart || "all"}-to-${dateEnd || "now"}`),
       });
     } catch (err) {
       setDownloadError(err instanceof ApiRequestError ? err.message : "Failed to generate report");

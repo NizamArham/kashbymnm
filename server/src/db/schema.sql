@@ -89,6 +89,9 @@ CREATE TABLE IF NOT EXISTS customers (
   name TEXT NOT NULL,
   phone TEXT,
   phone2 TEXT,
+  -- For future marketing campaigns to segment by — also encoded as the
+  -- trailing letter of customer_code (see nextCustomerCode).
+  gender TEXT NOT NULL DEFAULT 'unspecified' CHECK (gender IN ('male', 'female', 'unspecified')),
   -- Manually-granted reward points (e.g. a legacy-customer bonus on
   -- import), separate from points earned through actual sales. A
   -- customer's total displayed loyalty_points is this PLUS the live sum
@@ -346,6 +349,28 @@ CREATE TABLE IF NOT EXISTS products (
 );
 
 CREATE INDEX IF NOT EXISTS idx_products_supplier ON products(supplier_id);
+
+-- 4a. categories / sub_categories --------------------------------------------
+-- The managed picklist behind the Category/Sub-category combobox on Add
+-- Product and Manage Products — a real, admin-editable list (add/rename/
+-- delete) rather than the old hardcoded categoryStructure in the client.
+-- products.category itself is untouched: it stays the single
+-- "Category / SubCategory (Gender)" text field every existing page already
+-- parses, so renaming a row here just rewrites that text on the products
+-- that use it — see the cascade logic in routes/categories.ts.
+CREATE TABLE IF NOT EXISTS categories (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS sub_categories (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  UNIQUE (category_id, name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sub_categories_category ON sub_categories(category_id);
 
 -- 5. inventory (physical units) ---------------------------------------------
 CREATE TABLE IF NOT EXISTS inventory (

@@ -2,14 +2,16 @@ import { useState, useEffect, FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { AlertTriangle, MapPin, Phone, UserRound } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
-import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button } from "../components/ui";
+import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Dropdown } from "../components/ui";
 import { CityPicker } from "../components/CityPicker";
+import { CustomerGender } from "../lib/types";
 
 export default function AddCustomerPage() {
   const navigate = useNavigate();
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [phone2, setPhone2] = useState("");
+  const [gender, setGender] = useState<CustomerGender>("unspecified");
   const [addLine1, setAddLine1] = useState("");
   const [addLine2, setAddLine2] = useState("");
   const [city, setCity] = useState("");
@@ -57,6 +59,7 @@ export default function AddCustomerPage() {
         name: name.trim(),
         phone: phone.trim() || undefined,
         phone2: phone2.trim() || undefined,
+        gender,
       });
 
       if (addLine1.trim() || city.trim()) {
@@ -72,6 +75,7 @@ export default function AddCustomerPage() {
       setName("");
       setPhone("");
       setPhone2("");
+      setGender("unspecified");
       setAddLine1("");
       setAddLine2("");
       setCity("");
@@ -108,10 +112,24 @@ export default function AddCustomerPage() {
               </div>
             )}
           </FormGroup>
-          <FormGroup>
-            <Label>Phone 2 (optional)</Label>
-            <Input value={phone2} onChange={(e) => setPhone2(e.target.value)} />
-          </FormGroup>
+          <div className="grid grid-cols-2 gap-4">
+            <FormGroup>
+              <Label>Phone 2 (optional)</Label>
+              <Input value={phone2} onChange={(e) => setPhone2(e.target.value)} />
+            </FormGroup>
+            <FormGroup>
+              <Label>Gender</Label>
+              <Dropdown
+                value={gender}
+                onChange={(v) => setGender(v as CustomerGender)}
+                options={[
+                  { value: "unspecified", label: "Unspecified" },
+                  { value: "male", label: "Male" },
+                  { value: "female", label: "Female" },
+                ]}
+              />
+            </FormGroup>
+          </div>
 
           <h3 className="text-sm font-semibold text-gray-900 mt-5 mb-3">Address (optional)</h3>
           <FormGroup>

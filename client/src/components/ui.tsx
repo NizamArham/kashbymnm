@@ -1,4 +1,4 @@
-import { ReactNode, useState, useRef, useEffect } from "react";
+import { ReactNode, useState, useRef, useEffect, forwardRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronDown, Check, Plus, CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
@@ -89,15 +89,16 @@ export function Button({
   );
 }
 
-export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
+export const Input = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(function Input(props, ref) {
   const { className = "", ...rest } = props;
   return (
     <input
       {...rest}
+      ref={ref}
       className={`w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl focus:outline-none focus:border-gray-400 focus:ring-2 focus:ring-gray-100 text-sm transition-all duration-200 ${className}`}
     />
   );
-}
+});
 
 export function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
   const { className = "", children, ...rest } = props;
@@ -141,6 +142,7 @@ export function Dropdown({
   createNewLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [openUpward, setOpenUpward] = useState(false);
   const [query, setQuery] = useState("");
   const ref = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -156,9 +158,45 @@ export function Dropdown({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  useEffect(() => {
-    if (open && searchable) searchInputRef.current?.focus();
-  }, [open, searchable]);
+  // Flips the panel above the trigger when there isn't enough room below
+  // (e.g. a field sitting low in a modal or short column) — same idea as
+  // any proper popover, so a long option list never gets cut off against
+  // whatever container it's opening into. The real boundary is usually a
+  // scrollable ancestor (a modal's own scroll area) rather than the whole
+  // window, which is normally much taller than what's actually visible.
+  function computeOpenUpward() {
+    if (!ref.current) return false;
+    const rect = ref.current.getBoundingClientRect();
+    let boundaryBottom = window.innerHeight;
+    let node = ref.current.parentElement;
+    while (node) {
+      if (/(auto|scroll)/.test(window.getComputedStyle(node).overflowY)) {
+        boundaryBottom = Math.min(boundaryBottom, node.getBoundingClientRect().bottom);
+        break;
+      }
+      node = node.parentElement;
+    }
+    const estimatedPanelHeight = (searchable ? 40 : 0) + 250;
+    const spaceBelow = boundaryBottom - rect.bottom;
+    return spaceBelow < estimatedPanelHeight && rect.top > spaceBelow;
+  }
+
+  function toggleOpen() {
+    if (!open) setOpenUpward(computeOpenUpward());
+    setOpen((o) => !o);
+  }
+
+  // Opens (never toggles closed) — for the searchable variant's trigger,
+  // which is a real text input: focusing it should always open the list,
+  // the same way any combobox does, rather than the open/close toggle a
+  // button gets on click.
+  function openPanel() {
+    if (!open) {
+      setOpenUpward(computeOpenUpward());
+      setOpen(true);
+      setQuery("");
+    }
+  }
 
   const selected = options.find((o) => o.value === value);
   const filteredOptions =
@@ -172,33 +210,53 @@ export function Dropdown({
 
   return (
     <div className="relative" ref={ref}>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => setOpen((o) => !o)}
-        className={`w-full flex items-center justify-between px-3.5 py-2.5 bg-white border rounded-xl text-sm text-left transition-all duration-200
-          ${disabled ? "opacity-50 cursor-not-allowed bg-gray-50" : "hover:border-gray-300"}
-          ${open ? "border-gray-400 ring-2 ring-gray-100" : "border-gray-200"}`}
-      >
-        <span className={selected ? "text-gray-900" : "text-gray-400"}>{selected ? selected.label : placeholder}</span>
-        <ChevronDown size={15} className={`text-gray-400 transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
+      {searchable ? (
+        <div className="relative">
+          <input
+            ref={searchInputRef}
+            type="text"
+            disabled={disabled}
+            value={open ? query : selected?.label ?? ""}
+            onFocus={openPanel}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              if (!open) openPanel();
+            }}
+            placeholder={placeholder}
+            className={`w-full px-3.5 py-2.5 pr-8 bg-white border rounded-xl text-sm text-gray-900 placeholder:text-gray-400 transition-all duration-200
+              ${disabled ? "opacity-50 cursor-not-allowed bg-gray-50" : "hover:border-gray-300"}
+              ${open ? "border-gray-400 ring-2 ring-gray-100" : "border-gray-200"}`}
+          />
+          <ChevronDown
+            size={15}
+            className={`pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 transition-transform ${
+              open ? "rotate-180" : ""
+            }`}
+          />
+        </div>
+      ) : (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={toggleOpen}
+          className={`w-full flex items-center justify-between px-3.5 py-2.5 bg-white border rounded-xl text-sm text-left transition-all duration-200
+            ${disabled ? "opacity-50 cursor-not-allowed bg-gray-50" : "hover:border-gray-300"}
+            ${open ? "border-gray-400 ring-2 ring-gray-100" : "border-gray-200"}`}
+        >
+          <span className={selected ? "text-gray-900" : "text-gray-400"}>{selected ? selected.label : placeholder}</span>
+          <ChevronDown size={15} className={`text-gray-400 transition-transform ${open ? "rotate-180" : ""}`} />
+        </button>
+      )}
 
       {open && !disabled && (
-        <div className="absolute z-20 mt-1.5 w-full bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
-          {searchable && (
-            <div className="p-2 border-b border-gray-100">
-              <input
-                ref={searchInputRef}
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Type to search..."
-                className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-gray-400"
-                onClick={(e) => e.stopPropagation()}
-              />
-            </div>
-          )}
-          <div className="max-h-72 overflow-y-auto py-1">
+        <div
+          className={`absolute z-20 w-full bg-white border border-gray-200 rounded-2xl shadow-xl overflow-hidden ${
+            openUpward ? "bottom-full mb-1.5" : "mt-1.5"
+          }`}
+        >
+          {/* Searching happens directly in the trigger input above (when
+              searchable) — no separate search box in the panel anymore. */}
+          <div className="max-h-72 overflow-y-auto p-1.5">
             {filteredOptions.length === 0 ? (
               onCreateNew ? (
                 <button
@@ -208,33 +266,40 @@ export function Dropdown({
                     setQuery("");
                     onCreateNew();
                   }}
-                  className="w-full flex items-center gap-1.5 px-3.5 py-2.5 text-sm text-left text-gray-900 font-medium hover:bg-gray-50 transition-colors"
+                  className="w-full flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm text-left text-gray-900 font-medium hover:bg-gray-50 transition-colors"
                 >
-                  <Plus size={14} />
+                  <span className="flex-shrink-0 w-5 h-5 rounded-full bg-gray-100 flex items-center justify-center">
+                    <Plus size={12} />
+                  </span>
                   {query.trim() ? `${createNewLabel} "${query.trim()}"` : createNewLabel}
                 </button>
               ) : (
-                <div className="px-3.5 py-2.5 text-sm text-gray-400">No matches</div>
+                <div className="px-3 py-2.5 text-sm text-gray-400">No matches</div>
               )
             ) : (
-              filteredOptions.map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => {
-                    onChange(opt.value);
-                    setOpen(false);
-                    setQuery("");
-                  }}
-                  className="w-full flex items-center justify-between px-3.5 py-2.5 text-sm text-left hover:bg-gray-50 transition-colors"
-                >
-                  <span>
-                    {opt.label}
-                    {opt.sublabel && <span className="text-gray-400 ml-1.5 text-xs">{opt.sublabel}</span>}
-                  </span>
-                  {opt.value === value && <Check size={14} className="text-black" />}
-                </button>
-              ))
+              filteredOptions.map((opt) => {
+                const isSelected = opt.value === value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => {
+                      onChange(opt.value);
+                      setOpen(false);
+                      setQuery("");
+                    }}
+                    className={`w-full flex items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-sm text-left transition-colors ${
+                      isSelected ? "bg-gray-50 font-medium text-gray-900" : "text-gray-700 hover:bg-gray-50"
+                    }`}
+                  >
+                    <span className="truncate">
+                      {opt.label}
+                      {opt.sublabel && <span className="text-gray-400 ml-1.5 text-xs font-normal">{opt.sublabel}</span>}
+                    </span>
+                    {isSelected && <Check size={14} className="flex-shrink-0 text-gray-900" />}
+                  </button>
+                );
+              })
             )}
           </div>
         </div>
@@ -417,10 +482,10 @@ export function EmptyState({ icon: Icon, title, subtitle }: { icon?: any; title:
   );
 }
 
-export function Table({ children }: { children: ReactNode }) {
+export function Table({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-sm">{children}</table>
+      <table className={`w-full text-sm ${className}`}>{children}</table>
     </div>
   );
 }
@@ -429,9 +494,19 @@ export function Th({ children, className = "" }: { children: ReactNode; classNam
   return <th className={`text-left px-3 py-2.5 text-xs font-medium text-gray-400 border-b border-gray-100 ${className}`}>{children}</th>;
 }
 
-export function Td({ children, colSpan, className = "" }: { children: ReactNode; colSpan?: number; className?: string }) {
+export function Td({
+  children,
+  colSpan,
+  className = "",
+  title,
+}: {
+  children: ReactNode;
+  colSpan?: number;
+  className?: string;
+  title?: string;
+}) {
   return (
-    <td colSpan={colSpan} className={`px-3 py-2.5 border-b border-gray-50 text-gray-700 ${className}`}>
+    <td colSpan={colSpan} title={title} className={`px-3 py-2.5 border-b border-gray-50 text-gray-700 ${className}`}>
       {children}
     </td>
   );
@@ -586,6 +661,117 @@ export function NewSupplierModal({
         <div className="flex gap-2 mt-2">
           <Button variant="primary" size="sm" disabled={submitting} onClick={handleCreate}>
             {submitting ? "Creating..." : "Create supplier"}
+          </Button>
+          <Button size="sm" onClick={onClose}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function NewCategoryModal({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: (category: { id: number; name: string; sub_categories: { id: number; name: string }[] }) => void;
+}) {
+  const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleCreate() {
+    setError(null);
+    if (!name.trim()) {
+      setError("Category name is required");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const created = await api.post<{ id: number; name: string; sub_categories: { id: number; name: string }[] }>(
+        "/categories",
+        { name: name.trim() }
+      );
+      onCreated(created);
+    } catch (err) {
+      setError(err instanceof ApiRequestError ? err.message : "Failed to create category");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-xl p-5 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-sm font-semibold text-gray-900 mb-3">New category</h3>
+        <FormGroup>
+          <Label>Name</Label>
+          <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+        </FormGroup>
+        {error && <ErrorText>{error}</ErrorText>}
+        <div className="flex gap-2 mt-2">
+          <Button variant="primary" size="sm" disabled={submitting} onClick={handleCreate}>
+            {submitting ? "Creating..." : "Create category"}
+          </Button>
+          <Button size="sm" onClick={onClose}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function NewSubCategoryModal({
+  categoryId,
+  categoryName,
+  onClose,
+  onCreated,
+}: {
+  categoryId: number;
+  categoryName: string;
+  onClose: () => void;
+  onCreated: (subCategory: { id: number; category_id: number; name: string }) => void;
+}) {
+  const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleCreate() {
+    setError(null);
+    if (!name.trim()) {
+      setError("Sub-category name is required");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const created = await api.post<{ id: number; category_id: number; name: string }>(
+        `/categories/${categoryId}/sub-categories`,
+        { name: name.trim() }
+      );
+      onCreated(created);
+    } catch (err) {
+      setError(err instanceof ApiRequestError ? err.message : "Failed to create sub-category");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-xl p-5 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-sm font-semibold text-gray-900 mb-3">New sub-category</h3>
+        <p className="text-xs text-gray-400 mb-3">Under {categoryName}</p>
+        <FormGroup>
+          <Label>Name</Label>
+          <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+        </FormGroup>
+        {error && <ErrorText>{error}</ErrorText>}
+        <div className="flex gap-2 mt-2">
+          <Button variant="primary" size="sm" disabled={submitting} onClick={handleCreate}>
+            {submitting ? "Creating..." : "Create sub-category"}
           </Button>
           <Button size="sm" onClick={onClose}>
             Cancel

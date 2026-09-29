@@ -4,7 +4,7 @@ import { NAME_LOGO_PNG_BASE64, NAME_LOGO_ASPECT_RATIO } from "./logoAsset";
 export interface ReportColumn {
   label: string;
   width: number;
-  align?: "left" | "right";
+  align?: "left" | "right" | "center";
   // Wraps this column's text onto up to 2 lines instead of truncating
   // it onto one — use for a field like "Reason" or "Notes" where the
   // full text matters more than keeping every row the same height.
@@ -33,19 +33,70 @@ export interface ReportSummaryLine {
   bold?: boolean;
 }
 
+// The one number a report is actually for — rendered the same
+// restrained way the invoice's own Total row is: a hairline rule, the
+// label at normal weight, and just the amount itself sized up a couple
+// points. No bold, no fill, no colored box.
+export interface ReportTotalSummary {
+  label: string;
+  amount: string;
+  note?: string;
+}
+
+// A label/value row in the page-1 header block — the exact same visual
+// language as the invoice's own kvRow (gray label, near-black value,
+// one shared value column wide enough for the longest label). This is
+// what actually identifies the document (what it is, who/what it's
+// for, what period) instead of one big standalone heading — the
+// invoice itself never has a giant "INVOICE" title either, just this.
+export interface ReportHeaderField {
+  label: string;
+  value: string;
+}
+
 export interface TabularReportOptions {
   headerLabel: string;
   headerRight?: string;
-  title: string;
+  // Preferred: a label/value block styled like the invoice's own
+  // (Report, Customer, Period, Generated, ...). When given, this
+  // replaces the plain title/subjectLines below entirely.
+  headerFields?: ReportHeaderField[];
+  // Legacy fallback for any report not yet moved to headerFields.
+  title?: string;
   subjectLines?: string[];
   rangeLabel: string;
   columns: ReportColumn[];
   rows: ReportRow[];
   summaryLines?: ReportSummaryLine[];
+  totalSummary?: ReportTotalSummary;
   filename: string;
   // Wide tables (many columns) read better in landscape. Defaults to
   // portrait, which suits the narrower ledger-style reports.
   orientation?: "portrait" | "landscape";
+}
+
+// Matches the invoice's own convention exactly (Invoice{number}.pdf) —
+// compact, PascalCase, no spaces, no lowercase-and-dashes slug. `tag`
+// is a short identifier for what's in this download (e.g. "Sep2026",
+// "28Sep2026", "CashSales") — deliberately NOT the full descriptive
+// range label shown on the page itself, since a filename needs to stay
+// short and unique across repeats, while the on-page text is free to
+// be as explicit as it needs to be.
+export function buildReportFilename(reportName: string, tag: string): string {
+  return `${reportName.replace(/\s+/g, "")}-${tag}.pdf`;
+}
+
+// The "Generated" field's value on every report's header block — one
+// shared formatter so it reads identically everywhere instead of each
+// page rolling its own date formatting.
+export function formatLongDate(iso: string): string {
+  return new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+}
+
+export function todayLongDate(): string {
+  const d = new Date();
+  const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return formatLongDate(iso);
 }
 
 function todayIso(): string {
@@ -115,15 +166,11 @@ export function downloadTabularReport(opts: TabularReportOptions): void {
   const marginX = 40;
   const defaultLineWidth = doc.getLineWidth();
 
-  const logoWidth = 16;
-  const logoHeight = logoWidth / NAME_LOGO_ASPECT_RATIO;
-
   function drawHeaderFooter(pageNum: number, totalPages: number) {
-    doc.addImage(NAME_LOGO_PNG_BASE64, "PNG", marginX, 16, logoWidth, logoHeight, undefined, "FAST");
     doc.setFontSize(9);
     doc.setTextColor(120);
     doc.setFont("helvetica", "normal");
-    doc.text(opts.headerLabel, marginX + logoWidth + 6, 28);
+    doc.text(opts.headerLabel, marginX, 28);
     if (opts.headerRight) {
       doc.text(opts.headerRight, pageWidth - marginX, 28, { align: "right" });
     }
@@ -138,19 +185,53 @@ export function downloadTabularReport(opts: TabularReportOptions): void {
   }
 
   let y = 70;
-  doc.setFontSize(20);
-  doc.setTextColor(20);
-  doc.setFont("helvetica", "bold");
-  doc.text(opts.title, marginX, y);
-  y += 22;
 
-  doc.setFont("helvetica", "normal");
-  (opts.subjectLines ?? []).forEach((line, i) => {
-    doc.setFontSize(i === 0 ? 13 : 10);
-    doc.setTextColor(i === 0 ? 20 : 100);
-    doc.text(line, marginX, y);
-    y += i === 0 ? 18 : 16;
-  });
+  // The logo as a one-time hero mark, top-right — the exact placement
+  // AND physical size the invoice itself uses (logo opposite the
+  // barcode, "SLOW" quality for a crisp edge), translated here to sit
+  // opposite the header block instead. Page 1 only, same as the
+  // invoice never repeats its own logo on overflow pages.
+  // The invoice draws its logo at 42mm on an "mm"-unit document; this
+  // document's unit is "pt", so matching the invoice's real, physical
+  // size means converting mm to points (1mm = 72/25.4pt) — using the
+  // bare number 42 here would be 42pt, less than a third of the actual
+  // invoice size, and exactly the "still too small" bug being fixed.
+  const MM_TO_PT = 72 / 25.4;
+  const logoWidth = 42 * MM_TO_PT;
+  const logoHeight = logoWidth / NAME_LOGO_ASPECT_RATIO;
+  doc.addImage(NAME_LOGO_PNG_BASE64, "PNG", pageWidth - marginX - logoWidth, y - 8, logoWidth, logoHeight, undefined, "SLOW");
+
+  if (opts.headerFields && opts.headerFields.length > 0) {
+    // Same visual language as the invoice's own kvRow: gray label,
+    // near-black value, one shared value column sized to the longest
+    // label actually used — no separate giant title text, since the
+    // invoice itself never has one either.
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(11);
+    const labelWidth = Math.max(...opts.headerFields.map((f) => doc.getTextWidth(f.label))) + 16;
+    const valueX = marginX + labelWidth;
+    for (const field of opts.headerFields) {
+      doc.setTextColor(150);
+      doc.text(field.label, marginX, y);
+      doc.setTextColor(20);
+      doc.text(field.value, valueX, y);
+      y += 16;
+    }
+  } else if (opts.title) {
+    doc.setFontSize(20);
+    doc.setTextColor(20);
+    doc.setFont("helvetica", "bold");
+    doc.text(opts.title, marginX, y);
+    y += 22;
+
+    doc.setFont("helvetica", "normal");
+    (opts.subjectLines ?? []).forEach((line, i) => {
+      doc.setFontSize(i === 0 ? 13 : 10);
+      doc.setTextColor(i === 0 ? 20 : 100);
+      doc.text(line, marginX, y);
+      y += i === 0 ? 18 : 16;
+    });
+  }
   y += 10;
 
   const tableWidth = opts.columns.reduce((sum, c) => sum + c.width, 0);
@@ -168,7 +249,13 @@ export function downloadTabularReport(opts: TabularReportOptions): void {
     let x = marginX + 6;
     for (const col of opts.columns) {
       const label = fitText(doc, col.label, col.width - 14);
-      doc.text(label, x + (col.align === "right" ? col.width - 12 : 0), yPos + 14, col.align === "right" ? { align: "right" } : undefined);
+      if (col.align === "right") {
+        doc.text(label, x + col.width - 12, yPos + 14, { align: "right" });
+      } else if (col.align === "center") {
+        doc.text(label, x + col.width / 2, yPos + 14, { align: "center" });
+      } else {
+        doc.text(label, x, yPos + 14);
+      }
       x += col.width;
     }
     return yPos + rowHeight;
@@ -222,13 +309,15 @@ export function downloadTabularReport(opts: TabularReportOptions): void {
         const ty = y + 14 + li * lineGap;
         if (col.align === "right") {
           doc.text(lineText, x + col.width - 12, ty, { align: "right" });
+        } else if (col.align === "center") {
+          doc.text(lineText, x + col.width / 2, ty, { align: "center" });
         } else {
           doc.text(lineText, x, ty);
         }
         if (style?.strikethrough && lineText) {
           const w = doc.getTextWidth(lineText);
           const lineY = ty - 3;
-          const startX = col.align === "right" ? x + col.width - 12 - w : x;
+          const startX = col.align === "right" ? x + col.width - 12 - w : col.align === "center" ? x + col.width / 2 - w / 2 : x;
           setDrawColorFrom(doc, style?.color, 30);
           doc.setLineWidth(0.6);
           doc.line(startX, lineY, startX + w, lineY);
@@ -253,6 +342,26 @@ export function downloadTabularReport(opts: TabularReportOptions): void {
     doc.line(marginX, y + thisRowHeight, marginX + tableWidth, y + thisRowHeight);
 
     y += thisRowHeight;
+  }
+
+  if (opts.totalSummary) {
+    y += 8;
+    doc.setDrawColor(200);
+    doc.line(marginX, y, marginX + tableWidth, y);
+    y += 16;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(20);
+    doc.text(opts.totalSummary.label, marginX, y);
+    doc.setFontSize(13);
+    const amountWidth = doc.getTextWidth(opts.totalSummary.amount);
+    doc.text(opts.totalSummary.amount, marginX + tableWidth, y, { align: "right" });
+    if (opts.totalSummary.note) {
+      doc.setFontSize(9);
+      doc.setTextColor(130);
+      doc.text(opts.totalSummary.note, marginX + tableWidth - amountWidth - 8, y, { align: "right" });
+    }
+    y += 6;
   }
 
   if (opts.summaryLines && opts.summaryLines.length > 0) {

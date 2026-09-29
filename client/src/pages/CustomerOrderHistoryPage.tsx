@@ -1,24 +1,11 @@
 import { useEffect, useState, Fragment } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, ChevronDown, ChevronRight, ShoppingBag, MoreVertical, Download } from "lucide-react";
-import jsPDF from "jspdf";
+import { ArrowLeft, ChevronDown, ChevronRight, ShoppingBag, MoreVertical, FileText, Receipt as ReceiptIcon, MessageCircle } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Sale, SaleItem, Customer } from "../lib/types";
-import { NAME_LOGO_PNG_BASE64, NAME_LOGO_ASPECT_RATIO } from "../lib/logoAsset";
+import { downloadA4Pdf, downloadThermalPdf, sendWhatsAppBill, groupSaleItemsForDisplay } from "../lib/receipts";
 import { PageHeader, Card, Table, Th, Td, Badge, paymentStatusTone, EmptyState, ErrorText } from "../components/ui";
-
-interface BusinessInfo {
-  business_name: string | null;
-  address_line1: string | null;
-  address_line2: string | null;
-  city: string | null;
-  phone: string | null;
-  email: string | null;
-}
-
-function toISODate(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
+import ReceiptOptionsModal, { ModalOption } from "../components/ReceiptOptionsModal";
 
 export default function CustomerOrderHistoryPage() {
   const { id } = useParams<{ id: string }>();
@@ -26,7 +13,6 @@ export default function CustomerOrderHistoryPage() {
 
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [sales, setSales] = useState<Sale[]>([]);
-  const [businessInfo, setBusinessInfo] = useState<BusinessInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,12 +26,12 @@ export default function CustomerOrderHistoryPage() {
   const [itemsLoading, setItemsLoading] = useState<number | null>(null);
   const [itemsError, setItemsError] = useState<string | null>(null);
 
-  // The 3-dot menu open for a given sale row, and per-invoice
-  // downloading state (so a slow items fetch shows real feedback on
-  // the specific row being downloaded, not a blanket page spinner).
-  const [menuOpenFor, setMenuOpenFor] = useState<number | null>(null);
-  const [downloadingId, setDownloadingId] = useState<number | null>(null);
-  const [downloadError, setDownloadError] = useState<string | null>(null);
+  // "Get receipt" modal for a row — same A4/thermal/WhatsApp options as
+  // Sale History and the sale detail page, so a customer's own order
+  // history offers the exact same downloads rather than a one-off PDF.
+  const [receiptSale, setReceiptSale] = useState<Sale | null>(null);
+  const [receiptError, setReceiptError] = useState<string | null>(null);
+  const [receiptLoadingId, setReceiptLoadingId] = useState<number | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -54,15 +40,13 @@ export default function CustomerOrderHistoryPage() {
       setLoading(true);
       setError(null);
       try {
-        const [customerResult, salesResult, businessResult] = await Promise.all([
+        const [customerResult, salesResult] = await Promise.all([
           api.get<Customer>(`/customers/${id}`),
           api.get<Sale[]>(`/sales?customer_id=${id}`),
-          api.get<BusinessInfo>(`/business-info`).catch(() => null),
         ]);
         if (cancelled) return;
         setCustomer(customerResult);
         setSales(salesResult);
-        setBusinessInfo(businessResult);
       } catch (err) {
         if (!cancelled) setError(err instanceof ApiRequestError ? err.message : "Failed to load order history");
       } finally {
@@ -74,16 +58,6 @@ export default function CustomerOrderHistoryPage() {
       cancelled = true;
     };
   }, [id]);
-
-  useEffect(() => {
-    function handleClickOutside() {
-      setMenuOpenFor(null);
-    }
-    if (menuOpenFor !== null) {
-      document.addEventListener("click", handleClickOutside);
-      return () => document.removeEventListener("click", handleClickOutside);
-    }
-  }, [menuOpenFor]);
 
   async function toggleExpand(saleId: number) {
     if (expandedSaleId === saleId) {
@@ -105,168 +79,55 @@ export default function CustomerOrderHistoryPage() {
     }
   }
 
-  // A one-page A4 invoice for a single sale — genuinely different from
-  // the multi-page payment-history statement (a receipt-style document
-  // for one transaction, not a running ledger), so it gets its own,
-  // simpler layout: business details up top, customer + invoice meta,
-  // the line items, totals, and a small footer.
-  async function downloadInvoice(sale: Sale) {
-    setDownloadError(null);
-    setMenuOpenFor(null);
-    setDownloadingId(sale.id);
+  // Same "Get receipt" options as Sale History / the sale detail page —
+  // fetches the full sale (line items aren't in the list response) the
+  // first time, then reuses it if the row is reopened.
+  async function openReceipt(sale: Sale) {
+    setReceiptError(null);
+    setReceiptLoadingId(sale.id);
     try {
-      let items = itemsBySale[sale.id];
-      if (!items) {
-        const detail = await api.get<{ items: SaleItem[] }>(`/sales/${sale.id}`);
-        items = detail.items;
-        setItemsBySale((prev) => ({ ...prev, [sale.id]: items }));
-      }
-
-      const doc = new jsPDF({ unit: "pt", format: "a4" });
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const pageHeight = doc.internal.pageSize.getHeight();
-      const marginX = 40;
-      let y = 50;
-
-      // Business header
-      const logoWidth = 130;
-      const logoHeight = logoWidth / NAME_LOGO_ASPECT_RATIO;
-      doc.addImage(NAME_LOGO_PNG_BASE64, "PNG", marginX, y - 13, logoWidth, logoHeight, undefined, "SLOW");
-      y += logoHeight;
-      doc.setFontSize(9);
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(100);
-      const addressLine = [businessInfo?.address_line1, businessInfo?.address_line2, businessInfo?.city].filter(Boolean).join(", ");
-      if (addressLine) {
-        doc.text(addressLine, marginX, y);
-        y += 13;
-      }
-      const contactLine = [businessInfo?.phone, businessInfo?.email].filter(Boolean).join(" · ");
-      if (contactLine) {
-        doc.text(contactLine, marginX, y);
-        y += 13;
-      }
-
-      // Invoice title + meta, top right
-      doc.setFontSize(18);
-      doc.setFont("helvetica", "bold");
-      doc.setTextColor(20);
-      doc.text("INVOICE", pageWidth - marginX, 50, { align: "right" });
-      doc.setFontSize(9);
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(100);
-      doc.text(sale.invoice, pageWidth - marginX, 68, { align: "right" });
-      doc.text(sale.date.slice(0, 10), pageWidth - marginX, 81, { align: "right" });
-      if (sale.is_voided) {
-        doc.setTextColor(200, 0, 0);
-        doc.text("VOIDED", pageWidth - marginX, 94, { align: "right" });
-      }
-
-      y = Math.max(y, 94) + 20;
-      doc.setDrawColor(220);
-      doc.line(marginX, y, pageWidth - marginX, y);
-      y += 20;
-
-      // Bill-to block
-      doc.setFontSize(9);
-      doc.setTextColor(120);
-      doc.text("BILL TO", marginX, y);
-      y += 14;
-      doc.setFontSize(11);
-      doc.setFont("helvetica", "bold");
-      doc.setTextColor(20);
-      doc.text(customer?.name || sale.customer_name || "Walk-in customer", marginX, y);
-      y += 15;
-      doc.setFontSize(9);
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(100);
-      if (customer?.customer_code) {
-        doc.text(customer.customer_code, marginX, y);
-        y += 13;
-      }
-      if (sale.customer_phone) {
-        doc.text(sale.customer_phone, marginX, y);
-        y += 13;
-      }
-      y += 15;
-
-      // Line items table
-      const columns = [
-        { label: "Item", width: 220 },
-        { label: "Size/Color", width: 90 },
-        { label: "Qty", width: 40 },
-        { label: "Unit price", width: 85 },
-        { label: "Total", width: 85 },
-      ];
-      const tableWidth = columns.reduce((sum, c) => sum + c.width, 0);
-      const rowHeight = 20;
-
-      doc.setFillColor(245, 245, 245);
-      doc.rect(marginX, y, tableWidth, rowHeight, "F");
-      doc.setFontSize(9);
-      doc.setFont("helvetica", "bold");
-      doc.setTextColor(80);
-      let x = marginX + 6;
-      for (const col of columns) {
-        doc.text(col.label, x, y + 14);
-        x += col.width;
-      }
-      y += rowHeight;
-
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      for (const item of items) {
-        x = marginX + 6;
-        doc.setTextColor(30);
-        const title = (item.product_title ?? "—").length > 30 ? (item.product_title ?? "—").slice(0, 27) + "..." : item.product_title ?? "—";
-        doc.text(title, x, y + 14);
-        x += columns[0].width;
-        doc.text([item.size, item.color].filter(Boolean).join(" / ") || "—", x, y + 14);
-        x += columns[1].width;
-        doc.text(String(item.quantity), x, y + 14);
-        x += columns[2].width;
-        doc.text(item.unit_price.toLocaleString(), x, y + 14);
-        x += columns[3].width;
-        doc.text(item.line_total.toLocaleString(), x, y + 14);
-        doc.setDrawColor(235);
-        doc.line(marginX, y + rowHeight, marginX + tableWidth, y + rowHeight);
-        y += rowHeight;
-      }
-
-      // Totals block, right-aligned
-      y += 16;
-      const totalsX = marginX + tableWidth;
-      function totalsLine(label: string, value: string, bold = false) {
-        doc.setFont("helvetica", bold ? "bold" : "normal");
-        doc.setFontSize(bold ? 11 : 9);
-        doc.setTextColor(bold ? 20 : 90);
-        doc.text(label, totalsX - 160, y);
-        doc.text(value, totalsX, y, { align: "right" });
-        y += bold ? 18 : 15;
-      }
-      totalsLine("Subtotal", `Rs. ${sale.subtotal.toLocaleString()}`);
-      if (sale.discount > 0) totalsLine("Discount", `- Rs. ${sale.discount.toLocaleString()}`);
-      if (sale.coupon_discount > 0) totalsLine(`Coupon${sale.coupon_code ? ` (${sale.coupon_code})` : ""}`, `- Rs. ${sale.coupon_discount.toLocaleString()}`);
-      doc.setDrawColor(200);
-      doc.line(totalsX - 160, y - 4, totalsX, y - 4);
-      totalsLine("Total", `Rs. ${sale.total.toLocaleString()}`, true);
-      totalsLine("Paid", `Rs. ${sale.amount_paid.toLocaleString()}`);
-      if (sale.total - sale.amount_paid > 0) {
-        totalsLine("Balance due", `Rs. ${(sale.total - sale.amount_paid).toLocaleString()}`, true);
-      }
-
-      // Footer
-      doc.setFontSize(8);
-      doc.setTextColor(150);
-      doc.text(`Generated ${toISODate(new Date())} · Thank you for shopping with ${businessInfo?.business_name || "M&M Clothing"}`, marginX, pageHeight - 24);
-      doc.text(sale.invoice, pageWidth - marginX, pageHeight - 24, { align: "right" });
-
-      doc.save(`invoice-${sale.invoice}.pdf`);
+      const full = itemsBySale[sale.id] ? { ...sale, items: itemsBySale[sale.id] } : await api.get<Sale>(`/sales/${sale.id}`);
+      setReceiptSale(full);
     } catch (err) {
-      setDownloadError(err instanceof ApiRequestError ? err.message : "Failed to generate invoice");
+      setError(err instanceof ApiRequestError ? err.message : "Failed to load this order's receipt");
     } finally {
-      setDownloadingId(null);
+      setReceiptLoadingId(null);
     }
+  }
+
+  function receiptOptionsFor(sale: Sale): ModalOption[] {
+    return [
+      {
+        key: "a4",
+        icon: <FileText size={17} className="text-gray-700" />,
+        title: "A4 Invoice (PDF)",
+        subtitle: "Full-page printable invoice",
+        onClick: () => downloadA4Pdf(sale),
+      },
+      {
+        key: "thermal",
+        icon: <ReceiptIcon size={17} className="text-gray-700" />,
+        title: "80mm Receipt (PDF)",
+        subtitle: "For thermal till printers",
+        onClick: () => downloadThermalPdf(sale),
+      },
+      {
+        key: "whatsapp",
+        icon: <MessageCircle size={17} className="text-green-600" />,
+        iconBgClass: "bg-green-50",
+        title: "Send via WhatsApp",
+        subtitle: "Text summary to customer's phone",
+        onClick: () => {
+          const phone = sale.customer_phone ?? customer?.phone;
+          if (!phone) {
+            setReceiptError("This customer has no saved phone number — add one on the Customers page first.");
+            return;
+          }
+          setReceiptError(null);
+          sendWhatsAppBill(sale, phone);
+        },
+      },
+    ];
   }
 
   const totalSpent = sales.reduce((sum, s) => sum + s.total, 0);
@@ -291,7 +152,6 @@ export default function CustomerOrderHistoryPage() {
       />
 
       {error && <ErrorText>{error}</ErrorText>}
-      {downloadError && <ErrorText>{downloadError}</ErrorText>}
 
       {loading ? (
         <p className="text-sm text-gray-400">Loading...</p>
@@ -335,31 +195,18 @@ export default function CustomerOrderHistoryPage() {
                           <Badge label={sale.payment_status} tone={paymentStatusTone(sale.payment_status)} />
                         )}
                       </Td>
-                      <Td className="w-8 relative">
+                      <Td className="w-8">
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            setMenuOpenFor(menuOpenFor === sale.id ? null : sale.id);
+                            openReceipt(sale);
                           }}
-                          className="text-gray-400 hover:text-gray-700 p-1 rounded hover:bg-gray-100"
+                          disabled={receiptLoadingId === sale.id}
+                          className="text-gray-400 hover:text-gray-700 p-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                          title="Get receipt"
                         >
                           <MoreVertical size={15} />
                         </button>
-                        {menuOpenFor === sale.id && (
-                          <div
-                            onClick={(e) => e.stopPropagation()}
-                            className="absolute right-0 top-full mt-1 z-20 bg-white border border-gray-200 rounded-xl shadow-lg py-1 w-48"
-                          >
-                            <button
-                              onClick={() => downloadInvoice(sale)}
-                              disabled={downloadingId === sale.id}
-                              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 text-left"
-                            >
-                              <Download size={14} />
-                              {downloadingId === sale.id ? "Generating..." : "Download invoice (A4)"}
-                            </button>
-                          </div>
-                        )}
                       </Td>
                     </tr>
 
@@ -387,8 +234,8 @@ export default function CustomerOrderHistoryPage() {
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
-                                  {items.map((item, i) => (
-                                    <tr key={item.id} className={i % 2 === 1 ? "bg-gray-50/50" : ""}>
+                                  {groupSaleItemsForDisplay(items).map((item, i) => (
+                                    <tr key={item.ids.join(",")} className={i % 2 === 1 ? "bg-gray-50/50" : ""}>
                                       <td className="px-4 py-2 font-medium text-gray-900">{item.product_title ?? "—"}</td>
                                       <td className="px-4 py-2 text-gray-600">
                                         {[item.size, item.color].filter(Boolean).join(" / ") || "—"}
@@ -415,6 +262,16 @@ export default function CustomerOrderHistoryPage() {
             </tbody>
           </Table>
         </Card>
+      )}
+
+      {receiptSale && (
+        <ReceiptOptionsModal
+          heading="Get receipt"
+          subtitle={receiptSale.invoice}
+          options={receiptOptionsFor(receiptSale)}
+          error={receiptError}
+          onClose={() => setReceiptSale(null)}
+        />
       )}
     </div>
   );

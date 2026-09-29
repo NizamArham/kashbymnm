@@ -1,9 +1,24 @@
 import { useEffect, useState, useMemo, FormEvent } from "react";
 import { X, Plus, Wand2, AlertTriangle } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
-import { Supplier, Product, Purchase } from "../lib/types";
-import { mainCategories, categoryStructure, genderOptions } from "../lib/categories";
-import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Dropdown, TabToggle, NewSupplierModal, HelpHint } from "../components/ui";
+import { Supplier, Product, Purchase, Category } from "../lib/types";
+import { genderOptions } from "../lib/categories";
+import {
+  PageHeader,
+  Card,
+  Input,
+  Label,
+  FormGroup,
+  ErrorText,
+  SuccessText,
+  Button,
+  Dropdown,
+  TabToggle,
+  NewSupplierModal,
+  NewCategoryModal,
+  NewSubCategoryModal,
+  HelpHint,
+} from "../components/ui";
 
 interface VariantRow {
   size: string;
@@ -33,6 +48,9 @@ export default function AddProductPage() {
   const [duplicateWarning, setDuplicateWarning] = useState<{ id: number; title: string } | null>(null);
 
   const [showNewSupplierModal, setShowNewSupplierModal] = useState(false);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [showNewCategoryModal, setShowNewCategoryModal] = useState(false);
+  const [showNewSubCategoryModal, setShowNewSubCategoryModal] = useState(false);
 
   const [form, setForm] = useState({
     product_title: "",
@@ -94,6 +112,7 @@ export default function AddProductPage() {
     api.get<Supplier[]>("/suppliers").then(setSuppliers).catch(() => {});
     api.get<Product[]>("/products").then(setProducts).catch(() => {});
     api.get<Purchase[]>("/purchases/pending").then(setPendingPurchases).catch(() => {});
+    api.get<Category[]>("/categories").then(setCategories).catch(() => {});
   }, []);
 
   // Check for a duplicate title shortly after typing stops, so Add Product
@@ -217,7 +236,8 @@ export default function AddProductPage() {
     [variantRows]
   );
 
-  const availableSubCategories = form.category ? categoryStructure[form.category] ?? [] : [];
+  const selectedCategory = categories.find((c) => c.name === form.category);
+  const availableSubCategories = selectedCategory?.sub_categories ?? [];
 
   // How many AVAILABLE units already exist for a given color/size on the
   // selected existing product — shown per row so it's clear what the new
@@ -461,7 +481,10 @@ export default function AddProductPage() {
                           update("subCategory", "");
                         }}
                         placeholder="— Select category —"
-                        options={mainCategories.map((c) => ({ value: c, label: c }))}
+                        searchable
+                        onCreateNew={() => setShowNewCategoryModal(true)}
+                        createNewLabel="New category"
+                        options={categories.map((c) => ({ value: c.name, label: c.name }))}
                       />
                     </FormGroup>
                     <FormGroup>
@@ -471,7 +494,10 @@ export default function AddProductPage() {
                         onChange={(v) => update("subCategory", v)}
                         placeholder={form.category ? "— Select sub-category —" : "Pick a category first"}
                         disabled={!form.category}
-                        options={availableSubCategories.map((s) => ({ value: s, label: s }))}
+                        searchable
+                        onCreateNew={selectedCategory ? () => setShowNewSubCategoryModal(true) : undefined}
+                        createNewLabel="New sub-category"
+                        options={availableSubCategories.map((s) => ({ value: s.name, label: s.name }))}
                       />
                     </FormGroup>
                   </div>
@@ -967,6 +993,33 @@ export default function AddProductPage() {
             setSuppliers((prev) => [...prev, supplier as any]);
             update("supplier_id", String(supplier.id));
             setShowNewSupplierModal(false);
+          }}
+        />
+      )}
+
+      {showNewCategoryModal && (
+        <NewCategoryModal
+          onClose={() => setShowNewCategoryModal(false)}
+          onCreated={(category) => {
+            setCategories((prev) => [...prev, category].sort((a, b) => a.name.localeCompare(b.name)));
+            update("category", category.name);
+            update("subCategory", "");
+            setShowNewCategoryModal(false);
+          }}
+        />
+      )}
+
+      {showNewSubCategoryModal && selectedCategory && (
+        <NewSubCategoryModal
+          categoryId={selectedCategory.id}
+          categoryName={selectedCategory.name}
+          onClose={() => setShowNewSubCategoryModal(false)}
+          onCreated={(sub) => {
+            setCategories((prev) =>
+              prev.map((c) => (c.id === sub.category_id ? { ...c, sub_categories: [...c.sub_categories, sub].sort((a, b) => a.name.localeCompare(b.name)) } : c))
+            );
+            update("subCategory", sub.name);
+            setShowNewSubCategoryModal(false);
           }}
         />
       )}
