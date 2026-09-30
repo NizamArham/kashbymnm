@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "../db/connection";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth, requireRole } from "../lib/auth";
+import { logAudit } from "../lib/auditLog";
 
 export const couponsRouter = Router();
 
@@ -45,6 +46,10 @@ couponsRouter.post(
       .run(code, data.discount_type, data.discount_value, data.is_active ? 1 : 0, data.expires_at ?? null);
 
     const created = db.prepare(`SELECT * FROM coupons WHERE id = ?`).get(result.lastInsertRowid);
+
+    const rewardLabel = data.discount_type === "percent" ? `${data.discount_value}%` : `Rs. ${data.discount_value.toLocaleString()}`;
+    logAudit(req.user!, "coupon_create", "coupon", Number(result.lastInsertRowid), `Created coupon ${code} (${rewardLabel} off)`);
+
     res.status(201).json(created);
   })
 );
@@ -70,6 +75,8 @@ couponsRouter.put(
       req.params.id
     );
 
+    logAudit(req.user!, "coupon_edit", "coupon", Number(req.params.id), `Edited coupon ${existing.code}`);
+
     const updated = db.prepare(`SELECT * FROM coupons WHERE id = ?`).get(req.params.id);
     res.json(updated);
   })
@@ -80,9 +87,12 @@ couponsRouter.delete(
   "/:id",
   requireRole("admin"),
   asyncHandler(async (req, res) => {
-    const existing = db.prepare(`SELECT id FROM coupons WHERE id = ?`).get(req.params.id);
+    const existing = db.prepare(`SELECT * FROM coupons WHERE id = ?`).get(req.params.id) as any;
     if (!existing) throw new ApiError(404, "Coupon not found");
     db.prepare(`DELETE FROM coupons WHERE id = ?`).run(req.params.id);
+
+    logAudit(req.user!, "coupon_delete", "coupon", Number(req.params.id), `Deleted coupon ${existing.code}`);
+
     res.status(204).send();
   })
 );

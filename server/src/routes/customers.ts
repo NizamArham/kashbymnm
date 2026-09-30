@@ -4,6 +4,7 @@ import { db } from "../db/connection";
 import { nextCustomerCode, nextTransactionCode } from "../lib/codes";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth, requireRole } from "../lib/auth";
+import { logAudit } from "../lib/auditLog";
 
 export const customersRouter = Router();
 
@@ -240,6 +241,15 @@ customersRouter.delete(
     }
 
     db.prepare(`DELETE FROM customers WHERE id = ?`).run(req.params.id);
+
+    logAudit(
+      req.user!,
+      "customer_delete",
+      "customer",
+      Number(req.params.id),
+      `Deleted customer ${existing.name}${existing.customer_code ? ` (${existing.customer_code})` : ""}`
+    );
+
     res.status(204).send();
   })
 );
@@ -254,13 +264,15 @@ customersRouter.put(
   "/:id/suspend",
   requireRole("admin"),
   asyncHandler(async (req, res) => {
-    const existing = db.prepare(`SELECT * FROM customers WHERE id = ?`).get(req.params.id);
+    const existing = db.prepare(`SELECT * FROM customers WHERE id = ?`).get(req.params.id) as any;
     if (!existing) throw new ApiError(404, "Customer not found");
 
     const data = suspendInput.parse(req.body);
     db.prepare(
       `UPDATE customers SET is_suspended = 1, suspended_reason = ?, suspended_at = datetime('now', '+330 minutes') WHERE id = ?`
     ).run(data.reason, req.params.id);
+
+    logAudit(req.user!, "customer_suspend", "customer", Number(req.params.id), `Suspended customer ${existing.name} — ${data.reason}`);
 
     const updated = db.prepare(`SELECT customers.*, ${CALC_SUBQUERY} FROM customers WHERE id = ?`).get(req.params.id);
     res.json(updated);
@@ -282,6 +294,8 @@ customersRouter.put(
     db.prepare(
       `UPDATE customers SET is_suspended = 0, reactivated_reason = ?, reactivated_at = datetime('now', '+330 minutes') WHERE id = ?`
     ).run(data.reason, req.params.id);
+
+    logAudit(req.user!, "customer_reactivate", "customer", Number(req.params.id), `Reactivated customer ${existing.name} — ${data.reason}`);
 
     const updated = db.prepare(`SELECT customers.*, ${CALC_SUBQUERY} FROM customers WHERE id = ?`).get(req.params.id);
     res.json(updated);

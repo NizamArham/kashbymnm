@@ -4,6 +4,7 @@ import { db } from "../db/connection";
 import { nextSku } from "../lib/codes";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth, requireRole } from "../lib/auth";
+import { logAudit } from "../lib/auditLog";
 
 export const inventoryRouter = Router();
 
@@ -205,6 +206,14 @@ inventoryRouter.put(
     db.prepare(
       `UPDATE inventory SET status = ?, removal_reason = ?, removal_note = ? WHERE id = ?`
     ).run(statusByReason[data.reason], data.reason, data.note ?? null, req.params.id);
+
+    logAudit(
+      req.user!,
+      "inventory_remove",
+      "inventory",
+      Number(req.params.id),
+      `Removed unit ${existing.sku} from stock — ${data.reason}${data.note ? ` (${data.note})` : ""}`
+    );
 
     const updated = db.prepare(`SELECT * FROM inventory WHERE id = ?`).get(req.params.id);
     res.json(updated);

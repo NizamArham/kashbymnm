@@ -5,6 +5,7 @@ import { ApiError, asyncHandler } from "../lib/errors";
 import { nextTransactionCode } from "../lib/codes";
 import { requireAuth, requireRole } from "../lib/auth";
 import { computeFifoAllocation } from "./customers";
+import { logAudit } from "../lib/auditLog";
 
 export const chequesRouter = Router();
 
@@ -172,6 +173,15 @@ chequesRouter.delete(
     });
 
     runDelete();
+
+    logAudit(
+      req.user!,
+      "cheque_delete",
+      "cheque_receipt",
+      Number(req.params.id),
+      `Deleted in-hand cheque ${receipt.cheque_number} (Rs. ${receipt.amount.toLocaleString()})`
+    );
+
     res.status(204).send();
   })
 );
@@ -486,6 +496,15 @@ chequesRouter.put(
     });
 
     runBounce();
+
+    logAudit(
+      req.user!,
+      "cheque_bounce",
+      "cheque_receipt",
+      Number(req.params.id),
+      `Cheque ${receipt.cheque_number} bounced (Rs. ${receipt.amount.toLocaleString()}) — ${data.reason}`
+    );
+
     const updated = db.prepare(`${CHEQUE_SELECT} WHERE cheque_receipts.id = ?`).get(req.params.id);
     res.json({ cheque: updated, affected_supplier: transfer ? true : false });
   })
@@ -750,6 +769,15 @@ chequesRouter.put(
     });
 
     runBounce();
+
+    logAudit(
+      req.user!,
+      "cheque_bounce",
+      "cheque_issued",
+      Number(req.params.id),
+      `Issued cheque ${issued.cheque_number} bounced (Rs. ${issued.amount.toLocaleString()}) — ${data.reason}`
+    );
+
     const updated = db
       .prepare(
         `SELECT cheques_issued.*, suppliers.name as supplier_name

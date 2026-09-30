@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
-import { Building2, MapPin, Phone, Mail, Globe, Landmark, Pencil, Keyboard } from "lucide-react";
-import { api, ApiRequestError } from "../lib/api";
+import { Building2, MapPin, Phone, Mail, Globe, Landmark, Pencil, Keyboard, DatabaseBackup, Download, Send } from "lucide-react";
+import { api, ApiRequestError, downloadFile } from "../lib/api";
 import { BusinessInfo } from "../lib/types";
 import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, TabToggle } from "../components/ui";
 
-type SettingsTab = "business" | "reference";
+type SettingsTab = "business" | "reference" | "backup";
 
 interface ShortcutEntry {
   keys: string;
@@ -22,7 +22,7 @@ const SHORTCUTS: ShortcutEntry[] = [
   {
     keys: "/",
     action: "Jump into the search box",
-    where: "POS, Stocks, Manage Products, Customers, Staff, Find",
+    where: "POS, Stocks, Manage Products, Customers, Staff, Find, Audit Log",
   },
 ];
 
@@ -63,6 +63,12 @@ export default function GeneralSettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  const [downloadingBackup, setDownloadingBackup] = useState(false);
+  const [backupDownloadError, setBackupDownloadError] = useState<string | null>(null);
+  const [emailingBackup, setEmailingBackup] = useState(false);
+  const [backupEmailError, setBackupEmailError] = useState<string | null>(null);
+  const [backupEmailSuccess, setBackupEmailSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     api
@@ -137,6 +143,32 @@ export default function GeneralSettingsPage() {
 
   const address = [saved.address_line1, saved.address_line2, saved.city].filter(Boolean).join(", ");
 
+  async function handleDownloadBackup() {
+    setBackupDownloadError(null);
+    setDownloadingBackup(true);
+    try {
+      await downloadFile("/backup/download", "mm-clothing-backup.db");
+    } catch (err) {
+      setBackupDownloadError(err instanceof ApiRequestError ? err.message : "Failed to download backup");
+    } finally {
+      setDownloadingBackup(false);
+    }
+  }
+
+  async function handleEmailBackup() {
+    setBackupEmailError(null);
+    setBackupEmailSuccess(null);
+    setEmailingBackup(true);
+    try {
+      const result = await api.post<{ sent_to: string[] }>("/backup/email");
+      setBackupEmailSuccess(`Sent to ${result.sent_to.join(", ")}.`);
+    } catch (err) {
+      setBackupEmailError(err instanceof ApiRequestError ? err.message : "Failed to email backup");
+    } finally {
+      setEmailingBackup(false);
+    }
+  }
+
   return (
     <div>
       <PageHeader
@@ -149,6 +181,7 @@ export default function GeneralSettingsPage() {
             options={[
               { value: "business", label: "Business Info" },
               { value: "reference", label: "Reference" },
+              { value: "backup", label: "Backup" },
             ]}
           />
         }
@@ -294,7 +327,7 @@ export default function GeneralSettingsPage() {
         </Card>
       )}
         </>
-      ) : (
+      ) : tab === "reference" ? (
       <>
       <Card className="max-w-2xl">
         <h2 className="text-base font-semibold text-gray-900 mb-1">Invoice code reference</h2>
@@ -378,6 +411,43 @@ export default function GeneralSettingsPage() {
             </div>
           ))}
         </div>
+      </Card>
+      </>
+      ) : (
+      <>
+      <Card className="max-w-2xl">
+        <h2 className="text-base font-semibold text-gray-900 mb-1 flex items-center gap-1.5">
+          <DatabaseBackup size={16} className="text-gray-400" />
+          Database backup
+        </h2>
+        <p className="text-xs text-gray-500 mb-4">
+          A full snapshot of everything in Kash — products, sales, customers, all of it. Worth grabbing one regularly.
+        </p>
+
+        <div className="flex items-center justify-between py-3 border-t border-gray-100">
+          <div>
+            <p className="text-sm font-medium text-gray-900">Download backup now</p>
+            <p className="text-xs text-gray-400">Saves a .db file straight to your computer.</p>
+          </div>
+          <Button onClick={handleDownloadBackup} disabled={downloadingBackup} className="inline-flex items-center gap-1.5">
+            <Download size={14} />
+            {downloadingBackup ? "Preparing..." : "Download"}
+          </Button>
+        </div>
+        {backupDownloadError && <ErrorText>{backupDownloadError}</ErrorText>}
+
+        <div className="flex items-center justify-between py-3 border-t border-gray-100">
+          <div>
+            <p className="text-sm font-medium text-gray-900">Email backup now</p>
+            <p className="text-xs text-gray-400">Sends the same file to the address(es) configured on the server.</p>
+          </div>
+          <Button onClick={handleEmailBackup} disabled={emailingBackup} className="inline-flex items-center gap-1.5">
+            <Send size={14} />
+            {emailingBackup ? "Sending..." : "Email"}
+          </Button>
+        </div>
+        {backupEmailError && <ErrorText>{backupEmailError}</ErrorText>}
+        {backupEmailSuccess && <SuccessText>{backupEmailSuccess}</SuccessText>}
       </Card>
       </>
       )}

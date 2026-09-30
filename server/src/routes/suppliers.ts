@@ -4,6 +4,7 @@ import { db } from "../db/connection";
 import { generateSupplierCode } from "../lib/codes";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth, requireRole } from "../lib/auth";
+import { logAudit } from "../lib/auditLog";
 
 export const suppliersRouter = Router();
 
@@ -195,7 +196,7 @@ suppliersRouter.put(
 suppliersRouter.delete(
   "/:id",
   asyncHandler(async (req, res) => {
-    const existing = db.prepare(`SELECT * FROM suppliers WHERE id = ?`).get(req.params.id);
+    const existing = db.prepare(`SELECT * FROM suppliers WHERE id = ?`).get(req.params.id) as any;
     if (!existing) throw new ApiError(404, "Supplier not found");
 
     const hasProducts = db
@@ -213,6 +214,9 @@ suppliersRouter.delete(
     }
 
     db.prepare(`DELETE FROM suppliers WHERE id = ?`).run(req.params.id);
+
+    logAudit(req.user!, "supplier_delete", "supplier", Number(req.params.id), `Deleted supplier ${existing.name}`);
+
     res.status(204).send();
   })
 );

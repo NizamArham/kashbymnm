@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "../db/connection";
 import { signToken, requireAuth, requireRole } from "../lib/auth";
 import { ApiError, asyncHandler } from "../lib/errors";
+import { logAudit } from "../lib/auditLog";
 
 export const authRouter = Router();
 
@@ -268,6 +269,18 @@ authRouter.put(
       req.params.id
     );
 
+    if (merged.role !== existing.role) {
+      logAudit(
+        req.user!,
+        "staff_role_change",
+        "staff",
+        Number(req.params.id),
+        `Changed ${existing.username}'s role from ${existing.role} to ${merged.role}`
+      );
+    } else {
+      logAudit(req.user!, "staff_edit", "staff", Number(req.params.id), `Edited staff details for ${existing.username}`);
+    }
+
     const updated = db.prepare(`SELECT ${FULL_FIELD_LIST.join(", ")} FROM users WHERE id = ?`).get(req.params.id);
     res.json(updated);
   })
@@ -282,13 +295,16 @@ authRouter.put(
   requireAuth,
   requireRole("admin"),
   asyncHandler(async (req, res) => {
-    const existing = db.prepare(`SELECT id FROM users WHERE id = ?`).get(req.params.id);
+    const existing = db.prepare(`SELECT id, username FROM users WHERE id = ?`).get(req.params.id) as any;
     if (!existing) throw new ApiError(404, "User not found");
 
     const { password } = z.object({ password: z.string().min(6) }).parse(req.body);
     const password_hash = bcrypt.hashSync(password, 10);
 
     db.prepare(`UPDATE users SET password_hash = ? WHERE id = ?`).run(password_hash, req.params.id);
+
+    logAudit(req.user!, "staff_password_reset", "staff", Number(req.params.id), `Reset password for ${existing.username}`);
+
     res.status(204).send();
   })
 );

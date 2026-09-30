@@ -35,6 +35,8 @@ import CourierOrderHistoryPage from "./pages/CourierOrderHistoryPage";
 import GeneralSettingsPage from "./pages/GeneralSettingsPage";
 import FindPage from "./pages/FindPage";
 import AnalyticsPage from "./pages/AnalyticsPage";
+import AuditLogPage from "./pages/AuditLogPage";
+import PromotionsPage from "./pages/PromotionsPage";
 
 // Root path behaves differently per role: admin sees the Dashboard,
 // staff is redirected straight to POS, matching the access model.
@@ -202,6 +204,22 @@ export default function App() {
           element={
             <ProtectedRoute adminOnly>
               <AnalyticsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/audit-log"
+          element={
+            <ProtectedRoute adminOnly>
+              <AuditLogPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/promotions"
+          element={
+            <ProtectedRoute adminOnly>
+              <PromotionsPage />
             </ProtectedRoute>
           }
         />

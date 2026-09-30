@@ -27,6 +27,8 @@ import {
   Send,
   LayoutGrid,
   BarChart3,
+  ClipboardList,
+  Tag,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "../context/AuthContext";
@@ -79,6 +81,7 @@ export default function AppShell() {
       subItems: [
         { id: "checkout", label: "Checkout", path: "/pos", icon: ShoppingCart },
         { id: "sales-history", label: "Sale History", path: "/sales", icon: History },
+        { id: "promotions", label: "Promotions", path: "/promotions", icon: Tag, adminOnly: true },
       ],
     },
     {
@@ -150,6 +153,7 @@ export default function AppShell() {
       adminOnly: true,
       subItems: [
         { id: "attendance", label: "Attendance", path: "/attendance", icon: Clock },
+        { id: "audit-log", label: "Audit Log", path: "/audit-log", icon: ClipboardList },
         { id: "general-settings", label: "General Settings", path: "/settings/general", icon: Settings },
       ],
     },
@@ -163,13 +167,13 @@ export default function AppShell() {
 
   useEffect(() => {
     const path = location.pathname;
-    const isOnPos = path === "/pos" || path === "/sales";
+    const isOnPos = path === "/pos" || path === "/sales" || path === "/promotions";
     const isOnInventory = path === "/inventory" || path === "/products" || path === "/products/add";
     const isOnDirectory = path === "/customers" || path === "/customers/add" || path === "/staff" || path === "/suppliers";
     const isOnPurchases = path === "/purchases" || path === "/supplier-payments";
     const isOnFinance = path === "/cash-book" || path === "/cheques";
     const isOnDeliveries = path === "/deliveries" || path === "/couriers" || path === "/couriers/history" || path === "/waybill-generator";
-    const isOnAdmin = path === "/attendance" || path === "/settings/general";
+    const isOnAdmin = path === "/attendance" || path === "/settings/general" || path === "/audit-log";
 
     if (isOnPos) setOpenMenuId("pos");
     else if (isOnInventory) setOpenMenuId("inventory");

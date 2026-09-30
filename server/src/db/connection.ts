@@ -9,7 +9,7 @@ if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-const DB_PATH = path.join(DATA_DIR, "mm-clothing.db");
+export const DB_PATH = path.join(DATA_DIR, "mm-clothing.db");
 
 export const db = new Database(DB_PATH);
 db.pragma("foreign_keys = ON");

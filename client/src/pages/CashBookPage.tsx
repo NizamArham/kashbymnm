@@ -414,7 +414,7 @@ export default function CashBookPage() {
                       : "border-gray-200 text-gray-600 hover:border-gray-300"
                   }`}
                 >
-                  <TrendingDown size={14} />
+                  <TrendingUp size={14} />
                   Debit
                 </button>
                 <button
@@ -426,7 +426,7 @@ export default function CashBookPage() {
                       : "border-gray-200 text-gray-600 hover:border-gray-300"
                   }`}
                 >
-                  <TrendingUp size={14} />
+                  <TrendingDown size={14} />
                   Credit
                 </button>
               </div>

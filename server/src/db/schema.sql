@@ -47,6 +47,25 @@ CREATE TABLE IF NOT EXISTS login_activity (
 
 CREATE INDEX IF NOT EXISTS idx_login_activity_user ON login_activity(user_id);
 
+-- 0a-2. audit_log --------------------------------------------------------
+-- An audit trail of notable actions taken in the system — who did what,
+-- and when. Deliberately scoped to sensitive/destructive actions (deletes,
+-- voids, approve/decline, bounced cheques, suspensions, staff/HR changes)
+-- rather than every create/read, which already have their own full history
+-- pages (Sale History, Purchases, etc) and would just add noise here.
+CREATE TABLE IF NOT EXISTS audit_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  staff_id INTEGER REFERENCES users(id),
+  staff_name TEXT NOT NULL,
+  action TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  entity_id INTEGER,
+  description TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at);
+
 -- 0b. attendance ------------------------------------------------------------
 -- One row per staff member per day. Marked from a dedicated Attendance
 -- tab (pick the name, mark present, timestamp saved) rather than
@@ -415,6 +434,34 @@ CREATE TABLE IF NOT EXISTS coupons (
   discount_value REAL NOT NULL,
   is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
   expires_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes'))
+);
+
+-- 5b. gift_vouchers ------------------------------------------------------------
+-- Admin-managed stored-value codes — unlike a coupon (a discount applied
+-- at the moment of sale), a voucher carries an actual Rs. balance. Models
+-- a real physical voucher booklet: each code is printed with its own
+-- barcode ahead of time and sits dormant (activated_at IS NULL) until a
+-- customer actually buys it at POS — that sale is what "activates" it.
+-- validity_days is chosen at creation (not a fixed date, since nobody
+-- knows yet when a given voucher will be sold); once activated,
+-- expires_at is computed as activated_at + validity_days and stored so
+-- it doesn't need recomputing on every read. initial_value is fixed;
+-- remaining_value tracks what's left to spend across redemptions.
+-- is_enabled is a separate admin kill-switch (e.g. reported lost/stolen)
+-- independent of the sold/expiry lifecycle. Selling (activation) and
+-- redemption at POS aren't wired up yet — this is the admin-managed code
+-- list (create/edit/delete) the POS integration will build on.
+CREATE TABLE IF NOT EXISTS gift_vouchers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT UNIQUE NOT NULL,
+  initial_value REAL NOT NULL,
+  remaining_value REAL NOT NULL,
+  validity_days INTEGER NOT NULL,
+  activated_at TEXT,
+  expires_at TEXT,
+  is_enabled INTEGER NOT NULL DEFAULT 1 CHECK (is_enabled IN (0,1)),
+  notes TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes'))
 );
 

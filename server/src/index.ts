@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import { errorHandler } from "./lib/errors";
@@ -21,6 +22,9 @@ import { authRouter } from "./routes/auth";
 import { returnsRouter } from "./routes/returns";
 import { attendanceRouter } from "./routes/attendance";
 import { couponsRouter } from "./routes/coupons";
+import { auditLogRouter } from "./routes/auditLog";
+import { backupRouter } from "./routes/backup";
+import { giftVouchersRouter } from "./routes/giftVouchers";
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -57,6 +61,9 @@ app.use("/api/courier-reconciliation", courierReconciliationRouter);
 app.use("/api/cash-book", cashBookRouter);
 app.use("/api/attendance", attendanceRouter);
 app.use("/api/coupons", couponsRouter);
+app.use("/api/audit-log", auditLogRouter);
+app.use("/api/backup", backupRouter);
+app.use("/api/gift-vouchers", giftVouchersRouter);
 
 // Must be registered last — Express error-handling middleware.
 app.use(errorHandler);

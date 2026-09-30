@@ -4,6 +4,7 @@ import { db } from "../db/connection";
 import { nextPurchaseCode, nextSku, nextTransactionCode } from "../lib/codes";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth, requireRole } from "../lib/auth";
+import { logAudit } from "../lib/auditLog";
 
 export const purchasesRouter = Router();
 
@@ -944,6 +945,9 @@ purchasesRouter.delete(
     });
 
     runDelete();
+
+    logAudit(req.user!, "purchase_delete", "purchase", Number(req.params.id), `Deleted purchase ${purchase.purchase_code}`);
+
     res.status(204).send();
   })
 );

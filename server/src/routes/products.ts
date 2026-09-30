@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "../db/connection";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth, requireRole } from "../lib/auth";
+import { logAudit } from "../lib/auditLog";
 
 export const productsRouter = Router();
 
@@ -233,6 +234,9 @@ productsRouter.delete(
     });
 
     runDelete();
+
+    logAudit(req.user!, "product_delete", "product", Number(req.params.id), `Deleted product ${product.product_title}`);
+
     res.status(204).send();
   })
 );

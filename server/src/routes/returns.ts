@@ -4,6 +4,7 @@ import { db } from "../db/connection";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { nextTransactionCode } from "../lib/codes";
 import { requireAuth, requireRole } from "../lib/auth";
+import { logAudit } from "../lib/auditLog";
 
 export const returnsRouter = Router();
 
@@ -303,7 +304,16 @@ returnsRouter.put(
       return returnId;
     });
 
-    runApproval();
+    const returnId = runApproval();
+
+    logAudit(
+      req.user!,
+      "return_approve",
+      "return_request",
+      Number(req.params.id),
+      `Approved return on invoice ${saleItem.invoice} — ${request.resolution.replace(/_/g, " ")}${refund_amount > 0 ? ` (Rs. ${refund_amount.toLocaleString()} refunded)` : ""}`
+    );
+
     const updated = db.prepare(`${REQUEST_SELECT} WHERE return_requests.id = ?`).get(req.params.id);
     res.json(updated);
   })
@@ -324,6 +334,14 @@ returnsRouter.put(
     db.prepare(
       `UPDATE return_requests SET status = 'declined', decided_by = ?, decided_at = datetime('now', '+330 minutes'), decision_reason = ? WHERE id = ?`
     ).run(req.user!.id, data.decision_reason, req.params.id);
+
+    logAudit(
+      req.user!,
+      "return_decline",
+      "return_request",
+      Number(req.params.id),
+      `Declined return request #${req.params.id} — ${data.decision_reason}`
+    );
 
     const updated = db.prepare(`${REQUEST_SELECT} WHERE return_requests.id = ?`).get(req.params.id);
     res.json(updated);

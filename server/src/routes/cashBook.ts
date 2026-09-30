@@ -4,6 +4,7 @@ import { db } from "../db/connection";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { nextTransactionCode } from "../lib/codes";
 import { requireAuth, requireRole } from "../lib/auth";
+import { logAudit } from "../lib/auditLog";
 
 export const cashBookRouter = Router();
 
@@ -213,6 +214,15 @@ cashBookRouter.delete(
     assertWithinEditWindow(existing);
 
     db.prepare(`DELETE FROM cash_book WHERE id = ?`).run(req.params.id);
+
+    logAudit(
+      req.user!,
+      "cash_book_delete",
+      "cash_book",
+      Number(req.params.id),
+      `Deleted cash book entry ${existing.transaction_code ?? `#${existing.id}`} (Rs. ${existing.amount.toLocaleString()}, ${existing.type})`
+    );
+
     res.status(204).send();
   })
 );

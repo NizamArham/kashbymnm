@@ -60,3 +60,39 @@ export const api = {
   put: <T,>(path: string, body?: unknown) => request<T>("PUT", path, body),
   delete: <T,>(path: string) => request<T>("DELETE", path),
 };
+
+// For endpoints that return a raw file (e.g. a DB backup) instead of
+// JSON — the other `request()` helper always parses the body as JSON,
+// which would choke on binary content, so this is a separate small path
+// that fetches a blob and triggers a normal browser download.
+export async function downloadFile(path: string, fallbackName: string): Promise<void> {
+  const headers: Record<string, string> = {};
+  const token = getToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(`${API_BASE}${path}`, { headers });
+  if (!res.ok) {
+    let message = `Download failed (${res.status})`;
+    try {
+      const data = await res.json();
+      if (data?.error) message = data.error;
+    } catch {
+      // no JSON body — keep the generic message
+    }
+    throw new ApiRequestError(res.status, message);
+  }
+
+  const disposition = res.headers.get("Content-Disposition") ?? "";
+  const match = disposition.match(/filename="?([^"]+)"?/);
+  const filename = match?.[1] ?? fallbackName;
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}

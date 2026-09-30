@@ -4,6 +4,7 @@ import { db } from "../db/connection";
 import { nextInvoiceCode, InvoiceCategory, nextTransactionCode } from "../lib/codes";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth, requireRole } from "../lib/auth";
+import { logAudit } from "../lib/auditLog";
 
 export const salesRouter = Router();
 
@@ -666,6 +667,14 @@ salesRouter.put(
     });
 
     runVoidTransaction();
+
+    logAudit(
+      req.user!,
+      "sale_void",
+      "sale",
+      sale.id,
+      `Voided sale ${sale.invoice} (Rs. ${sale.total.toLocaleString()})${reasonInput.reason ? ` — ${reasonInput.reason}` : ""}`
+    );
 
     const updated = db.prepare(`SELECT * FROM sales WHERE id = ?`).get(req.params.id);
     res.json(updated);

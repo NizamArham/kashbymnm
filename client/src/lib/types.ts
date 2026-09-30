@@ -248,6 +248,19 @@ export interface Coupon {
   created_at: string;
 }
 
+export interface GiftVoucher {
+  id: number;
+  code: string;
+  initial_value: number;
+  remaining_value: number;
+  validity_days: number;
+  activated_at: string | null;
+  expires_at: string | null;
+  is_enabled: number;
+  notes: string | null;
+  created_at: string;
+}
+
 export interface ReturnRecord {
   id: number;
   sale_item_id: number;
@@ -356,6 +369,17 @@ export interface CashBookEntry {
   amount: number;
   running_balance: number;
   notes: string | null;
+}
+
+export interface AuditLogEntry {
+  id: number;
+  staff_id: number | null;
+  staff_name: string;
+  action: string;
+  entity_type: string;
+  entity_id: number | null;
+  description: string;
+  created_at: string;
 }
 
 export interface SupplierPayment {
