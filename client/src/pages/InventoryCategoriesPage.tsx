@@ -26,6 +26,7 @@ import { groupByProduct, summarizeProductVariants } from "../lib/sizeSort";
 import { createProductSearchIndex, searchProductUnits } from "../lib/productSearch";
 import { Card, Input, ErrorText, EmptyState, Table, Th, Td, Badge, inventoryStatusTone } from "../components/ui";
 import { downloadTabularReport, buildReportFilename, todayLongDate } from "../lib/reportPdf";
+import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 
 interface SelectedFilter {
   gender?: ProductGender;
@@ -377,6 +378,10 @@ export default function InventoryCategoriesPage() {
 
   const searchOpen = searchFocused && query.trim().length > 0;
 
+  // "/" jumps straight into the search box — same convention as the POS
+  // product search.
+  useKeyboardShortcut("/", () => inputRef.current?.focus());
+
   // ---- Debounce query (150ms) ----
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQuery(query), 150);
@@ -699,7 +704,7 @@ export default function InventoryCategoriesPage() {
               <Input
                 ref={inputRef}
                 className="pl-8 pr-7 py-2 text-sm"
-                placeholder="Search product, brand, SKU, barcode…"
+                placeholder="Search product, brand, SKU, barcode… (/)"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onFocus={() => setSearchFocused(true)}

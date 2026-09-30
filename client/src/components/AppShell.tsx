@@ -8,6 +8,7 @@ import {
   RotateCcw,
   Truck,
   Landmark,
+  Search,
   Plus,
   Settings,
   ChevronDown,
@@ -25,6 +26,7 @@ import {
   PackageCheck,
   Send,
   LayoutGrid,
+  BarChart3,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "../context/AuthContext";
@@ -67,6 +69,8 @@ export default function AppShell() {
 
   const menu: MenuItem[] = [
     { id: "dashboard", label: "Dashboard", icon: Home, path: "/" },
+    { id: "find", label: "Find", icon: Search, path: "/find", adminOnly: true },
+    { id: "analytics", label: "Analytics", icon: BarChart3, path: "/analytics", adminOnly: true },
     {
       id: "pos",
       label: "POS",

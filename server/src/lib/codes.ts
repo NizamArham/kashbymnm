@@ -182,6 +182,14 @@ export function nextPurchaseCode(): string {
   return `P${yymm}${String(nextNum).padStart(4, "0")}`;
 }
 
+// Every cash_book row gets one of these — a plain, permanent, never-reset
+// sequence (unlike invoice/purchase codes, a cash book entry has no
+// natural date-based or category-based grouping worth encoding), so it's
+// just a flat running number: TXN-0001, TXN-0002, ...
+export function nextTransactionCode(): string {
+  return nextSequentialCode("cash_book", "transaction_code", "TXN");
+}
+
 export function nextSku(productId: number): string {
   // SKU derived from product id + a running count of its inventory rows,
   // e.g. product 12's 3rd unit -> SKU-0012-003

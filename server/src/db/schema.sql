@@ -785,6 +785,10 @@ CREATE INDEX IF NOT EXISTS idx_deliveries_sale ON deliveries(sale_id);
 -- 11. cash_book -----------------------------------------------------------
 CREATE TABLE IF NOT EXISTS cash_book (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  -- A human-readable, searchable reference for this entry (e.g. TXN-0042)
+  -- — every insert generates one via nextTransactionCode(), so it can be
+  -- looked up through Find the same way an invoice or customer code can.
+  transaction_code TEXT UNIQUE,
   entry_date TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes')),
   type TEXT NOT NULL CHECK (type IN ('income','expense')),
   category TEXT NOT NULL,

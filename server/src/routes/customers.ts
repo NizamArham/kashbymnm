@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { db } from "../db/connection";
-import { nextCustomerCode } from "../lib/codes";
+import { nextCustomerCode, nextTransactionCode } from "../lib/codes";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth, requireRole } from "../lib/auth";
 
@@ -805,9 +805,10 @@ customersRouter.post(
         }
       } else {
         db.prepare(
-          `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
-           VALUES ('income', 'customer_payment', ?, ?, ?, ?)`
+          `INSERT INTO cash_book (transaction_code, type, category, payment_method, reference_id, amount, notes)
+           VALUES (?, 'income', 'customer_payment', ?, ?, ?, ?)`
         ).run(
+          nextTransactionCode(),
           data.method,
           req.params.id,
           totalAmount,

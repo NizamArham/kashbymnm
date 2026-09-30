@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "../db/connection";
 import { ApiError, asyncHandler } from "../lib/errors";
+import { nextTransactionCode } from "../lib/codes";
 import { requireAuth, requireRole } from "../lib/auth";
 
 export const returnsRouter = Router();
@@ -236,9 +237,9 @@ returnsRouter.put(
       if (request.resolution === "refund") {
         if (refund_amount > 0) {
           db.prepare(
-            `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
-             VALUES ('expense', 'return_refund', ?, ?, ?, ?)`
-          ).run(refundMethod, returnId, refund_amount, `Refund for invoice ${saleItem.invoice}`);
+            `INSERT INTO cash_book (transaction_code, type, category, payment_method, reference_id, amount, notes)
+             VALUES (?, 'expense', 'return_refund', ?, ?, ?, ?)`
+          ).run(nextTransactionCode(), refundMethod, returnId, refund_amount, `Refund for invoice ${saleItem.invoice}`);
         }
 
         // The part of this item that was never actually paid for comes

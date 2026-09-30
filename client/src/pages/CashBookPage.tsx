@@ -191,6 +191,7 @@ export default function CashBookPage() {
         ],
         rangeLabel,
         columns: [
+          { label: "Code", width: 70 },
           { label: "Date", width: 95 },
           { label: "Type", width: 60 },
           { label: "Method", width: 90 },
@@ -199,13 +200,14 @@ export default function CashBookPage() {
         ],
         rows: result.rows.map((entry) => ({
           cells: [
+            entry.transaction_code ?? "—",
             entry.entry_date.slice(0, 16).replace("T", " "),
             typeLabel(entry.type),
             methodLabel(entry.payment_method),
             `${entry.type === "income" ? "+" : "-"} Rs. ${entry.amount.toLocaleString()}`,
             `Rs. ${entry.running_balance.toLocaleString()}`,
           ],
-          styles: [undefined, undefined, undefined, { color: entry.type === "income" ? ([21, 128, 61] as [number, number, number]) : ([220, 38, 38] as [number, number, number]) }, undefined],
+          styles: [undefined, undefined, undefined, undefined, { color: entry.type === "income" ? ([21, 128, 61] as [number, number, number]) : ([220, 38, 38] as [number, number, number]) }, undefined],
         })),
         summaryLines: truncated
           ? [{ text: `Showing the latest ${result.rows.length} of ${result.total} entries — narrow the date range for a complete report.` }]
@@ -610,6 +612,9 @@ export default function CashBookPage() {
                             </td>
                             <td className="px-3 py-2.5 text-gray-500 text-xs whitespace-nowrap">
                               {entry.entry_date.slice(0, 16).replace("T", " ")}
+                              {entry.transaction_code && (
+                                <span className="block text-[10px] text-gray-300 font-mono">{entry.transaction_code}</span>
+                              )}
                             </td>
                             <td className="px-3 py-2.5">
                               <span className={`inline-flex items-center gap-1 text-xs font-medium ${

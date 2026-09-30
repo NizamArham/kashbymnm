@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "../db/connection";
 import { ApiError, asyncHandler } from "../lib/errors";
+import { nextTransactionCode } from "../lib/codes";
 import { requireAuth, requireRole } from "../lib/auth";
 
 export const supplierPaymentsRouter = Router();
@@ -107,9 +108,9 @@ supplierPaymentsRouter.post(
         );
 
       db.prepare(
-        `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
-         VALUES ('expense', 'supplier_payment', ?, ?, ?, ?)`
-      ).run(data.method ?? null, result.lastInsertRowid, data.amount, `${data.notes ?? "Supplier payment"}${accountNote}`);
+        `INSERT INTO cash_book (transaction_code, type, category, payment_method, reference_id, amount, notes)
+         VALUES (?, 'expense', 'supplier_payment', ?, ?, ?, ?)`
+      ).run(nextTransactionCode(), data.method ?? null, result.lastInsertRowid, data.amount, `${data.notes ?? "Supplier payment"}${accountNote}`);
 
       // If tied to a specific purchase, keep that purchase's payment_status current.
       if (data.purchase_id) {

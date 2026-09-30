@@ -4,11 +4,15 @@ import { api, ApiRequestError } from "../lib/api";
 import { Sale } from "../lib/types";
 import { downloadTabularReport, rangeLabelFor, buildReportFilename, formatLongDate, todayLongDate } from "../lib/reportPdf";
 import { downloadA4Pdf, downloadThermalPdf, sendWhatsAppBill, groupSaleItemsForDisplay } from "../lib/receipts";
-import { PageHeader, Card, Table, Th, Td, Badge, paymentStatusTone, EmptyState, ErrorText, DateRangePicker, Button, HelpHint, RowCard, RowCardStats, RowCardStat } from "../components/ui";
+import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
+import { useSortableData } from "../lib/useSortableData";
+import { useCopyToClipboard } from "../lib/useCopyToClipboard";
+import { PageHeader, Card, Table, Th, Td, Badge, SortHeader, paymentStatusTone, EmptyState, ErrorText, DateRangePicker, Button, HelpHint, RowCard, RowCardStats, RowCardStat } from "../components/ui";
 import ReceiptOptionsModal, { ModalOption } from "../components/ReceiptOptionsModal";
 import { useAuth } from "../context/AuthContext";
 
 type HistoryTab = "today" | "week" | "month" | "cash" | "credit_cod" | "voided";
+type SaleSortKey = "invoice" | "date" | "customer" | "total" | "paid";
 
 const TABS: { value: HistoryTab; label: string }[] = [
   { value: "today", label: "Today" },
@@ -178,6 +182,28 @@ export default function SaleHistoryPage() {
     return result;
   }, [sales, activeTab, startDate, endDate]);
 
+  const { sorted: sortedSales, sortKey, sortDir, toggleSort } = useSortableData<Sale, SaleSortKey>(
+    filteredSales,
+    (s, key) => {
+      switch (key) {
+        case "invoice":
+          return s.invoice.toLowerCase();
+        case "date":
+          return s.date;
+        case "customer":
+          return (s.customer_name ?? s.deleted_customer_snapshot ?? "Walk-in").toLowerCase();
+        case "total":
+          return s.total;
+        case "paid":
+          return s.amount_paid;
+      }
+    },
+    "date",
+    "desc"
+  );
+
+  const { copy: copySku, tooltip: skuCopyTooltip } = useCopyToClipboard();
+
   const periodTotal = filteredSales.reduce((sum, s) => sum + s.total, 0);
 
   // Downloads exactly what's currently on screen (the active tab or date
@@ -255,6 +281,8 @@ export default function SaleHistoryPage() {
       filename: buildReportFilename("Sales Report", rangeLabel),
     });
   }
+
+  useKeyboardShortcut("d", downloadSalesPdf, { ctrlOrCmd: true, shift: true, enabled: filteredSales.length > 0 });
 
   async function toggleExpand(sale: Sale) {
     if (expanded?.id === sale.id) {
@@ -381,7 +409,13 @@ export default function SaleHistoryPage() {
           <tbody>
             {groupSaleItemsForDisplay(sale.items ?? []).map((item) => (
               <tr key={item.ids.join(",")} className={item.is_returned ? "opacity-60" : ""}>
-                <Td className={item.is_returned ? "line-through" : ""}>{item.sku}</Td>
+                <td
+                  onClick={(e) => item.sku && copySku(`sku-${item.ids.join(",")}`, item.sku, e)}
+                  className={`px-3 py-2.5 border-b border-gray-50 text-gray-700 ${item.sku ? "cursor-pointer hover:bg-gray-100 rounded transition-colors select-none" : ""} ${item.is_returned ? "line-through" : ""}`}
+                  title={item.sku ? "Click to copy SKU" : undefined}
+                >
+                  {item.sku ?? "—"}
+                </td>
                 <Td className={item.is_returned ? "line-through" : ""}>
                   {item.product_title}
                   {item.is_returned ? (
@@ -496,7 +530,12 @@ export default function SaleHistoryPage() {
                 setEndDate(e);
               }}
             />
-            <Button onClick={downloadSalesPdf} disabled={filteredSales.length === 0} className="inline-flex items-center gap-1.5">
+            <Button
+              onClick={downloadSalesPdf}
+              disabled={filteredSales.length === 0}
+              className="inline-flex items-center gap-1.5"
+              title="Download PDF (Ctrl/Cmd+Shift+D)"
+            >
               <Download size={14} />
               Download PDF
             </Button>
@@ -545,19 +584,19 @@ export default function SaleHistoryPage() {
             <Table>
               <thead>
                 <tr>
-                  <Th>Invoice</Th>
-                  <Th>Date</Th>
-                  <Th>Customer</Th>
+                  <SortHeader<SaleSortKey> label="Invoice" sortKey="invoice" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+                  <SortHeader<SaleSortKey> label="Date" sortKey="date" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+                  <SortHeader<SaleSortKey> label="Customer" sortKey="customer" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
                   <Th>Type</Th>
-                  <Th>Total</Th>
-                  <Th>Paid</Th>
+                  <SortHeader<SaleSortKey> label="Total" sortKey="total" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+                  <SortHeader<SaleSortKey> label="Paid" sortKey="paid" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
                   <Th>Payment</Th>
                   <Th>Status</Th>
                   <Th></Th>
                 </tr>
               </thead>
               <tbody>
-                {filteredSales.map((sale) => (
+                {sortedSales.map((sale) => (
                   <Fragment key={sale.id}>
                     <tr
                       onClick={() => toggleExpand(sale)}
@@ -622,7 +661,7 @@ export default function SaleHistoryPage() {
 
           {/* Mobile / tablet-portrait: stacked cards, same tap-to-expand */}
           <div className="lg:hidden space-y-2.5">
-            {filteredSales.map((sale) => {
+            {sortedSales.map((sale) => {
               const isExpanded = expanded?.id === sale.id;
               return (
                 <RowCard key={sale.id} onClick={() => toggleExpand(sale)} className={sale.is_voided ? "opacity-50" : ""}>
@@ -742,6 +781,8 @@ export default function SaleHistoryPage() {
           </div>
         </div>
       )}
+
+      {skuCopyTooltip}
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "../db/connection";
 import { ApiError, asyncHandler } from "../lib/errors";
+import { nextTransactionCode } from "../lib/codes";
 import { requireAuth, requireRole } from "../lib/auth";
 
 export const courierReconciliationRouter = Router();
@@ -156,9 +157,9 @@ courierReconciliationRouter.post("/settlements", asyncHandler(async (req, res) =
     // this, Cash Book's current balance never reflects it even though
     // Courier Reconciliation's own balance does.
     db.prepare(
-      `INSERT INTO cash_book (type, category, reference_id, amount, notes)
-       VALUES ('income', 'courier_settlement', ?, ?, ?)`
-    ).run(result.lastInsertRowid, data.amount_received, data.notes ?? `Settlement from ${data.courier_partner}`);
+      `INSERT INTO cash_book (transaction_code, type, category, reference_id, amount, notes)
+       VALUES (?, 'income', 'courier_settlement', ?, ?, ?)`
+    ).run(nextTransactionCode(), result.lastInsertRowid, data.amount_received, data.notes ?? `Settlement from ${data.courier_partner}`);
 
     // A settlement means the courier has now actually paid the shop back
     // for everything they've delivered for this partner so far — so the

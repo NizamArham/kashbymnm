@@ -4,6 +4,7 @@ import { ArrowLeft, Receipt, Download, CreditCard } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Supplier, BusinessInfo, ChequeInfo } from "../lib/types";
 import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
+import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { PageHeader, Card, Table, Th, Td, EmptyState, ErrorText, DateRangePicker, Button } from "../components/ui";
 import ChequePreviewModal from "../components/ChequePreviewModal";
 
@@ -170,6 +171,8 @@ export default function SupplierPaymentHistoryPage() {
     });
   }
 
+  useKeyboardShortcut("d", downloadPdf, { ctrlOrCmd: true, shift: true, enabled: !!supplier && filteredEntries.length > 0 });
+
   return (
     <div>
       <button
@@ -188,7 +191,13 @@ export default function SupplierPaymentHistoryPage() {
             : undefined
         }
         action={
-          <Button variant="primary" onClick={downloadPdf} disabled={!supplier || filteredEntries.length === 0} className="inline-flex items-center gap-1.5">
+          <Button
+            variant="primary"
+            onClick={downloadPdf}
+            disabled={!supplier || filteredEntries.length === 0}
+            className="inline-flex items-center gap-1.5"
+            title="Download PDF (Ctrl/Cmd+Shift+D)"
+          >
             <Download size={14} />
             Download PDF
           </Button>

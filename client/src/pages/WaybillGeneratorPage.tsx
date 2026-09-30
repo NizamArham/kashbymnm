@@ -9,6 +9,7 @@ import { CityPicker } from "../components/CityPicker";
 import { api } from "../lib/api";
 import { Customer, BusinessInfo } from "../lib/types";
 import { applyBusinessInfoToReturnAddress } from "../lib/businessInfo";
+import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 
 function formatLabelDate(d: Date): string {
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -298,6 +299,8 @@ export default function WaybillGeneratorPage() {
     }
   }
 
+  useKeyboardShortcut("d", handleSavePdf, { ctrlOrCmd: true, shift: true, enabled: step === "package" && !processing });
+
   async function handlePrint() {
     if (!validateStep2()) return;
     setProcessing(true);
@@ -575,6 +578,7 @@ export default function WaybillGeneratorPage() {
                   <button
                     onClick={handleSavePdf}
                     disabled={processing}
+                    title="Save as PDF (Ctrl/Cmd+Shift+D)"
                     className="flex items-center gap-2 px-5 py-2.5 bg-black text-white rounded-full text-sm font-medium hover:bg-gray-800 transition disabled:opacity-50"
                   >
                     <Download size={15} />

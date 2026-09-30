@@ -143,3 +143,140 @@ export function RevenueChart({ data, height = 220 }: { data: RevenuePoint[]; hei
     </div>
   );
 }
+
+export interface RevenueProfitPoint {
+  label: string;
+  revenue: number;
+  profit: number;
+}
+
+const REVENUE_COLOR = "#111827"; // gray-900 — matches the single-series chart above
+const PROFIT_COLOR = "#059669"; // emerald-600 — distinct hue, reads as "growth" without clashing with the app's neutral palette
+
+// Two-series version of the chart above — same axis, gridlines, and
+// interaction model, but both Revenue and Profit share one y-axis (both
+// are Rs. amounts, so a second axis would violate the "one axis" rule)
+// and get a legend since there are now 2 series to tell apart.
+export function RevenueProfitChart({ data, height = 260 }: { data: RevenueProfitPoint[]; height?: number }) {
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+
+  const width = 760;
+  const padLeft = 50;
+  const padRight = 14;
+  const padTop = 16;
+  const padBottom = 26;
+  const plotWidth = width - padLeft - padRight;
+  const plotHeight = height - padTop - padBottom;
+
+  const maxValue = useMemo(
+    () => niceCeiling(Math.max(...data.map((d) => Math.max(d.revenue, d.profit)), 1) * 1.15),
+    [data]
+  );
+  const gridLines = 4;
+
+  const points = useMemo(() => {
+    if (data.length === 0) return [];
+    const stepX = data.length > 1 ? plotWidth / (data.length - 1) : 0;
+    return data.map((d, i) => ({
+      x: padLeft + stepX * i,
+      yRevenue: padTop + plotHeight * (1 - d.revenue / maxValue),
+      yProfit: padTop + plotHeight * (1 - d.profit / maxValue),
+      ...d,
+    }));
+  }, [data, maxValue, plotWidth, plotHeight]);
+
+  const revenuePath = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.yRevenue.toFixed(1)}`).join(" ");
+  const profitPath = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.yProfit.toFixed(1)}`).join(" ");
+
+  const hovered = hoverIndex !== null ? points[hoverIndex] : null;
+
+  function handleMove(e: React.MouseEvent<SVGSVGElement>) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const relX = ((e.clientX - rect.left) / rect.width) * width;
+    if (points.length === 0) return;
+    const stepX = points.length > 1 ? plotWidth / (points.length - 1) : 0;
+    const idx = stepX > 0 ? Math.round((relX - padLeft) / stepX) : 0;
+    setHoverIndex(Math.max(0, Math.min(points.length - 1, idx)));
+  }
+
+  return (
+    <div>
+      <div className="flex items-center gap-4 mb-2 px-1">
+        <span className="flex items-center gap-1.5 text-xs text-gray-500">
+          <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: REVENUE_COLOR }} />
+          Revenue
+        </span>
+        <span className="flex items-center gap-1.5 text-xs text-gray-500">
+          <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: PROFIT_COLOR }} />
+          Profit
+        </span>
+      </div>
+      <div className="relative">
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          className="w-full"
+          style={{ height }}
+          onMouseMove={handleMove}
+          onMouseLeave={() => setHoverIndex(null)}
+        >
+          {Array.from({ length: gridLines + 1 }, (_, i) => {
+            const value = (maxValue / gridLines) * i;
+            const y = padTop + plotHeight * (1 - i / gridLines);
+            return (
+              <g key={i}>
+                <line x1={padLeft} y1={y} x2={width - padRight} y2={y} stroke="#F1F1F1" strokeWidth={1} />
+                <text x={padLeft - 8} y={y + 3} textAnchor="end" fontSize="10" fill="#9CA3AF">
+                  {formatCompact(value)}
+                </text>
+              </g>
+            );
+          })}
+
+          {points.map((p, i) => {
+            const showEvery = points.length > 14 ? Math.ceil(points.length / 8) : 1;
+            if (i % showEvery !== 0 && i !== points.length - 1) return null;
+            return (
+              <text key={i} x={p.x} y={height - 8} textAnchor="middle" fontSize="10" fill="#9CA3AF">
+                {p.label}
+              </text>
+            );
+          })}
+
+          {revenuePath && <path d={revenuePath} fill="none" stroke={REVENUE_COLOR} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />}
+          {profitPath && <path d={profitPath} fill="none" stroke={PROFIT_COLOR} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />}
+
+          {hovered && (
+            <>
+              <line
+                x1={hovered.x}
+                y1={padTop}
+                x2={hovered.x}
+                y2={padTop + plotHeight}
+                stroke="#9CA3AF"
+                strokeWidth={1}
+                strokeDasharray="3,3"
+              />
+              <circle cx={hovered.x} cy={hovered.yRevenue} r={4} fill={REVENUE_COLOR} stroke="#fff" strokeWidth={2} />
+              <circle cx={hovered.x} cy={hovered.yProfit} r={4} fill={PROFIT_COLOR} stroke="#fff" strokeWidth={2} />
+            </>
+          )}
+        </svg>
+
+        {hovered && (
+          <div
+            className="absolute pointer-events-none bg-gray-900 text-white text-xs font-medium px-2.5 py-1.5 rounded-lg shadow-lg whitespace-nowrap -translate-x-1/2"
+            style={{
+              left: `${(hovered.x / width) * 100}%`,
+              top: `${Math.max(0, (Math.min(hovered.yRevenue, hovered.yProfit) / height) * 100 - 16)}%`,
+            }}
+          >
+            <span style={{ color: "#34D399" }}>Profit Rs. {hovered.profit.toLocaleString()}</span>
+            <span className="mx-1 text-gray-500">·</span>
+            <span>Revenue Rs. {hovered.revenue.toLocaleString()}</span>
+            <span className="block text-[10px] text-gray-400 font-normal">{hovered.label}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

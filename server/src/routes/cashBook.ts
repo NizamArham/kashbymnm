@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "../db/connection";
 import { ApiError, asyncHandler } from "../lib/errors";
+import { nextTransactionCode } from "../lib/codes";
 import { requireAuth, requireRole } from "../lib/auth";
 
 export const cashBookRouter = Router();
@@ -135,10 +136,11 @@ cashBookRouter.post(
 
     const result = db
       .prepare(
-        `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes, entry_date)
-         VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now', '+330 minutes')))`
+        `INSERT INTO cash_book (transaction_code, type, category, payment_method, reference_id, amount, notes, entry_date)
+         VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now', '+330 minutes')))`
       )
       .run(
+        nextTransactionCode(),
         data.type,
         data.category,
         data.payment_method ?? null,
@@ -242,15 +244,17 @@ cashBookRouter.post(
 
     const runTransfer = db.transaction(() => {
       const outResult = db
-        .prepare(`INSERT INTO cash_book (type, category, payment_method, amount, notes) VALUES ('expense', 'transfer', ?, ?, ?)`)
-        .run(fromMethod, data.amount, `Transfer to ${toMethod === "cash" ? "cash in hand" : "bank"}${noteSuffix}`);
+        .prepare(
+          `INSERT INTO cash_book (transaction_code, type, category, payment_method, amount, notes) VALUES (?, 'expense', 'transfer', ?, ?, ?)`
+        )
+        .run(nextTransactionCode(), fromMethod, data.amount, `Transfer to ${toMethod === "cash" ? "cash in hand" : "bank"}${noteSuffix}`);
       const outId = outResult.lastInsertRowid;
 
       const inResult = db
         .prepare(
-          `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes) VALUES ('income', 'transfer', ?, ?, ?, ?)`
+          `INSERT INTO cash_book (transaction_code, type, category, payment_method, reference_id, amount, notes) VALUES (?, 'income', 'transfer', ?, ?, ?, ?)`
         )
-        .run(toMethod, outId, data.amount, `Transfer from ${fromMethod === "cash" ? "cash in hand" : "bank"}${noteSuffix}`);
+        .run(nextTransactionCode(), toMethod, outId, data.amount, `Transfer from ${fromMethod === "cash" ? "cash in hand" : "bank"}${noteSuffix}`);
       const inId = inResult.lastInsertRowid;
 
       // Link the first entry back to the second now that its id exists.

@@ -4,6 +4,9 @@ import { api, ApiRequestError } from "../lib/api";
 import { Product, InventoryUnit, Supplier, RemovalReason, Purchase, Category, SubCategory } from "../lib/types";
 import { compareSizes } from "../lib/sizeSort";
 import { splitCategory, extractGenderSuffix, composeCategory } from "../lib/categoryTree";
+import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
+import { useSortableData } from "../lib/useSortableData";
+import { useCopyToClipboard } from "../lib/useCopyToClipboard";
 import {
   PageHeader,
   Card,
@@ -15,6 +18,7 @@ import {
   Dropdown,
   Button,
   Badge,
+  SortHeader,
   inventoryStatusTone,
   EmptyState,
   ErrorText,
@@ -31,6 +35,7 @@ const LOW_STOCK_THRESHOLD = 5;
 const removalReasons: RemovalReason[] = ["Damaged", "Gifted", "Staff Use", "Stolen", "Lost", "Other"];
 
 type ExpandedTab = "stock" | "restock" | "details";
+type ProductSortKey = "title" | "brand" | "category" | "price" | "qty";
 
 interface VariantSummary {
   color: string;
@@ -88,6 +93,13 @@ function summarizeVariants(units: InventoryUnit[]): VariantSummary[] {
     if (colorCompare !== 0) return colorCompare;
     return compareSizes(a.size, b.size);
   });
+}
+
+function firstBarcode(range: string): string {
+  return range.split(/\s*[-–]\s*/)[0].trim();
+}
+function isBarcodeRange(range: string): boolean {
+  return /[-–]/.test(range);
 }
 
 function ComboPicker({
@@ -522,6 +534,8 @@ function ManageCategoriesModal({
 export default function ManageProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  useKeyboardShortcut("/", () => searchInputRef.current?.focus());
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [inventoryByProduct, setInventoryByProduct] = useState<Record<number, InventoryUnit[]>>({});
   const [loading, setLoading] = useState(true);
@@ -839,6 +853,27 @@ export default function ManageProductsPage() {
     );
   });
 
+  const { sorted: sortedProducts, sortKey, sortDir, toggleSort } = useSortableData<Product, ProductSortKey>(
+    filteredProducts,
+    (p, key) => {
+      switch (key) {
+        case "title":
+          return p.product_title.toLowerCase();
+        case "brand":
+          return (p.brand ?? "").toLowerCase();
+        case "category":
+          return (p.category ?? "").toLowerCase();
+        case "price":
+          return p.selling_price;
+        case "qty":
+          return p.qty;
+      }
+    },
+    "title"
+  );
+
+  const { copy: copyValue, tooltip: copyTooltip } = useCopyToClipboard();
+
   const totalUnitsInStock = products.reduce((sum, p) => sum + p.qty, 0);
   const distinctCategoryCount = new Set(products.map((p) => splitCategory(p.category).category).filter(Boolean)).size;
   const editSelectedCategory = categories.find((c) => c.name === editForm.category);
@@ -872,10 +907,11 @@ export default function ManageProductsPage() {
           <div className="relative mb-4 max-w-md">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
+              ref={searchInputRef}
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search products..."
+              placeholder="Search products... (/)"
               className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-gray-400"
             />
           </div>
@@ -897,15 +933,15 @@ export default function ManageProductsPage() {
                 <thead className="sticky top-0 z-10 bg-white">
                   <tr>
                     <Th className="w-8"></Th>
-                    <Th>Product title</Th>
-                    <Th>Brand</Th>
-                    <Th>Category</Th>
-                    <Th>Selling price</Th>
-                    <Th>In stock</Th>
+                    <SortHeader<ProductSortKey> label="Product title" sortKey="title" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+                    <SortHeader<ProductSortKey> label="Brand" sortKey="brand" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+                    <SortHeader<ProductSortKey> label="Category" sortKey="category" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+                    <SortHeader<ProductSortKey> label="Selling price" sortKey="price" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+                    <SortHeader<ProductSortKey> label="In stock" sortKey="qty" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredProducts.map((p) => {
+                  {sortedProducts.map((p) => {
                     const isExpanded = expandedId === p.id;
                     const units = inventoryByProduct[p.id] ?? [];
 
@@ -976,9 +1012,13 @@ export default function ManageProductsPage() {
                                               </tr>
                                             </thead>
                                             <tbody className="divide-y divide-gray-100">
-                                              {summarizeVariants(units).map((row) => {
+                                              {summarizeVariants(units).map((row, i) => {
                                                 const rowKey = `${row.color}::${row.size}::${row.status}`;
                                                 const canRemove = row.status === "available";
+                                                const skuKey = `sku-${p.id}-${i}`;
+                                                const barcodeKey = `bc-${p.id}-${i}`;
+                                                const hasRange = isBarcodeRange(row.barcodeRange);
+                                                const barcodeToCopy = firstBarcode(row.barcodeRange);
                                                 return (
                                                   <Fragment key={rowKey}>
                                                     <tr className={removeOpenKey === rowKey ? "bg-red-50/40" : ""}>
@@ -996,10 +1036,20 @@ export default function ManageProductsPage() {
                                                           </button>
                                                         )}
                                                       </td>
-                                                      <td className="px-3 py-2">
+                                                      <td
+                                                        onClick={(e) => copyValue(skuKey, row.skuSample, e)}
+                                                        className="px-3 py-2 cursor-pointer hover:bg-gray-100 rounded transition-colors select-none"
+                                                        title="Click to copy SKU"
+                                                      >
                                                         {row.count > 1 ? `${row.skuSample} (+${row.count - 1} more)` : row.skuSample}
                                                       </td>
-                                                      <td className="px-3 py-2 font-mono text-xs">{row.barcodeRange}</td>
+                                                      <td
+                                                        onClick={(e) => copyValue(barcodeKey, barcodeToCopy, e)}
+                                                        className="px-3 py-2 font-mono text-xs cursor-pointer hover:bg-gray-100 rounded transition-colors select-none"
+                                                        title={hasRange ? `Click to copy first: ${barcodeToCopy}` : "Click to copy barcode"}
+                                                      >
+                                                        {row.barcodeRange}
+                                                      </td>
                                                       <td className="px-3 py-2">
                                                         <Badge label={row.status} tone={inventoryStatusTone(row.status)} />
                                                       </td>
@@ -1442,6 +1492,8 @@ export default function ManageProductsPage() {
           onReload={load}
         />
       )}
+
+      {copyTooltip}
     </div>
   );
 }

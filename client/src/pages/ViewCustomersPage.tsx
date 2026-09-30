@@ -4,8 +4,10 @@ import { api, ApiRequestError } from "../lib/api";
 import { Customer, CustomerAddress, BankAccount, CustomerGender } from "../lib/types";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { PageHeader, Card, Table, Th, Td, Input, Button, EmptyState, ErrorText, SuccessText, Label, FormGroup, Dropdown, DatePicker, HelpHint, TabToggle } from "../components/ui";
+import { PageHeader, Card, Table, Th, Td, Input, Button, EmptyState, ErrorText, SuccessText, Label, FormGroup, Dropdown, DatePicker, HelpHint, TabToggle, SortHeader } from "../components/ui";
 import { CityPicker } from "../components/CityPicker";
+import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
+import { useSortableData } from "../lib/useSortableData";
 
 function whatsappLink(phone: string): string {
   const digitsOnly = phone.replace(/\D/g, "").replace(/^0/, "");
@@ -26,6 +28,7 @@ function whatsappMessageLink(phone: string, message: string): string {
 
 type ExpandedTab = "overview" | "contact" | "addresses" | "bank";
 type PaymentMethod = "cash" | "bank_transfer" | "cheque" | "other";
+type CustomerSortKey = "priority" | "code" | "name" | "phone" | "loyalty" | "balance" | "last_order";
 
 function startOfToday(): Date {
   const d = new Date();
@@ -129,6 +132,8 @@ export default function ViewCustomersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  useKeyboardShortcut("/", () => searchInputRef.current?.focus());
 
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState<{ name: string; phone: string; phone2: string; gender: CustomerGender }>({
@@ -712,21 +717,40 @@ export default function ViewCustomersPage() {
     );
   }, [customers, query]);
 
-  // Three-tier ordering, most actionable first:
+  // Default order (sortKey "priority"), most actionable first:
   //   1. Pending  — customer owes money (balance_due > 0)
   //   2. Overpaid — has store credit and no debt
   //   3. Settled  — nothing outstanding either way
-  // Within each tier, the original order from the API is preserved
-  // (stable sort). Re-runs only when the filtered list changes, so
-  // the order stays stable during a session.
-  const sortedCustomers = useMemo(() => {
-    function tier(c: Customer): number {
-      if ((c.balance_due ?? 0) > 0) return 0; // pending — owes us money
-      if ((c.store_credit_balance ?? 0) > 0) return 1; // overpaid — we owe them credit
-      return 2; // settled
-    }
-    return [...filteredCustomers].sort((a, b) => tier(a) - tier(b));
-  }, [filteredCustomers]);
+  // Clicking any column header overrides this with a plain sort on
+  // that column, same as every other sortable table.
+  function tier(c: Customer): number {
+    if ((c.balance_due ?? 0) > 0) return 0; // pending — owes us money
+    if ((c.store_credit_balance ?? 0) > 0) return 1; // overpaid — we owe them credit
+    return 2; // settled
+  }
+
+  const { sorted: sortedCustomers, sortKey, sortDir, toggleSort } = useSortableData<Customer, CustomerSortKey>(
+    filteredCustomers,
+    (c, key) => {
+      switch (key) {
+        case "priority":
+          return tier(c);
+        case "code":
+          return c.customer_code.toLowerCase();
+        case "name":
+          return c.name.toLowerCase();
+        case "phone":
+          return (c.phone ?? "").toLowerCase();
+        case "loyalty":
+          return c.loyalty_points;
+        case "balance":
+          return c.store_credit_balance - c.balance_due;
+        case "last_order":
+          return c.last_order_date ?? "";
+      }
+    },
+    "priority"
+  );
 
   return (
     <div>
@@ -746,7 +770,7 @@ export default function ViewCustomersPage() {
           <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
             <Search size={16} className="text-gray-400" />
           </div>
-          <Input className="pl-10" placeholder="Search customers..." value={query} onChange={(e) => setQuery(e.target.value)} />
+          <Input ref={searchInputRef} className="pl-10" placeholder="Search customers... (/)" value={query} onChange={(e) => setQuery(e.target.value)} />
         </div>
       </Card>
 
@@ -762,12 +786,12 @@ export default function ViewCustomersPage() {
             <thead>
               <tr>
                 <Th></Th>
-                <Th>Code</Th>
-                <Th>Name</Th>
-                <Th>Phone</Th>
-                <Th>Loyalty points</Th>
-                <Th>Balance</Th>
-                <Th>Last order</Th>
+                <SortHeader<CustomerSortKey> label="Code" sortKey="code" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+                <SortHeader<CustomerSortKey> label="Name" sortKey="name" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+                <SortHeader<CustomerSortKey> label="Phone" sortKey="phone" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+                <SortHeader<CustomerSortKey> label="Loyalty points" sortKey="loyalty" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+                <SortHeader<CustomerSortKey> label="Balance" sortKey="balance" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+                <SortHeader<CustomerSortKey> label="Last order" sortKey="last_order" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
               </tr>
             </thead>
             <tbody>

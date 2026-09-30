@@ -347,6 +347,7 @@ export interface Delivery {
 
 export interface CashBookEntry {
   id: number;
+  transaction_code: string | null;
   entry_date: string;
   type: "income" | "expense";
   category: string;

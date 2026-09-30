@@ -1,8 +1,30 @@
 import { useState, useEffect } from "react";
-import { Building2, MapPin, Phone, Mail, Globe, Landmark, Pencil } from "lucide-react";
+import { Building2, MapPin, Phone, Mail, Globe, Landmark, Pencil, Keyboard } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { BusinessInfo } from "../lib/types";
-import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button } from "../components/ui";
+import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, TabToggle } from "../components/ui";
+
+type SettingsTab = "business" | "reference";
+
+interface ShortcutEntry {
+  keys: string;
+  action: string;
+  where: string;
+}
+
+const SHORTCUTS: ShortcutEntry[] = [
+  { keys: "Ctrl/Cmd + Shift + D", action: "Download this page's report", where: "Sale History, Analytics, Purchases (History tab)" },
+  { keys: "Ctrl/Cmd + Shift + D", action: "Download this statement", where: "Customer / Supplier Payment History" },
+  { keys: "Ctrl/Cmd + Shift + D", action: "Save the waybill as PDF", where: "Waybill Generator, on the final (package) step" },
+  { keys: "Ctrl/Cmd + Shift + D", action: "Open “Get Receipt”", where: "Sale Detail" },
+  { keys: "↑ / ↓", action: "Recall a recently-looked-up code", where: "Find" },
+  { keys: "Esc", action: "Clear the search box and result", where: "Find" },
+  {
+    keys: "/",
+    action: "Jump into the search box",
+    where: "POS, Stocks, Manage Products, Customers, Staff, Find",
+  },
+];
 
 type FormState = {
   business_name: string;
@@ -33,6 +55,7 @@ const EMPTY_FORM: FormState = {
 };
 
 export default function GeneralSettingsPage() {
+  const [tab, setTab] = useState<SettingsTab>("business");
   const [saved, setSaved] = useState<FormState>(EMPTY_FORM);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [isEditing, setIsEditing] = useState(false);
@@ -116,8 +139,23 @@ export default function GeneralSettingsPage() {
 
   return (
     <div>
-      <PageHeader title="General settings" subtitle="Business details used on receipts, waybills, and invoices." />
+      <PageHeader
+        title="General settings"
+        subtitle="Business details used on receipts, waybills, and invoices."
+        action={
+          <TabToggle
+            value={tab}
+            onChange={setTab}
+            options={[
+              { value: "business", label: "Business Info" },
+              { value: "reference", label: "Reference" },
+            ]}
+          />
+        }
+      />
 
+      {tab === "business" ? (
+        <>
       {loading ? (
         <p className="text-sm text-gray-400">Loading...</p>
       ) : !isEditing ? (
@@ -255,8 +293,10 @@ export default function GeneralSettingsPage() {
           </div>
         </Card>
       )}
-
-      <Card className="max-w-2xl mt-4">
+        </>
+      ) : (
+      <>
+      <Card className="max-w-2xl">
         <h2 className="text-base font-semibold text-gray-900 mb-1">Invoice code reference</h2>
         <p className="text-xs text-gray-500 mb-3">
           What each invoice prefix means, and how the number after it is built — kept here since it's easy to forget.
@@ -289,6 +329,58 @@ export default function GeneralSettingsPage() {
           of that scheme, and whichever sale came next (any prefix) became ...0241.
         </p>
       </Card>
+
+      <Card className="max-w-2xl mt-4">
+        <h2 className="text-base font-semibold text-gray-900 mb-1">Customer code reference</h2>
+        <p className="text-xs text-gray-500 mb-3">How a customer's code (e.g. C3090001M) is built, segment by segment.</p>
+        <div className="grid grid-cols-1 gap-1.5 text-sm">
+          <div className="flex justify-between border-b border-gray-100 pb-1.5">
+            <span className="font-medium text-gray-900">C</span>
+            <span className="text-gray-600">Fixed prefix</span>
+          </div>
+          <div className="flex justify-between border-b border-gray-100 pb-1.5">
+            <span className="font-medium text-gray-900">3</span>
+            <span className="text-gray-600">Shop year — the shop's own age, not the calendar year (2024 = 1, 2025 = 2, 2026 = 3, …)</span>
+          </div>
+          <div className="flex justify-between border-b border-gray-100 pb-1.5">
+            <span className="font-medium text-gray-900">09</span>
+            <span className="text-gray-600">The month they joined (2 digits)</span>
+          </div>
+          <div className="flex justify-between border-b border-gray-100 pb-1.5">
+            <span className="font-medium text-gray-900">0001</span>
+            <span className="text-gray-600">A lifetime running number — shared across every gender, never resets</span>
+          </div>
+          <div className="flex justify-between pb-1.5">
+            <span className="font-medium text-gray-900">M / F / U</span>
+            <span className="text-gray-600">Gender at signup — Male / Female / Unspecified</span>
+          </div>
+        </div>
+        <p className="text-xs text-gray-400 mt-3">
+          Correcting a customer's gender later only changes future filtering/segmentation — it never regenerates their
+          code, the same way a sale's invoice number is fixed forever once issued.
+        </p>
+      </Card>
+
+      <Card className="max-w-2xl mt-4">
+        <h2 className="text-base font-semibold text-gray-900 mb-1 flex items-center gap-1.5">
+          <Keyboard size={16} className="text-gray-400" />
+          Keyboard shortcuts
+        </h2>
+        <p className="text-xs text-gray-500 mb-3">Available on the pages listed — a text field always keeps its own keystrokes.</p>
+        <div className="grid grid-cols-1 gap-1.5 text-sm">
+          {SHORTCUTS.map((s, i) => (
+            <div key={i} className={`flex items-center justify-between gap-3 py-1.5 ${i < SHORTCUTS.length - 1 ? "border-b border-gray-100" : ""}`}>
+              <span className="font-mono text-xs bg-gray-100 text-gray-700 rounded-md px-2 py-1 flex-shrink-0">{s.keys}</span>
+              <div className="text-right">
+                <p className="text-gray-900">{s.action}</p>
+                <p className="text-gray-400 text-xs">{s.where}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+      </>
+      )}
     </div>
   );
 }

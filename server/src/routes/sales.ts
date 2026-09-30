@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { db } from "../db/connection";
-import { nextInvoiceCode, InvoiceCategory } from "../lib/codes";
+import { nextInvoiceCode, InvoiceCategory, nextTransactionCode } from "../lib/codes";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth, requireRole } from "../lib/auth";
 
@@ -374,9 +374,9 @@ salesRouter.post(
       const netCashPaid = data.amount_paid - change_due;
       if (netCashPaid > 0) {
         db.prepare(
-          `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
-           VALUES ('income', 'sale', ?, ?, ?, ?)`
-        ).run(data.payment_method ?? null, saleId, netCashPaid, `Payment for invoice ${invoice}`);
+          `INSERT INTO cash_book (transaction_code, type, category, payment_method, reference_id, amount, notes)
+           VALUES (?, 'income', 'sale', ?, ?, ?, ?)`
+        ).run(nextTransactionCode(), data.payment_method ?? null, saleId, netCashPaid, `Payment for invoice ${invoice}`);
       }
 
       // Online sales need to ship — auto-create a pending delivery using
@@ -461,9 +461,9 @@ salesRouter.put(
       );
 
       db.prepare(
-        `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
-         VALUES ('income', 'sale', ?, ?, ?, ?)`
-      ).run(payment_method ?? null, req.params.id, amount, `Additional payment for invoice ${sale.invoice}`);
+        `INSERT INTO cash_book (transaction_code, type, category, payment_method, reference_id, amount, notes)
+         VALUES (?, 'income', 'sale', ?, ?, ?, ?)`
+      ).run(nextTransactionCode(), payment_method ?? null, req.params.id, amount, `Additional payment for invoice ${sale.invoice}`);
     });
 
     runPaymentTransaction();
@@ -516,9 +516,9 @@ salesRouter.put(
       db.prepare(`UPDATE sales SET amount_paid = total, payment_status = 'paid' WHERE id = ?`).run(req.params.id);
 
       db.prepare(
-        `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
-         VALUES ('income', 'sale', ?, ?, ?, ?)`
-      ).run(payment_method, req.params.id, remaining, `COD collected on delivery — invoice ${sale.invoice}`);
+        `INSERT INTO cash_book (transaction_code, type, category, payment_method, reference_id, amount, notes)
+         VALUES (?, 'income', 'sale', ?, ?, ?, ?)`
+      ).run(nextTransactionCode(), payment_method, req.params.id, remaining, `COD collected on delivery — invoice ${sale.invoice}`);
     });
 
     runConfirm();
@@ -577,9 +577,9 @@ salesRouter.put(
       );
 
       db.prepare(
-        `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
-         VALUES ('expense', 'sale', ?, ?, ?, ?)`
-      ).run(entry.payment_method, req.params.id, entry.amount, reversalNote);
+        `INSERT INTO cash_book (transaction_code, type, category, payment_method, reference_id, amount, notes)
+         VALUES (?, 'expense', 'sale', ?, ?, ?, ?)`
+      ).run(nextTransactionCode(), entry.payment_method, req.params.id, entry.amount, reversalNote);
     });
 
     runUndo();
@@ -628,9 +628,9 @@ salesRouter.put(
       const cashPortionPaid = sale.amount_paid - creditRedeemed.total;
       if (cashPortionPaid > 0) {
         db.prepare(
-          `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
-           VALUES ('expense', 'sale_void', ?, ?, ?, ?)`
-        ).run(sale.payment_method ?? null, sale.id, cashPortionPaid, `Reversal of voided invoice ${sale.invoice}`);
+          `INSERT INTO cash_book (transaction_code, type, category, payment_method, reference_id, amount, notes)
+           VALUES (?, 'expense', 'sale_void', ?, ?, ?, ?)`
+        ).run(nextTransactionCode(), sale.payment_method ?? null, sale.id, cashPortionPaid, `Reversal of voided invoice ${sale.invoice}`);
       }
 
       // Cancel any delivery tied to this sale rather than leaving it

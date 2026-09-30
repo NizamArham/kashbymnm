@@ -1,9 +1,11 @@
-import { useState, useEffect, FormEvent, Fragment, useMemo } from "react";
+import { useState, useEffect, FormEvent, Fragment, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Pencil, Plus, Search, KeyRound, X } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { api, ApiRequestError } from "../lib/api";
 import { StaffMember } from "../lib/types";
+import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
+import { useSortableData } from "../lib/useSortableData";
 import {
   PageHeader,
   Card,
@@ -16,10 +18,13 @@ import {
   Table,
   Th,
   Td,
+  SortHeader,
   Dropdown,
   DatePicker,
   HelpHint,
 } from "../components/ui";
+
+type StaffSortKey = "username" | "name" | "job_title" | "role" | "reports_to";
 
 const JOB_TITLES = ["Cashier", "Sales Assistant", "Store Manager", "Inventory Assistant", "Delivery Coordinator"];
 
@@ -28,6 +33,8 @@ export default function StaffPage() {
   const { user } = useAuth();
   const [staffList, setStaffList] = useState<StaffMember[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  useKeyboardShortcut("/", () => searchInputRef.current?.focus());
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState<Record<string, string>>({});
@@ -62,6 +69,25 @@ export default function StaffPage() {
         .some((value) => String(value).toLowerCase().includes(query))
     );
   }, [searchQuery, staffList]);
+
+  const { sorted: sortedStaff, sortKey, sortDir, toggleSort } = useSortableData<StaffMember, StaffSortKey>(
+    filteredStaff,
+    (s, key) => {
+      switch (key) {
+        case "username":
+          return s.username.toLowerCase();
+        case "name":
+          return (s.name ?? "").toLowerCase();
+        case "job_title":
+          return (s.job_title ?? "").toLowerCase();
+        case "role":
+          return s.role.toLowerCase();
+        case "reports_to":
+          return (s.reports_to_name ?? "").toLowerCase();
+      }
+    },
+    "username"
+  );
 
   function toggleExpand(s: StaffMember) {
     if (expandedId === s.id) {
@@ -169,9 +195,10 @@ export default function StaffPage() {
           <div className="relative max-w-sm">
             <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <Input
+              ref={searchInputRef}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search staff..."
+              placeholder="Search staff... (/)"
               className="pl-9 py-2 text-sm"
             />
           </div>
@@ -181,15 +208,15 @@ export default function StaffPage() {
           <thead>
             <tr>
               <Th></Th>
-              <Th>Username</Th>
-              <Th>Name</Th>
-              <Th>Job title</Th>
-              <Th>Role</Th>
-              <Th>Reports to</Th>
+              <SortHeader<StaffSortKey> label="Username" sortKey="username" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+              <SortHeader<StaffSortKey> label="Name" sortKey="name" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+              <SortHeader<StaffSortKey> label="Job title" sortKey="job_title" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+              <SortHeader<StaffSortKey> label="Role" sortKey="role" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+              <SortHeader<StaffSortKey> label="Reports to" sortKey="reports_to" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
             </tr>
           </thead>
           <tbody>
-            {filteredStaff.map((s) => {
+            {sortedStaff.map((s) => {
               const isExpanded = expandedId === s.id;
               // The very first account (the shop owner's own login) — its
               // role can't be changed and it can't be deleted, enforced

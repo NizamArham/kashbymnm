@@ -4,6 +4,7 @@ import { ArrowLeft, Receipt, Download } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Customer } from "../lib/types";
 import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
+import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { PageHeader, Card, Table, Th, Td, EmptyState, ErrorText, DateRangePicker, Button, RefLink } from "../components/ui";
 
 interface LedgerEntry {
@@ -119,6 +120,8 @@ export default function CustomerPaymentHistoryPage() {
     });
   }
 
+  useKeyboardShortcut("d", downloadPdf, { ctrlOrCmd: true, shift: true, enabled: !!customer && filteredEntries.length > 0 });
+
   return (
     <div>
       <button
@@ -137,7 +140,13 @@ export default function CustomerPaymentHistoryPage() {
             : undefined
         }
         action={
-          <Button variant="primary" onClick={downloadPdf} disabled={!customer || filteredEntries.length === 0} className="inline-flex items-center gap-1.5">
+          <Button
+            variant="primary"
+            onClick={downloadPdf}
+            disabled={!customer || filteredEntries.length === 0}
+            className="inline-flex items-center gap-1.5"
+            title="Download PDF (Ctrl/Cmd+Shift+D)"
+          >
             <Download size={14} />
             Download PDF
           </Button>

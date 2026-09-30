@@ -6,6 +6,7 @@ import { Sale } from "../lib/types";
 import { downloadA4Pdf, downloadThermalPdf, sendWhatsAppBill, groupSaleItemsForDisplay } from "../lib/receipts";
 import { PageHeader, Card, Table, Th, Td, ErrorText, Badge, RefLink, Button } from "../components/ui";
 import ReceiptOptionsModal, { ModalOption } from "../components/ReceiptOptionsModal";
+import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 
 export default function SaleDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -70,6 +71,13 @@ export default function SaleDetailPage() {
     };
   }, [id]);
 
+  function openReceiptOptions() {
+    setReceiptError(null);
+    setShowReceiptOptions(true);
+  }
+
+  useKeyboardShortcut("d", openReceiptOptions, { ctrlOrCmd: true, shift: true, enabled: !!sale });
+
   return (
     <div>
       <button
@@ -94,11 +102,9 @@ export default function SaleDetailPage() {
             action={
               <Button
                 variant="primary"
-                onClick={() => {
-                  setReceiptError(null);
-                  setShowReceiptOptions(true);
-                }}
+                onClick={openReceiptOptions}
                 className="inline-flex items-center gap-1.5"
+                title="Get receipt (Ctrl/Cmd+Shift+D)"
               >
                 <Printer size={14} />
                 Get Receipt

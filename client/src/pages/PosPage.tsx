@@ -28,6 +28,7 @@ import { CityPicker } from "../components/CityPicker";
 import { useAuth } from "../context/AuthContext";
 import { DELIVERY_PARTNERS, DeliveryPartner, calculateDeliveryFee, calculateCodAmount } from "../lib/delivery";
 import { saveDraftSale, loadDraftSale, clearDraftSale, PosDraftSale } from "../lib/posDraft";
+import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 
 // A cart line represents one or more physical units that share the same
 // product + color + size — merged into one row with a quantity, rather
@@ -84,6 +85,7 @@ export default function PosPage() {
   const [productSearchOpen, setProductSearchOpen] = useState(false);
   const [productSearchError, setProductSearchError] = useState<string | null>(null);
   const productBoxRef = useRef<HTMLDivElement>(null);
+  const productInputRef = useRef<HTMLInputElement>(null);
   const [allAvailableUnits, setAllAvailableUnits] = useState<InventoryUnit[] | null>(null);
 
   const [customerQuery, setCustomerQuery] = useState("");
@@ -191,6 +193,10 @@ export default function PosPage() {
   const browserUnits = (allAvailableUnits ?? []).filter((u) => !cartIds.has(u.id));
   const browserCategories = Array.from(new Set(browserUnits.map((u) => (u.category ?? "").split(" / ")[0]).filter(Boolean))).sort();
   const browserFiltered = browserCategory === "all" ? browserUnits : browserUnits.filter((u) => (u.category ?? "").startsWith(browserCategory));
+
+  // "/" jumps straight into the product search — the most repeated action
+  // on this page — from anywhere else on it, same convention as GitHub/Slack.
+  useKeyboardShortcut("/", () => productInputRef.current?.focus());
 
   function startEditPrice(line: CartLine) {
     setEditingLineKey(cartLineKey(line.units[0]));
@@ -856,8 +862,9 @@ export default function PosPage() {
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={17} />
                 <input
+                  ref={productInputRef}
                   type="text"
-                  placeholder="Scan or search products..."
+                  placeholder="Scan or search products... (/)"
                   value={productQuery}
                   onChange={(e) => handleProductQueryChange(e.target.value)}
                   onFocus={() => productQuery && setProductSearchOpen(true)}

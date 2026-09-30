@@ -4,8 +4,12 @@ import { ArrowLeft, ChevronDown, ChevronRight, ShoppingBag, MoreVertical, FileTe
 import { api, ApiRequestError } from "../lib/api";
 import { Sale, SaleItem, Customer } from "../lib/types";
 import { downloadA4Pdf, downloadThermalPdf, sendWhatsAppBill, groupSaleItemsForDisplay } from "../lib/receipts";
-import { PageHeader, Card, Table, Th, Td, Badge, paymentStatusTone, EmptyState, ErrorText } from "../components/ui";
+import { PageHeader, Card, Table, Th, Td, Badge, SortHeader, paymentStatusTone, EmptyState, ErrorText } from "../components/ui";
 import ReceiptOptionsModal, { ModalOption } from "../components/ReceiptOptionsModal";
+import { useCopyToClipboard } from "../lib/useCopyToClipboard";
+import { useSortableData } from "../lib/useSortableData";
+
+type OrderSortKey = "invoice" | "date" | "total";
 
 export default function CustomerOrderHistoryPage() {
   const { id } = useParams<{ id: string }>();
@@ -25,6 +29,24 @@ export default function CustomerOrderHistoryPage() {
   const [itemsBySale, setItemsBySale] = useState<Record<number, SaleItem[]>>({});
   const [itemsLoading, setItemsLoading] = useState<number | null>(null);
   const [itemsError, setItemsError] = useState<string | null>(null);
+
+  const { copy: copySku, tooltip: skuCopyTooltip } = useCopyToClipboard();
+
+  const { sorted: sortedSales, sortKey, sortDir, toggleSort } = useSortableData<Sale, OrderSortKey>(
+    sales,
+    (s, key) => {
+      switch (key) {
+        case "invoice":
+          return s.invoice.toLowerCase();
+        case "date":
+          return s.date;
+        case "total":
+          return s.total;
+      }
+    },
+    "date",
+    "desc"
+  );
 
   // "Get receipt" modal for a row — same A4/thermal/WhatsApp options as
   // Sale History and the sale detail page, so a customer's own order
@@ -163,16 +185,16 @@ export default function CustomerOrderHistoryPage() {
             <thead>
               <tr>
                 <Th></Th>
-                <Th>Invoice</Th>
-                <Th>Date</Th>
+                <SortHeader<OrderSortKey> label="Invoice" sortKey="invoice" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+                <SortHeader<OrderSortKey> label="Date" sortKey="date" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
                 <Th>Type</Th>
-                <Th>Total</Th>
+                <SortHeader<OrderSortKey> label="Total" sortKey="total" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
                 <Th>Status</Th>
                 <Th></Th>
               </tr>
             </thead>
             <tbody>
-              {sales.map((sale, index) => {
+              {sortedSales.map((sale, index) => {
                 const isExpanded = expandedSaleId === sale.id;
                 const items = itemsBySale[sale.id];
                 return (
@@ -240,7 +262,13 @@ export default function CustomerOrderHistoryPage() {
                                       <td className="px-4 py-2 text-gray-600">
                                         {[item.size, item.color].filter(Boolean).join(" / ") || "—"}
                                       </td>
-                                      <td className="px-4 py-2 text-gray-500">{item.sku ?? "—"}</td>
+                                      <td
+                                        onClick={(e) => item.sku && copySku(`sku-${item.ids.join(",")}`, item.sku, e)}
+                                        className={`px-4 py-2 text-gray-500 ${item.sku ? "cursor-pointer hover:bg-gray-100 rounded transition-colors select-none" : ""}`}
+                                        title={item.sku ? "Click to copy SKU" : undefined}
+                                      >
+                                        {item.sku ?? "—"}
+                                      </td>
                                       <td className="px-4 py-2 text-gray-600">{item.quantity}</td>
                                       <td className="px-4 py-2 text-gray-600">Rs. {item.unit_price.toLocaleString()}</td>
                                       <td className="px-4 py-2 font-medium text-gray-900">Rs. {item.line_total.toLocaleString()}</td>
@@ -273,6 +301,8 @@ export default function CustomerOrderHistoryPage() {
           onClose={() => setReceiptSale(null)}
         />
       )}
+
+      {skuCopyTooltip}
     </div>
   );
 }

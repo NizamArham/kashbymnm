@@ -1,6 +1,6 @@
 import { ReactNode, useState, useRef, useEffect, forwardRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronDown, Check, Plus, CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronUp, Check, Plus, CalendarDays, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, Minus } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 
 // A reference to another record (an invoice, a product) shown inline
@@ -44,11 +44,33 @@ export function Card({ children, className = "" }: { children: ReactNode; classN
   );
 }
 
-export function StatCard({ label, value }: { label: string; value: string }) {
+// deltaPct is optional and purely additive — every existing call site
+// without it renders exactly as before. When present, it's read as
+// "% change vs whatever the caller considers the comparison period"
+// (e.g. the same-length window immediately before the current one).
+//
+// The delta line is kept to a single line no matter how narrow the card
+// gets: whitespace-nowrap stops it wrapping to a second line, and the
+// card's own overflow-hidden + the text's truncate clip anything that
+// doesn't fit (with an ellipsis) rather than spilling outside the card.
+export function StatCard({ label, value, deltaPct }: { label: string; value: string; deltaPct?: number | null }) {
+  const showDelta = deltaPct != null && Number.isFinite(deltaPct);
+  const isUp = showDelta && deltaPct! > 0.05;
+  const isDown = showDelta && deltaPct! < -0.05;
   return (
-    <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
+    <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm overflow-hidden">
       <div className="text-xs text-gray-400 mb-1">{label}</div>
       <div className="text-2xl font-semibold text-gray-900">{value}</div>
+      {showDelta && (
+        <div
+          className={`mt-1.5 flex items-center gap-1 text-xs font-medium whitespace-nowrap ${
+            isUp ? "text-green-600" : isDown ? "text-red-500" : "text-gray-400"
+          }`}
+        >
+          {isUp ? <ArrowUp size={11} className="flex-shrink-0" /> : isDown ? <ArrowDown size={11} className="flex-shrink-0" /> : <Minus size={11} className="flex-shrink-0" />}
+          <span className="truncate">{Math.abs(deltaPct!).toFixed(1)}% vs prev.</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -61,6 +83,7 @@ export function Button({
   size = "md",
   disabled,
   className = "",
+  title,
 }: {
   children: ReactNode;
   onClick?: () => void;
@@ -69,6 +92,7 @@ export function Button({
   size?: "sm" | "md";
   disabled?: boolean;
   className?: string;
+  title?: string;
 }) {
   const base = "font-medium rounded-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed";
   const sizes = size === "sm" ? "px-3 py-1.5 text-xs" : "px-4 py-2.5 text-sm";
@@ -82,6 +106,7 @@ export function Button({
       type={type}
       onClick={onClick}
       disabled={disabled}
+      title={title}
       className={`${base} ${sizes} ${variants[variant]} ${className}`}
     >
       {children}
@@ -492,6 +517,43 @@ export function Table({ children, className = "" }: { children: ReactNode; class
 
 export function Th({ children, className = "" }: { children: ReactNode; className?: string }) {
   return <th className={`text-left px-3 py-2.5 text-xs font-medium text-gray-400 border-b border-gray-100 ${className}`}>{children}</th>;
+}
+
+// A clickable <Th> that shows the active sort column/direction — pairs
+// with the useSortableData hook (lib/useSortableData.ts). Generic over
+// the caller's own sort-key union so every table gets its own type-safe
+// set of sortable columns without redeclaring this component.
+export function SortHeader<K extends string>({
+  label,
+  sortKey,
+  activeKey,
+  dir,
+  onClick,
+  align,
+  className = "",
+}: {
+  label: string;
+  sortKey: K;
+  activeKey: K;
+  dir: "asc" | "desc";
+  onClick: (key: K) => void;
+  align?: "right";
+  className?: string;
+}) {
+  const isActive = activeKey === sortKey;
+  return (
+    <Th className={`${align === "right" ? "text-right" : ""} ${className}`}>
+      <button
+        onClick={() => onClick(sortKey)}
+        className={`inline-flex items-center gap-1 hover:text-gray-700 transition-colors ${
+          align === "right" ? "flex-row-reverse" : ""
+        } ${isActive ? "text-gray-900" : ""}`}
+      >
+        {label}
+        {isActive ? dir === "asc" ? <ChevronUp size={12} /> : <ChevronDown size={12} /> : null}
+      </button>
+    </Th>
+  );
 }
 
 export function Td({

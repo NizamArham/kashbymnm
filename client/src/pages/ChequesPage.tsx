@@ -3,7 +3,8 @@ import { Banknote, CheckCircle2, XCircle, Plus, Pencil, Trash2, X, Download } fr
 import { api, ApiRequestError } from "../lib/api";
 import { Supplier } from "../lib/types";
 import { downloadTabularReport, buildReportFilename, todayLongDate } from "../lib/reportPdf";
-import { PageHeader, Card, Table, Th, Td, Button, EmptyState, ErrorText, Badge, TabToggle, Input, Label, FormGroup, Dropdown, DatePicker, HelpHint } from "../components/ui";
+import { PageHeader, Card, Table, Th, Td, SortHeader, Button, EmptyState, ErrorText, Badge, TabToggle, Input, Label, FormGroup, Dropdown, DatePicker, HelpHint } from "../components/ui";
+import { useSortableData } from "../lib/useSortableData";
 
 interface ChequeRow {
   id: number;
@@ -45,6 +46,9 @@ interface IssuedChequeRow {
   payee_name: string | null;
 }
 
+type ReceivedChequeSortKey = "received" | "number" | "bank" | "cheque_date" | "amount" | "from" | "status";
+type IssuedChequeSortKey = "issued" | "number" | "bank" | "cheque_date" | "amount" | "to" | "status";
+
 function statusTone(status: string): "success" | "warning" | "danger" | "neutral" {
   if (status === "cleared") return "success";
   if (status === "bounced") return "danger";
@@ -68,6 +72,54 @@ export default function ChequesPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const { sorted: sortedCheques, sortKey: receivedSortKey, sortDir: receivedSortDir, toggleSort: toggleReceivedSort } = useSortableData<ChequeRow, ReceivedChequeSortKey>(
+    cheques,
+    (c, key) => {
+      switch (key) {
+        case "received":
+          return c.date_received;
+        case "number":
+          return c.cheque_number.toLowerCase();
+        case "bank":
+          return c.bank_name.toLowerCase();
+        case "cheque_date":
+          return c.cheque_date;
+        case "amount":
+          return c.amount;
+        case "from":
+          return c.customer_name.toLowerCase();
+        case "status":
+          return c.status;
+      }
+    },
+    "received",
+    "desc"
+  );
+
+  const { sorted: sortedIssuedCheques, sortKey: issuedSortKey, sortDir: issuedSortDir, toggleSort: toggleIssuedSort } = useSortableData<IssuedChequeRow, IssuedChequeSortKey>(
+    issuedCheques,
+    (c, key) => {
+      switch (key) {
+        case "issued":
+          return c.date_issued;
+        case "number":
+          return c.cheque_number.toLowerCase();
+        case "bank":
+          return c.bank_name.toLowerCase();
+        case "cheque_date":
+          return c.cheque_date;
+        case "amount":
+          return c.amount;
+        case "to":
+          return c.supplier_name.toLowerCase();
+        case "status":
+          return c.status;
+      }
+    },
+    "issued",
+    "desc"
+  );
 
   const [clearingId, setClearingId] = useState<number | null>(null);
   const [clearingIsIssued, setClearingIsIssued] = useState(false);
@@ -389,18 +441,18 @@ export default function ChequesPage() {
             <Table>
               <thead>
                 <tr>
-                  <Th>Issued</Th>
-                  <Th>Cheque #</Th>
-                  <Th>Bank</Th>
-                  <Th>Cheque date</Th>
-                  <Th>Amount</Th>
-                  <Th>To supplier</Th>
-                  <Th>Status</Th>
+                  <SortHeader<IssuedChequeSortKey> label="Issued" sortKey="issued" activeKey={issuedSortKey} dir={issuedSortDir} onClick={toggleIssuedSort} />
+                  <SortHeader<IssuedChequeSortKey> label="Cheque #" sortKey="number" activeKey={issuedSortKey} dir={issuedSortDir} onClick={toggleIssuedSort} />
+                  <SortHeader<IssuedChequeSortKey> label="Bank" sortKey="bank" activeKey={issuedSortKey} dir={issuedSortDir} onClick={toggleIssuedSort} />
+                  <SortHeader<IssuedChequeSortKey> label="Cheque date" sortKey="cheque_date" activeKey={issuedSortKey} dir={issuedSortDir} onClick={toggleIssuedSort} />
+                  <SortHeader<IssuedChequeSortKey> label="Amount" sortKey="amount" activeKey={issuedSortKey} dir={issuedSortDir} onClick={toggleIssuedSort} />
+                  <SortHeader<IssuedChequeSortKey> label="To supplier" sortKey="to" activeKey={issuedSortKey} dir={issuedSortDir} onClick={toggleIssuedSort} />
+                  <SortHeader<IssuedChequeSortKey> label="Status" sortKey="status" activeKey={issuedSortKey} dir={issuedSortDir} onClick={toggleIssuedSort} />
                   <Th></Th>
                 </tr>
               </thead>
               <tbody>
-                {issuedCheques.map((c) => (
+                {sortedIssuedCheques.map((c) => (
                   <tr key={c.id}>
                     <Td>{c.date_issued.slice(0, 10)}</Td>
                     <Td>{c.cheque_number}</Td>
@@ -476,18 +528,18 @@ export default function ChequesPage() {
           <Table>
             <thead>
               <tr>
-                <Th>Received</Th>
-                <Th>Cheque #</Th>
-                <Th>Bank</Th>
-                <Th>Cheque date</Th>
-                <Th>Amount</Th>
-                <Th>From</Th>
-                <Th>Status</Th>
+                <SortHeader<ReceivedChequeSortKey> label="Received" sortKey="received" activeKey={receivedSortKey} dir={receivedSortDir} onClick={toggleReceivedSort} />
+                <SortHeader<ReceivedChequeSortKey> label="Cheque #" sortKey="number" activeKey={receivedSortKey} dir={receivedSortDir} onClick={toggleReceivedSort} />
+                <SortHeader<ReceivedChequeSortKey> label="Bank" sortKey="bank" activeKey={receivedSortKey} dir={receivedSortDir} onClick={toggleReceivedSort} />
+                <SortHeader<ReceivedChequeSortKey> label="Cheque date" sortKey="cheque_date" activeKey={receivedSortKey} dir={receivedSortDir} onClick={toggleReceivedSort} />
+                <SortHeader<ReceivedChequeSortKey> label="Amount" sortKey="amount" activeKey={receivedSortKey} dir={receivedSortDir} onClick={toggleReceivedSort} />
+                <SortHeader<ReceivedChequeSortKey> label="From" sortKey="from" activeKey={receivedSortKey} dir={receivedSortDir} onClick={toggleReceivedSort} />
+                <SortHeader<ReceivedChequeSortKey> label="Status" sortKey="status" activeKey={receivedSortKey} dir={receivedSortDir} onClick={toggleReceivedSort} />
                 <Th></Th>
               </tr>
             </thead>
             <tbody>
-              {cheques.map((c) => (
+              {sortedCheques.map((c) => (
                 <tr key={c.id}>
                   <Td>{c.date_received.slice(0, 10)}</Td>
                   <Td>{c.cheque_number}</Td>

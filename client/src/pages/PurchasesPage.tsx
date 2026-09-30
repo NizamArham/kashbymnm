@@ -3,6 +3,8 @@ import { Package, Clock, Trash2, Download } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Supplier, Purchase, AvailableUnit } from "../lib/types";
 import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
+import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
+import { useSortableData } from "../lib/useSortableData";
 import {
   PageHeader,
   Card,
@@ -15,6 +17,7 @@ import {
   Table,
   Th,
   Td,
+  SortHeader,
   Dropdown,
   EmptyState,
   DateRangePicker,
@@ -27,6 +30,7 @@ import {
 } from "../components/ui";
 
 type PurchasesTab = "record" | "pending" | "history" | "returns";
+type PurchaseSortKey = "code" | "date" | "supplier" | "total_cost" | "paid";
 
 interface DraftLine {
   description: string;
@@ -368,6 +372,26 @@ export default function PurchasesPage() {
     return d >= historyStart && d <= historyEnd;
   });
 
+  const { sorted: sortedPurchases, sortKey: purchaseSortKey, sortDir: purchaseSortDir, toggleSort: togglePurchaseSort } = useSortableData<Purchase, PurchaseSortKey>(
+    filteredPurchases,
+    (p, key) => {
+      switch (key) {
+        case "code":
+          return p.purchase_code.toLowerCase();
+        case "date":
+          return p.purchase_date;
+        case "supplier":
+          return p.supplier_name.toLowerCase();
+        case "total_cost":
+          return p.total_cost;
+        case "paid":
+          return p.amount_paid;
+      }
+    },
+    "date",
+    "desc"
+  );
+
   function downloadPurchasesPdf() {
     const totalCost = filteredPurchases.reduce((sum, p) => sum + p.total_cost, 0);
     const totalPaid = filteredPurchases.reduce((sum, p) => sum + p.amount_paid, 0);
@@ -407,6 +431,12 @@ export default function PurchasesPage() {
       filename: buildReportFilename("Purchases", `${historyStart || "all"}-to-${historyEnd || "now"}`),
     });
   }
+
+  useKeyboardShortcut("d", downloadPurchasesPdf, {
+    ctrlOrCmd: true,
+    shift: true,
+    enabled: activeTab === "history" && filteredPurchases.length > 0,
+  });
 
   async function handleReturnLookup() {
     setReturnLookupError(null);
@@ -909,7 +939,12 @@ export default function PurchasesPage() {
                 setHistoryEnd(e);
               }}
             />
-            <Button onClick={downloadPurchasesPdf} disabled={filteredPurchases.length === 0} className="inline-flex items-center gap-1.5">
+            <Button
+              onClick={downloadPurchasesPdf}
+              disabled={filteredPurchases.length === 0}
+              className="inline-flex items-center gap-1.5"
+              title="Download PDF (Ctrl/Cmd+Shift+D)"
+            >
               <Download size={14} />
               Download PDF
             </Button>
@@ -923,17 +958,17 @@ export default function PurchasesPage() {
                 <Table>
                   <thead>
                     <tr>
-                      <Th>Code</Th>
-                      <Th>Date</Th>
-                      <Th>Supplier</Th>
-                      <Th>Total cost</Th>
-                      <Th>Paid</Th>
+                      <SortHeader<PurchaseSortKey> label="Code" sortKey="code" activeKey={purchaseSortKey} dir={purchaseSortDir} onClick={togglePurchaseSort} />
+                      <SortHeader<PurchaseSortKey> label="Date" sortKey="date" activeKey={purchaseSortKey} dir={purchaseSortDir} onClick={togglePurchaseSort} />
+                      <SortHeader<PurchaseSortKey> label="Supplier" sortKey="supplier" activeKey={purchaseSortKey} dir={purchaseSortDir} onClick={togglePurchaseSort} />
+                      <SortHeader<PurchaseSortKey> label="Total cost" sortKey="total_cost" activeKey={purchaseSortKey} dir={purchaseSortDir} onClick={togglePurchaseSort} />
+                      <SortHeader<PurchaseSortKey> label="Paid" sortKey="paid" activeKey={purchaseSortKey} dir={purchaseSortDir} onClick={togglePurchaseSort} />
                       <Th>Status</Th>
                       <Th></Th>
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredPurchases.map((p) => (
+                    {sortedPurchases.map((p) => (
                       <tr key={p.id}>
                         <Td>{p.purchase_code}</Td>
                         <Td>{p.purchase_date.slice(0, 10)}</Td>
@@ -965,7 +1000,7 @@ export default function PurchasesPage() {
 
               {/* Mobile / tablet-portrait */}
               <div className="lg:hidden space-y-2.5">
-                {filteredPurchases.map((p) => (
+                {sortedPurchases.map((p) => (
                   <RowCard key={p.id}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "../db/connection";
 import { ApiError, asyncHandler } from "../lib/errors";
+import { nextTransactionCode } from "../lib/codes";
 import { requireAuth, requireRole } from "../lib/auth";
 import { computeFifoAllocation } from "./customers";
 
@@ -414,14 +415,15 @@ chequesRouter.put(
 
       if (transfer) {
         db.prepare(
-          `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
-           VALUES ('expense', 'supplier_payment', 'cheque', ?, ?, ?)`
-        ).run(transfer.supplier_payment_id, receipt.amount, `Cheque #${receipt.cheque_number} cleared — paid to supplier`);
+          `INSERT INTO cash_book (transaction_code, type, category, payment_method, reference_id, amount, notes)
+           VALUES (?, 'expense', 'supplier_payment', 'cheque', ?, ?, ?)`
+        ).run(nextTransactionCode(), transfer.supplier_payment_id, receipt.amount, `Cheque #${receipt.cheque_number} cleared — paid to supplier`);
       } else {
         db.prepare(
-          `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
-           VALUES ('income', 'customer_payment', ?, ?, ?, ?)`
+          `INSERT INTO cash_book (transaction_code, type, category, payment_method, reference_id, amount, notes)
+           VALUES (?, 'income', 'customer_payment', ?, ?, ?, ?)`
         ).run(
+          nextTransactionCode(),
           data.payment_method ?? "bank_transfer",
           req.params.id,
           receipt.amount,
@@ -709,9 +711,9 @@ chequesRouter.put(
     const runClear = db.transaction(() => {
       db.prepare(`UPDATE cheques_issued SET status = 'cleared', cleared_at = datetime('now', '+330 minutes') WHERE id = ?`).run(req.params.id);
       db.prepare(
-        `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
-         VALUES ('expense', 'supplier_payment', 'cheque', ?, ?, ?)`
-      ).run(issued.supplier_payment_id, issued.amount, `Cheque #${issued.cheque_number} cleared — paid to supplier`);
+        `INSERT INTO cash_book (transaction_code, type, category, payment_method, reference_id, amount, notes)
+         VALUES (?, 'expense', 'supplier_payment', 'cheque', ?, ?, ?)`
+      ).run(nextTransactionCode(), issued.supplier_payment_id, issued.amount, `Cheque #${issued.cheque_number} cleared — paid to supplier`);
     });
 
     runClear();

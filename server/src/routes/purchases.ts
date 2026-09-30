@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { db } from "../db/connection";
-import { nextPurchaseCode, nextSku } from "../lib/codes";
+import { nextPurchaseCode, nextSku, nextTransactionCode } from "../lib/codes";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth, requireRole } from "../lib/auth";
 
@@ -264,9 +264,9 @@ purchasesRouter.post(
           // regardless of which kind. That only happens once it clears.
         } else {
           db.prepare(
-            `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
-             VALUES ('expense', 'purchase', ?, ?, ?, ?)`
-          ).run(data.payment_method ?? null, purchaseId, data.amount_paid, `Payment for pending purchase ${purchase_code}`);
+            `INSERT INTO cash_book (transaction_code, type, category, payment_method, reference_id, amount, notes)
+             VALUES (?, 'expense', 'purchase', ?, ?, ?, ?)`
+          ).run(nextTransactionCode(), data.payment_method ?? null, purchaseId, data.amount_paid, `Payment for pending purchase ${purchase_code}`);
 
           db.prepare(
             `INSERT INTO supplier_payments (supplier_id, purchase_id, amount, is_partial, notes)
@@ -291,9 +291,9 @@ purchasesRouter.post(
         ).run(purchaseId, expense.label.trim(), expense.amount);
 
         db.prepare(
-          `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
-           VALUES ('expense', 'purchase_other_costs', ?, ?, ?, ?)`
-        ).run(data.payment_method ?? null, purchaseId, expense.amount, `${expense.label.trim()} for purchase ${purchase_code}`);
+          `INSERT INTO cash_book (transaction_code, type, category, payment_method, reference_id, amount, notes)
+           VALUES (?, 'expense', 'purchase_other_costs', ?, ?, ?, ?)`
+        ).run(nextTransactionCode(), data.payment_method ?? null, purchaseId, expense.amount, `${expense.label.trim()} for purchase ${purchase_code}`);
       }
 
       return purchaseId;
@@ -594,9 +594,9 @@ purchasesRouter.post(
         // Cash changes hands right away — recorded as income (money
         // coming back to the business), nothing carried forward.
         db.prepare(
-          `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
-           VALUES ('income', 'return_refund', ?, ?, ?, ?)`
-        ).run(data.payment_method ?? null, returnId, total_amount, `Cash refund for return — purchase ${purchase.purchase_code}`);
+          `INSERT INTO cash_book (transaction_code, type, category, payment_method, reference_id, amount, notes)
+           VALUES (?, 'income', 'return_refund', ?, ?, ?, ?)`
+        ).run(nextTransactionCode(), data.payment_method ?? null, returnId, total_amount, `Cash refund for return — purchase ${purchase.purchase_code}`);
       } else {
         // Supplier credit: a running balance that automatically reduces
         // what's owed on a future purchase from this same supplier.
@@ -846,9 +846,9 @@ purchasesRouter.post(
       // count it in the cash book and supplier balance.
       if (data.amount_paid > 0 && !data.fulfills_line_id) {
         db.prepare(
-          `INSERT INTO cash_book (type, category, payment_method, reference_id, amount, notes)
-           VALUES ('expense', 'purchase', ?, ?, ?, ?)`
-        ).run(data.payment_method ?? null, purchaseId, data.amount_paid, `Payment for purchase ${purchase_code}`);
+          `INSERT INTO cash_book (transaction_code, type, category, payment_method, reference_id, amount, notes)
+           VALUES (?, 'expense', 'purchase', ?, ?, ?, ?)`
+        ).run(nextTransactionCode(), data.payment_method ?? null, purchaseId, data.amount_paid, `Payment for purchase ${purchase_code}`);
 
         db.prepare(
           `INSERT INTO supplier_payments (supplier_id, purchase_id, amount, is_partial, notes)

@@ -4,6 +4,8 @@ import { api, ApiRequestError } from "../lib/api";
 import { Sale, ReturnRequest } from "../lib/types";
 import { useAuth } from "../context/AuthContext";
 import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
+import { useSortableData } from "../lib/useSortableData";
+import { useCopyToClipboard } from "../lib/useCopyToClipboard";
 import {
   PageHeader,
   Card,
@@ -17,6 +19,7 @@ import {
   Table,
   Th,
   Td,
+  SortHeader,
   Badge,
   TabToggle,
   DateRangePicker,
@@ -29,6 +32,7 @@ import {
 } from "../components/ui";
 
 type ReturnsTab = "request" | "all";
+type ReturnSortKey = "id" | "date" | "customer" | "product" | "status";
 
 const RETURN_REASON_PRESETS = [
   "Wrong size",
@@ -782,6 +786,28 @@ function AllReturnsTab({ isAdmin }: { isAdmin: boolean }) {
     return d >= startDate && d <= endDate;
   });
 
+  const { sorted: sortedRequests, sortKey, sortDir, toggleSort } = useSortableData<ReturnRequest, ReturnSortKey>(
+    filtered,
+    (r, key) => {
+      switch (key) {
+        case "id":
+          return r.id;
+        case "date":
+          return r.requested_at;
+        case "customer":
+          return (r.customer_name ?? r.deleted_customer_snapshot ?? "Walk-in").toLowerCase();
+        case "product":
+          return (r.product_title ?? "").toLowerCase();
+        case "status":
+          return r.status;
+      }
+    },
+    "date",
+    "desc"
+  );
+
+  const { copy: copySku, tooltip: skuCopyTooltip } = useCopyToClipboard();
+
   // Day/month/year in full — e.g. "9/09/2026" — since the short "19 Sep
   // 26" style used on screen reads ambiguous on a printed report.
   function longDate(dateStr: string): string {
@@ -880,18 +906,18 @@ function AllReturnsTab({ isAdmin }: { isAdmin: boolean }) {
             <Table>
               <thead>
                 <tr>
-                  <Th>ID</Th>
-                  <Th>Date</Th>
-                  <Th>Customer</Th>
-                  <Th>Product</Th>
+                  <SortHeader<ReturnSortKey> label="ID" sortKey="id" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+                  <SortHeader<ReturnSortKey> label="Date" sortKey="date" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+                  <SortHeader<ReturnSortKey> label="Customer" sortKey="customer" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+                  <SortHeader<ReturnSortKey> label="Product" sortKey="product" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
                   <Th>Reason</Th>
-                  <Th>Status</Th>
+                  <SortHeader<ReturnSortKey> label="Status" sortKey="status" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
                   <Th>Decided by</Th>
                   <Th></Th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((r) => {
+                {sortedRequests.map((r) => {
                   const isExpanded = expandedId === r.id;
                   return (
                     <Fragment key={r.id}>
@@ -908,7 +934,16 @@ function AllReturnsTab({ isAdmin }: { isAdmin: boolean }) {
                           <p className="text-gray-900">
                             {r.product_id ? <RefLink to={`/products/${r.product_id}`}>{r.product_title}</RefLink> : r.product_title}
                           </p>
-                          <p className="text-xs text-gray-400">{r.sku}</p>
+                          <p
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              copySku(`sku-${r.id}`, r.sku, e);
+                            }}
+                            className="text-xs text-gray-400 inline-block cursor-pointer hover:bg-gray-100 rounded transition-colors select-none"
+                            title="Click to copy SKU"
+                          >
+                            {r.sku}
+                          </p>
                           {r.is_admin_override === 1 && r.status === "pending" && (
                             <span className="text-xs text-amber-600 font-medium">Final Sale</span>
                           )}
@@ -939,7 +974,7 @@ function AllReturnsTab({ isAdmin }: { isAdmin: boolean }) {
 
           {/* Mobile / tablet-portrait: stacked cards, same tap-to-expand */}
           <div className="lg:hidden space-y-2.5">
-            {filtered.map((r) => {
+            {sortedRequests.map((r) => {
               const isExpanded = expandedId === r.id;
               return (
                 <RowCard
@@ -975,6 +1010,8 @@ function AllReturnsTab({ isAdmin }: { isAdmin: boolean }) {
           </div>
         </>
       )}
+
+      {skuCopyTooltip}
     </>
   );
 }

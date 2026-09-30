@@ -1,12 +1,14 @@
-import { useEffect, useState, useMemo, FormEvent, Fragment } from "react";
+import { useEffect, useState, FormEvent, Fragment } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { Truck, ChevronDown, ChevronRight, Pencil, Plus, X } from "lucide-react";
+import { Truck, ChevronDown, ChevronRight, ChevronUp, Pencil, Plus, X } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Supplier, BankAccount } from "../lib/types";
-import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Table, Th, Td, EmptyState, HelpHint } from "../components/ui";
+import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Table, Th, Td, SortHeader, EmptyState, HelpHint } from "../components/ui";
 import { CityPicker } from "../components/CityPicker";
+import { useSortableData } from "../lib/useSortableData";
 
 type ExpandedTab = "details" | "bank" | "payment_history";
+type SupplierSortKey = "priority" | "code" | "name" | "phone" | "city" | "balance";
 
 export default function SuppliersPage() {
   const navigate = useNavigate();
@@ -60,17 +62,35 @@ export default function SuppliersPage() {
     load();
   }, []);
 
-  // Two-tier ordering, most actionable first:
+  // Default order (sortKey "priority"), most actionable first:
   //   1. Owing  — you still owe this supplier money (balance_owed > 0)
   //   2. Settled — nothing outstanding
-  // Stable within each tier, preserving the API's original order (which
-  // is id-descending, so newest-added first within each group).
-  const sortedSuppliers = useMemo(() => {
-    function tier(s: Supplier): number {
-      return (s.balance_owed ?? 0) > 0 ? 0 : 1;
-    }
-    return [...suppliers].sort((a, b) => tier(a) - tier(b));
-  }, [suppliers]);
+  // Clicking any column header overrides this with a plain sort on
+  // that column, same as every other sortable table.
+  function tier(s: Supplier): number {
+    return (s.balance_owed ?? 0) > 0 ? 0 : 1;
+  }
+
+  const { sorted: sortedSuppliers, sortKey, sortDir, toggleSort } = useSortableData<Supplier, SupplierSortKey>(
+    suppliers,
+    (s, key) => {
+      switch (key) {
+        case "priority":
+          return tier(s);
+        case "code":
+          return s.supplier_code.toLowerCase();
+        case "name":
+          return s.name.toLowerCase();
+        case "phone":
+          return (s.phone ?? "").toLowerCase();
+        case "city":
+          return (s.city ?? "").toLowerCase();
+        case "balance":
+          return s.balance_owed ?? 0;
+      }
+    },
+    "priority"
+  );
 
   useEffect(() => {
     const state = location.state as { expandSupplierId?: number } | null;
@@ -338,12 +358,18 @@ export default function SuppliersPage() {
               <thead>
                 <tr>
                   <Th></Th>
-                  <Th>Code</Th>
-                  <Th>Name</Th>
-                  <Th>Phone</Th>
-                  <Th>City</Th>
+                  <SortHeader<SupplierSortKey> label="Code" sortKey="code" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+                  <SortHeader<SupplierSortKey> label="Name" sortKey="name" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+                  <SortHeader<SupplierSortKey> label="Phone" sortKey="phone" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+                  <SortHeader<SupplierSortKey> label="City" sortKey="city" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
                   <Th>
-                    Balance owed
+                    <button
+                      onClick={() => toggleSort("balance")}
+                      className={`inline-flex items-center gap-1 hover:text-gray-700 transition-colors ${sortKey === "balance" ? "text-gray-900" : ""}`}
+                    >
+                      Balance owed
+                      {sortKey === "balance" ? (sortDir === "asc" ? <ChevronUp size={12} /> : <ChevronDown size={12} />) : null}
+                    </button>
                     <HelpHint text="Calculated live from purchases minus payments made." />
                   </Th>
                 </tr>
