@@ -4,6 +4,7 @@ import { db } from "../db/connection";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth, requireRole } from "../lib/auth";
 import { applyReturnCharge } from "./courierReconciliation";
+import { citypakCreateOrder } from "../lib/citypak";
 
 export const deliveriesRouter = Router();
 
@@ -154,6 +155,71 @@ deliveriesRouter.put(
       )
       .get(req.params.id);
     res.json(updated);
+  })
+);
+
+// POST /api/deliveries/:id/citypak-order — creates the shipment on
+// CityPak's side via their API (rather than staff creating it manually
+// on CityPak's own portal and pasting the tracking number back here).
+// Only valid for orders already assigned to CityPak as the delivery
+// partner; the returned tracking number is handed back to the client to
+// feed into the normal /pack flow exactly as a manually-typed one would.
+deliveriesRouter.post(
+  "/:id/citypak-order",
+  asyncHandler(async (req, res) => {
+    const delivery = db
+      .prepare(
+        `SELECT deliveries.*, sales.invoice, sales.customer_id,
+                customers.name as customer_name, customers.phone as customer_phone,
+                customer_addresses.address_line1, customer_addresses.address_line2, customer_addresses.city
+         FROM deliveries
+         JOIN sales ON sales.id = deliveries.sale_id
+         LEFT JOIN customers ON customers.id = sales.customer_id
+         LEFT JOIN customer_addresses ON customer_addresses.id = deliveries.address_id
+         WHERE deliveries.id = ?`
+      )
+      .get(req.params.id) as any;
+    if (!delivery) throw new ApiError(404, "Delivery not found");
+    if (delivery.delivery_partner !== "CPAK") {
+      throw new ApiError(400, "This order isn't assigned to CityPak as its delivery partner");
+    }
+    if (!delivery.address_line1 || !delivery.city) {
+      throw new ApiError(400, "This order has no delivery address on file");
+    }
+    if (!delivery.customer_phone) {
+      throw new ApiError(400, "This order's customer has no phone number on file");
+    }
+
+    const business = db.prepare(`SELECT * FROM business_info LIMIT 1`).get() as any;
+    if (!business?.address_line1 || !business?.city || !business?.phone) {
+      throw new ApiError(400, "Add your business address, city, and phone in General Settings before creating CityPak shipments");
+    }
+
+    const weightKg = delivery.package_weight_kg && delivery.package_weight_kg > 0 ? delivery.package_weight_kg : 0.5;
+
+    const result = await citypakCreateOrder({
+      reference: delivery.invoice,
+      from_name: business.business_name || "M&M Clothing",
+      from_address_line_1: business.address_line1,
+      from_address_line_2: business.address_line2 || undefined,
+      from_address_line_4: business.city,
+      from_contact_name: business.business_name || "M&M Clothing",
+      from_contact_1: business.phone,
+      to_name: delivery.customer_name || "Customer",
+      to_address_line_1: delivery.address_line1,
+      to_address_line_2: delivery.address_line2 || undefined,
+      to_address_line_4: delivery.city,
+      to_contact_name: delivery.customer_name || "Customer",
+      to_contact_1: delivery.customer_phone,
+      description: `Order ${delivery.invoice}`.slice(0, 128),
+      weight_g: Math.round(weightKg * 1000),
+      cash_on_delivery_amount: delivery.cod_amount || 0,
+      number_of_pieces: 1,
+    });
+
+    db.prepare(`UPDATE deliveries SET citypak_order_id = ? WHERE id = ?`).run(result.order_id, req.params.id);
+
+    res.json({ tracking_number: result.tracking_number, order_id: result.order_id });
   })
 );
 

@@ -794,6 +794,12 @@ CREATE TABLE IF NOT EXISTS deliveries (
   -- Which of the 3 delivery partners this order ships with. Drives the
   -- waybill's shop code (MNM X CPAK / MNM X D2D / MNM X DEX).
   delivery_partner TEXT CHECK (delivery_partner IN ('CPAK','D2D','DEX')),
+  -- Set only when the shipment was created via CityPak's API (rather
+  -- than manually on their portal with the tracking number pasted in
+  -- here) — lets a later feature look the order back up with CityPak
+  -- (e.g. reprinting their own waybill) without needing the tracking
+  -- number for that.
+  citypak_order_id INTEGER,
   package_weight_kg REAL,
   -- Confirming the delivery address (usually by calling/messaging the
   -- customer) is a hard gate before packing — a bad address caught here

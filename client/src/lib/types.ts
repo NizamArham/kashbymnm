@@ -334,6 +334,7 @@ export interface Delivery {
   courier_name: string | null;
   tracking_number: string | null;
   delivery_partner: "CPAK" | "D2D" | "DEX" | null;
+  citypak_order_id: number | null;
   package_weight_kg: number | null;
   address_confirmed: number;
   address_confirmed_at: string | null;

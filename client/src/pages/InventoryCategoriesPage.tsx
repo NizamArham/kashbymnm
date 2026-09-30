@@ -806,6 +806,7 @@ export default function InventoryCategoriesPage() {
 
         {hoveredItem && (
           <GenderNavPanel
+            key={hoveredItem.value}
             item={hoveredItem}
             selectedGender={selectedFilter.gender ?? ALL}
             selectedCategory={selectedFilter.category}

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, RefObject } from "react";
-import { X, Printer, Download, MapPin, Check, Plus } from "lucide-react";
+import { X, Printer, Download, MapPin, Check, Plus, Truck } from "lucide-react";
 import JsBarcode from "jsbarcode";
 import { Delivery, BusinessInfo, Customer, CustomerAddress } from "../lib/types";
 import { waybillShopCode } from "../lib/delivery";
@@ -29,6 +29,24 @@ export default function PackWaybillModal({
   const [weight, setWeight] = useState(delivery.package_weight_kg ? String(delivery.package_weight_kg) : "");
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
+
+  // Only CityPak has an API integration — D2D/DEX still need the
+  // tracking number created on their own portal and typed in below.
+  const [creatingCitypakOrder, setCreatingCitypakOrder] = useState(false);
+  const [citypakError, setCitypakError] = useState<string | null>(null);
+
+  async function createCitypakOrder() {
+    setCitypakError(null);
+    setCreatingCitypakOrder(true);
+    try {
+      const result = await api.post<{ tracking_number: string; order_id: number }>(`/deliveries/${delivery.id}/citypak-order`);
+      setTrackingNumber(result.tracking_number);
+    } catch (err) {
+      setCitypakError(err instanceof ApiRequestError ? err.message : "Failed to create the shipment with CityPak");
+    } finally {
+      setCreatingCitypakOrder(false);
+    }
+  }
 
   // Return-section footer — editable per waybill, defaulting to the
   // shop's usual details but adjustable if a specific order needs to
@@ -247,7 +265,12 @@ export default function PackWaybillModal({
         <div className="p-5 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
           <div>
             <h3 className="text-base font-semibold text-gray-900">Generate waybill</h3>
-            <p className="text-xs text-gray-400">{delivery.invoice} — feed this into the courier portal, then paste back the tracking number</p>
+            <p className="text-xs text-gray-400">
+              {delivery.invoice} —{" "}
+              {delivery.delivery_partner === "CPAK"
+                ? "create the shipment with CityPak below, or paste in a tracking number manually"
+                : "feed this into the courier portal, then paste back the tracking number"}
+            </p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
             <X size={18} />
@@ -257,8 +280,24 @@ export default function PackWaybillModal({
         <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-6 overflow-hidden">
           <div className="overflow-y-auto p-5">
             <h4 className="text-sm font-semibold text-gray-900 mb-3">Only these need typing</h4>
+
+            {delivery.delivery_partner === "CPAK" && (
+              <div className="mb-3">
+                <button
+                  type="button"
+                  onClick={createCitypakOrder}
+                  disabled={creatingCitypakOrder}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2.5 bg-gray-900 text-white rounded-xl text-sm font-medium hover:bg-gray-800 transition disabled:opacity-50"
+                >
+                  <Truck size={14} />
+                  {creatingCitypakOrder ? "Creating shipment..." : "Create shipment with CityPak"}
+                </button>
+                {citypakError && <ErrorText>{citypakError}</ErrorText>}
+              </div>
+            )}
+
             <FormGroup>
-              <Label>Tracking number (from courier portal)</Label>
+              <Label>Tracking number {delivery.delivery_partner === "CPAK" ? "(or type it in manually)" : "(from courier portal)"}</Label>
               <Input value={trackingNumber} onChange={(e) => setTrackingNumber(e.target.value)} autoFocus />
             </FormGroup>
             <div className="grid grid-cols-2 gap-3">

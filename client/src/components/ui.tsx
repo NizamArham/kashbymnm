@@ -1,4 +1,5 @@
-import { ReactNode, useState, useRef, useEffect, forwardRef } from "react";
+import { ReactNode, useState, useRef, useEffect, useLayoutEffect, forwardRef } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { ChevronDown, ChevronUp, Check, Plus, CalendarDays, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, Minus } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
@@ -1029,33 +1030,80 @@ export function DatePicker({
   placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [openUpward, setOpenUpward] = useState(false);
+  // Screen coordinates for the portal-rendered panel below, computed
+  // fresh each time it opens. Rendering into document.body via a portal
+  // (instead of as a normal descendant) is what actually matters here —
+  // positioned purely by these coordinates, the panel is never clipped
+  // or forced to scroll by a modal's own overflow-y-auto card or any
+  // other ancestor's bounds, no matter how tight the space around the
+  // field is.
+  const [panelPos, setPanelPos] = useState<{ top: number; left: number } | null>(null);
   const [viewMonth, setViewMonth] = useState(() => {
     const base = value ? new Date(value + "T00:00:00") : new Date();
     return new Date(base.getFullYear(), base.getMonth(), 1);
   });
   const ref = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const PANEL_WIDTH = 320;
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (ref.current?.contains(target)) return;
+      if (panelRef.current?.contains(target)) return;
+      setOpen(false);
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // The panel is roughly 320px tall — if there isn't that much room
-  // below the field (e.g. it's near the bottom of a modal), open
-  // upward instead of getting clipped by the modal's own boundary.
+  // Closing on scroll (rather than tracking/repositioning) matches how
+  // a native <select> behaves, and sidesteps the panel drifting out of
+  // sync if the modal's own body — not the window — is what scrolled.
+  // Capture phase so this fires for a scroll anywhere, including inside
+  // a nested overflow-y-auto container.
+  useEffect(() => {
+    if (!open) return;
+    function handleScroll() {
+      setOpen(false);
+    }
+    document.addEventListener("scroll", handleScroll, true);
+    return () => document.removeEventListener("scroll", handleScroll, true);
+  }, [open]);
+
+  // Positions the panel right against the field first (a fixed, honest
+  // guess — no invented height), then — once it's actually in the DOM —
+  // corrects against its real measured height in a layout effect below.
+  // That correction runs synchronously before the browser paints, so
+  // there's no visible jump; it just means the very first guess here
+  // only has to be reasonable, not exact.
   function handleToggle() {
     if (!open && buttonRef.current) {
       const rect = buttonRef.current.getBoundingClientRect();
-      const spaceBelow = window.innerHeight - rect.bottom;
-      setOpenUpward(spaceBelow < 320);
+      const openLeftward = window.innerWidth - rect.left < PANEL_WIDTH;
+      setPanelPos({
+        top: rect.bottom + 6,
+        left: openLeftward ? rect.right - PANEL_WIDTH : rect.left,
+      });
     }
     setOpen((o) => !o);
   }
+
+  useLayoutEffect(() => {
+    if (!open || !buttonRef.current || !panelRef.current) return;
+    const rect = buttonRef.current.getBoundingClientRect();
+    const panelHeight = panelRef.current.getBoundingClientRect().height;
+    const openUpward = window.innerHeight - rect.bottom < panelHeight + 8 && rect.top > panelHeight + 8;
+    const openLeftward = window.innerWidth - rect.left < PANEL_WIDTH;
+    setPanelPos({
+      top: openUpward ? rect.top - panelHeight - 6 : rect.bottom + 6,
+      left: openLeftward ? rect.right - PANEL_WIDTH : rect.left,
+    });
+    // Only re-runs when the panel opens (or the visible month changes
+    // the panel's own height, e.g. a 5-row vs 6-row month) — not on
+    // every panelPos update, which would just loop against itself.
+  }, [open, viewMonth]);
 
   function toISO(d: Date): string {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -1088,67 +1136,70 @@ export function DatePicker({
         <span className={value ? "text-gray-900" : "text-gray-400"}>{value ? formatDisplay(value) : placeholder}</span>
       </button>
 
-      {open && (
-        <div
-          className={`absolute z-20 left-0 bg-white border border-gray-200 rounded-xl shadow-lg p-3 w-[280px] ${
-            openUpward ? "bottom-full mb-1.5" : "top-full mt-1.5"
-          }`}
-        >
-          <div className="flex items-center justify-between mb-2">
-            <button
-              type="button"
-              onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() - 1, 1))}
-              className="p-1 hover:bg-gray-100 rounded-lg transition"
-            >
-              <ChevronLeft size={15} />
-            </button>
-            <span className="text-sm font-medium text-gray-900">{monthLabel}</span>
-            <button
-              type="button"
-              onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 1))}
-              className="p-1 hover:bg-gray-100 rounded-lg transition"
-            >
-              <ChevronRight size={15} />
-            </button>
-          </div>
+      {open &&
+        panelPos &&
+        createPortal(
+          <div
+            ref={panelRef}
+            style={{ position: "fixed", top: panelPos.top, left: panelPos.left, width: PANEL_WIDTH, zIndex: 60 }}
+            className="bg-white border border-gray-200 rounded-xl shadow-lg p-3.5"
+          >
+            <div className="flex items-center justify-between mb-2">
+              <button
+                type="button"
+                onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() - 1, 1))}
+                className="p-1 hover:bg-gray-100 rounded-lg transition"
+              >
+                <ChevronLeft size={15} />
+              </button>
+              <span className="text-sm font-medium text-gray-900">{monthLabel}</span>
+              <button
+                type="button"
+                onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 1))}
+                className="p-1 hover:bg-gray-100 rounded-lg transition"
+              >
+                <ChevronRight size={15} />
+              </button>
+            </div>
 
-          <div className="grid grid-cols-7 gap-1 mb-1">
-            {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
-              <div key={i} className="text-center text-[10px] font-medium text-gray-400 py-1">
-                {d}
-              </div>
-            ))}
-          </div>
-          <div className="grid grid-cols-7 gap-1">
-            {Array.from({ length: firstWeekday }).map((_, i) => (
-              <div key={`blank-${i}`} />
-            ))}
-            {Array.from({ length: daysInMonth }).map((_, i) => {
-              const day = i + 1;
-              const date = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), day);
-              const iso = toISO(date);
-              const isSelected = value === iso;
-              const isToday = todayIso === iso;
-              return (
-                <button
-                  type="button"
-                  key={day}
-                  onClick={() => handleDayClick(date)}
-                  className={`aspect-square rounded-lg text-xs transition ${
-                    isSelected
-                      ? "bg-black text-white font-medium"
-                      : isToday
-                      ? "bg-gray-100 text-gray-900 font-medium"
-                      : "text-gray-700 hover:bg-gray-50"
-                  }`}
-                >
-                  {day}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
+            <div className="grid grid-cols-7 gap-1 mb-1">
+              {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
+                <div key={i} className="text-center text-[10px] font-medium text-gray-400 py-1">
+                  {d}
+                </div>
+              ))}
+            </div>
+            <div className="grid grid-cols-7 gap-1">
+              {Array.from({ length: firstWeekday }).map((_, i) => (
+                <div key={`blank-${i}`} />
+              ))}
+              {Array.from({ length: daysInMonth }).map((_, i) => {
+                const day = i + 1;
+                const date = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), day);
+                const iso = toISO(date);
+                const isSelected = value === iso;
+                const isToday = todayIso === iso;
+                return (
+                  <button
+                    type="button"
+                    key={day}
+                    onClick={() => handleDayClick(date)}
+                    className={`aspect-square rounded-lg text-xs transition ${
+                      isSelected
+                        ? "bg-black text-white font-medium"
+                        : isToday
+                        ? "bg-gray-100 text-gray-900 font-medium"
+                        : "text-gray-700 hover:bg-gray-50"
+                    }`}
+                  >
+                    {day}
+                  </button>
+                );
+              })}
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
