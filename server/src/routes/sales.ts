@@ -650,9 +650,15 @@ salesRouter.put(
 
       // Reverse any store credit this sale granted (overpayment) or spent
       // (redemption) — a voided sale should leave the customer's credit
-      // balance exactly as if the sale had never happened.
+      // balance exactly as if the sale had never happened. reference_id is
+      // a SALE id only for these reasons — for 'return_exchange' it's a
+      // RETURN id, which can coincidentally equal this sale's id, so
+      // matching on reference_id alone would reverse unrelated return credit.
       const creditEntries = db
-        .prepare(`SELECT * FROM store_credit_transactions WHERE reference_id = ?`)
+        .prepare(
+          `SELECT * FROM store_credit_transactions
+           WHERE reference_id = ? AND reason IN ('redemption', 'overpayment', 'manual_adjustment')`
+        )
         .all(sale.id) as { amount: number }[];
       for (const entry of creditEntries) {
         db.prepare(
