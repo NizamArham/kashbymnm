@@ -3,12 +3,12 @@ import { useNavigate } from "react-router-dom";
 import { ArrowLeft, CheckCircle2, Download } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { CourierReconciliationOrder, CourierSettlement } from "../lib/types";
+import { useDeliveryPartners, partnerLabel as labelFor } from "../lib/delivery";
 import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
 import { Card, Button, DateRangePicker, ErrorText, HelpHint, PageHeader, Table, Td, Th, RefLink } from "../components/ui";
 
 type Summary = { courier_partner: string; cod_collected: number; courier_charges: number; expected_net: number; delivered_orders: number };
 type ReconciliationData = { summary: Summary[]; settlements: CourierSettlement[]; orders: CourierReconciliationOrder[] };
-const labels: Record<string, string> = { CPAK: "CityPak", DEX: "DEX", D2D: "Own delivery" };
 const money = (value: number) => `Rs. ${value.toLocaleString()}`;
 
 function todayIso(): string {
@@ -22,6 +22,7 @@ function addDaysIso(iso: string, days: number): string {
 }
 
 export default function CourierOrderHistoryPage() {
+  const { partners } = useDeliveryPartners();
   const navigate = useNavigate();
   const [data, setData] = useState<ReconciliationData>({ summary: [], settlements: [], orders: [] });
   const [error, setError] = useState<string | null>(null);
@@ -87,7 +88,7 @@ export default function CourierOrderHistoryPage() {
   // noise they'd have to filter through themselves.
   function downloadReconciliationPdf(courierPartner: string) {
     setDownloadMenuOpen(false);
-    const partnerLabel = labels[courierPartner] ?? courierPartner;
+    const partnerLabel = labelFor(courierPartner);
     const ordersForPartner = filteredOrders.filter((order) => order.courier_partner === courierPartner);
     const balance = balances.find((item) => item.courier_partner === courierPartner);
 
@@ -206,7 +207,7 @@ export default function CourierOrderHistoryPage() {
                 </Button>
                 {downloadMenuOpen && (
                   <div className="absolute right-0 z-20 mt-1 w-40 bg-white border border-gray-200 rounded-xl shadow-lg py-1">
-                    {[{ value: "CPAK", label: "CityPak" }, { value: "DEX", label: "DEX" }, { value: "D2D", label: "Own delivery" }].map((opt) => (
+                    {partners.filter((p) => p.kind === "courier").map((p) => ({ value: p.code, label: p.name })).map((opt) => (
                       <button
                         key={opt.value}
                         onClick={() => downloadReconciliationPdf(opt.value)}
@@ -244,7 +245,7 @@ export default function CourierOrderHistoryPage() {
                     </span>
                     <span className="block text-xs text-gray-400">{order.customer_name ?? "Walk-in"}</span>
                   </Td>
-                  <Td>{labels[order.courier_partner] ?? order.courier_partner}</Td>
+                  <Td>{labelFor(order.courier_partner)}</Td>
                   <Td>
                     <span className="inline-flex items-center gap-1 text-xs capitalize">
                       <CheckCircle2 size={12} className={order.delivery_status === "delivered" ? "text-green-600" : "text-gray-400"} />

@@ -69,9 +69,9 @@ const USABLE_CREDIT_SUBQUERY = `
 const CALC_SUBQUERY = `
   customers.bonus_points +
   COALESCE((SELECT SUM(points) FROM loyalty_transactions WHERE customer_id = customers.id), 0) AS loyalty_points,
-  COALESCE((SELECT SUM(total - amount_paid) FROM sales WHERE customer_id = customers.id AND is_voided = 0), 0) AS balance_due,
+  COALESCE((SELECT SUM(total - amount_paid) FROM sales WHERE customer_id = customers.id AND is_voided = 0 AND status = 'completed'), 0) AS balance_due,
   ${USABLE_CREDIT_SUBQUERY} AS store_credit_balance,
-  (SELECT MAX(date) FROM sales WHERE customer_id = customers.id AND is_voided = 0) AS last_order_date
+  (SELECT MAX(date) FROM sales WHERE customer_id = customers.id AND is_voided = 0 AND status = 'completed') AS last_order_date
 `;
 
 // Individual usable credit grants for one customer, each with its TRUE
@@ -494,11 +494,17 @@ customersRouter.get(
 customersRouter.get(
   "/:id/payment-history",
   asyncHandler(async (req, res) => {
-    const customer = db.prepare(`SELECT * FROM customers WHERE id = ?`).get(req.params.id) as any;
+    // balance_due / store_credit_balance come along so the page can show
+    // what's owed on invoices and what credit is held as two figures —
+    // the running balance below nets them, so spending credit on an
+    // invoice (which moves value between the two) leaves it unchanged.
+    const customer = db
+      .prepare(`SELECT customers.*, ${CALC_SUBQUERY} FROM customers WHERE customers.id = ?`)
+      .get(req.params.id) as any;
     if (!customer) throw new ApiError(404, "Customer not found");
 
     const sales = db
-      .prepare(`SELECT id, invoice, date, total FROM sales WHERE customer_id = ? AND is_voided = 0 ORDER BY date`)
+      .prepare(`SELECT id, invoice, date, total, amount_paid FROM sales WHERE customer_id = ? AND is_voided = 0 AND status = 'completed' ORDER BY date`)
       .all(req.params.id) as any[];
     const payments = db
       .prepare(
@@ -517,7 +523,7 @@ customersRouter.get(
       .prepare(
         `SELECT id, entry_date, amount, payment_method, notes, reference_id FROM cash_book
          WHERE category = 'sale' AND type = 'income'
-           AND reference_id IN (SELECT id FROM sales WHERE customer_id = ? AND is_voided = 0)
+           AND reference_id IN (SELECT id FROM sales WHERE customer_id = ? AND is_voided = 0 AND status = 'completed')
          ORDER BY entry_date`
       )
       .all(req.params.id) as any[];
@@ -529,9 +535,35 @@ customersRouter.get(
       .all(req.params.id) as any[];
     const credits = db
       .prepare(
-        `SELECT id, created_at, amount, reason, notes FROM store_credit_transactions WHERE customer_id = ? ORDER BY created_at`
+        `SELECT id, created_at, amount, reason, reference_id, notes FROM store_credit_transactions WHERE customer_id = ? ORDER BY created_at`
       )
       .all(req.params.id) as any[];
+    // A prepaid online order's payment also covered its delivery fee,
+    // which was never part of the sale's own total — so that slice of
+    // the payment isn't settling any debt shown here.
+    const feePaidRows = db
+      .prepare(`SELECT sale_id, SUM(fee_paid) as fee FROM deliveries WHERE fee_paid > 0 GROUP BY sale_id`)
+      .all() as { sale_id: number; fee: number }[];
+    const feeLeft = new Map(feePaidRows.map((r) => [r.sale_id, r.fee]));
+    const ledgerSaleIds = new Set(sales.map((s) => s.id));
+    // How much of each sale's amount_paid the lines below actually
+    // account for (cash taken at/after checkout, store credit spent on
+    // it) — used at the end to spot payments that were applied to a sale
+    // without leaving a line of their own.
+    const explainedBySale = new Map<number, number>();
+    const explain = (saleId: number, amount: number) => explainedBySale.set(saleId, (explainedBySale.get(saleId) ?? 0) + amount);
+
+    // Store credit entries tied to a sale (spent on it, kept from an
+    // overpayment on it, or a void/correction reversing either) only MOVE
+    // value between "credit they hold" and "what they owe on that sale" —
+    // the sale's own line and its payment lines already carry the real
+    // money, so counting these again would overstate the balance by
+    // every rupee of credit ever spent. Only credit with no such
+    // counterpart (a grant from a return, redeemed loyalty points) moves
+    // the balance on its own. A return's reference_id is the return, not
+    // a sale, so which kind it is comes from the reason.
+    const isSaleLinkedCredit = (c: { reason: string; reference_id: number | null }) =>
+      c.reference_id != null && ["redemption", "overpayment", "manual_adjustment"].includes(c.reason);
 
     type LedgerEntry = {
       date: string;
@@ -539,6 +571,11 @@ customersRouter.get(
       label: string;
       amount: number;
       effect: number;
+      // Credit rows only: how much this changes the store credit held
+      // (signed — a grant is +, spending it is −). The running balance
+      // below nets owed against credit, so this is what lets it also be
+      // shown split into the two parts.
+      credit_delta?: number;
       sale_id?: number;
       sale_invoice?: string;
     };
@@ -559,14 +596,20 @@ customersRouter.get(
         amount: p.amount,
         effect: -p.amount,
       })),
-      ...salePayments.map((p) => ({
-        date: p.entry_date,
-        type: "payment" as const,
-        label: p.notes || `Payment${p.payment_method ? ` (${p.payment_method})` : ""}`,
-        amount: p.amount,
-        effect: -p.amount,
-        sale_id: p.reference_id,
-      })),
+      ...salePayments.map((p) => {
+        const deliveryPart = Math.min(feeLeft.get(p.reference_id) ?? 0, p.amount);
+        if (deliveryPart > 0) feeLeft.set(p.reference_id, (feeLeft.get(p.reference_id) ?? 0) - deliveryPart);
+        const baseLabel = p.notes || `Payment${p.payment_method ? ` (${p.payment_method})` : ""}`;
+        explain(p.reference_id, p.amount - deliveryPart);
+        return {
+          date: p.entry_date,
+          type: "payment" as const,
+          label: deliveryPart > 0 ? `${baseLabel} (incl. Rs. ${deliveryPart.toLocaleString()} delivery fee)` : baseLabel,
+          amount: p.amount,
+          effect: -(p.amount - deliveryPart),
+          sale_id: p.reference_id,
+        };
+      }),
       // A cheque still in_hand or otherwise not yet cleared/bounced is
       // shown as settling the balance right away — matching the app's
       // own design (a received cheque marks the sale paid immediately,
@@ -582,19 +625,98 @@ customersRouter.get(
           amount: c.amount,
           effect: -c.amount,
         })),
-      ...credits.map((c) => ({
-        date: c.created_at,
-        type: "credit" as const,
-        label: c.amount > 0 ? c.notes || "Store credit granted" : `Credit applied${c.notes ? ` — ${c.notes}` : ""}`,
-        amount: Math.abs(c.amount),
-        effect: -c.amount,
-      })),
-    ].sort((a, b) => a.date.localeCompare(b.date));
+      ...credits
+        // A sale-linked credit row for a sale that isn't in this ledger
+        // (voided) would just be an unexplained line — its sale and
+        // payments are hidden, and its credit movements cancel out.
+        .filter((c) => !isSaleLinkedCredit(c) || ledgerSaleIds.has(c.reference_id))
+        .map((c) => ({
+          date: c.created_at,
+          type: "credit" as const,
+          label: c.amount > 0 ? c.notes || "Store credit granted" : `Credit applied${c.notes ? ` — ${c.notes}` : ""}`,
+          amount: Math.abs(c.amount),
+          effect: isSaleLinkedCredit(c) ? 0 : -c.amount,
+          credit_delta: c.amount,
+          ...(isSaleLinkedCredit(c) ? { sale_id: c.reference_id } : {}),
+        })),
+    ];
 
+    // Payments that were applied straight onto a sale's amount_paid with
+    // no line of their own — the main case is a courier settling COD for
+    // delivered orders, which marks each one paid from a single lump
+    // remittance. Without these the statement keeps listing those orders
+    // as unpaid and drifts away from what the invoices themselves say.
+    for (const c of credits) {
+      if (c.reason === "redemption" && c.amount < 0 && ledgerSaleIds.has(c.reference_id)) explain(c.reference_id, -c.amount);
+    }
+    const actualPaid = sales.reduce((sum, s) => sum + s.amount_paid, 0);
+    const explainedPaid =
+      Array.from(explainedBySale.values()).reduce((sum, v) => sum + v, 0) +
+      payments.reduce((sum, p) => sum + p.amount, 0) +
+      cheques.filter((c) => c.status !== "bounced").reduce((sum, c) => sum + c.amount, 0);
+    let residual = Math.round((actualPaid - explainedPaid) * 100) / 100;
+
+    if (residual > 0) {
+      const settled = db
+        .prepare(
+          `SELECT s.id, s.invoice, s.date, s.amount_paid, d.delivery_date, dp.name AS partner_name
+           FROM sales s
+           JOIN deliveries d ON d.sale_id = s.id
+           LEFT JOIN delivery_partners dp ON dp.code = d.delivery_partner
+           WHERE s.customer_id = ? AND s.is_voided = 0 AND s.status = 'completed'
+             AND d.delivery_status = 'delivered' AND s.amount_paid > 0
+           ORDER BY s.date, s.id`
+        )
+        .all(req.params.id) as any[];
+      for (const sale of settled) {
+        if (residual <= 0) break;
+        const give = Math.min(residual, Math.max(0, sale.amount_paid - (explainedBySale.get(sale.id) ?? 0)));
+        if (give <= 0) continue;
+        // On the day it was delivered (never before the sale itself).
+        let when = sale.delivery_date
+          ? sale.delivery_date.length >= 19
+            ? sale.delivery_date.replace("T", " ")
+            : `${sale.delivery_date.slice(0, 10)} 23:59:59`
+          : sale.date;
+        if (when < sale.date) when = sale.date;
+        entries.push({
+          date: when,
+          type: "payment" as const,
+          label: `Paid on delivery — settled by ${sale.partner_name ?? "the courier"} (${sale.invoice})`,
+          amount: give,
+          effect: -give,
+          sale_id: sale.id,
+        });
+        residual = Math.round((residual - give) * 100) / 100;
+      }
+    }
+    // Anything still unexplained (in either direction) is shown as one
+    // plain line rather than left to quietly skew the balance.
+    if (Math.abs(residual) >= 0.01 && sales.length > 0) {
+      entries.push({
+        date: sales[sales.length - 1].date,
+        type: "payment" as const,
+        label: residual > 0 ? "Other payments applied to invoices" : "Payments reversed or corrected",
+        amount: Math.abs(residual),
+        effect: -residual,
+      });
+    }
+
+    entries.sort((a, b) => a.date.localeCompare(b.date));
+
+    // balance = owed on invoices − store credit held. A row's effect on
+    // the net is owedChange − creditChange, so owedChange = effect +
+    // creditChange: spending credit on an invoice lowers BOTH by the same
+    // amount (net unchanged), a return's credit grant raises only credit.
     let runningBalance = 0;
+    let owedBalance = 0;
+    let creditBalance = 0;
     const withBalance = entries.map((entry) => {
+      const creditChange = entry.credit_delta ?? 0;
       runningBalance += entry.effect;
-      return { ...entry, running_balance: runningBalance };
+      creditBalance += creditChange;
+      owedBalance += entry.effect + creditChange;
+      return { ...entry, running_balance: runningBalance, owed_balance: owedBalance, credit_balance: creditBalance };
     });
 
     res.json({ customer, entries: withBalance, final_balance: runningBalance });
@@ -655,7 +777,7 @@ export function computeFifoAllocation(customerId: number, amount: number) {
     .prepare(
       `SELECT id, invoice, date, total, amount_paid
        FROM sales
-       WHERE customer_id = ? AND is_voided = 0 AND payment_status != 'paid'
+       WHERE customer_id = ? AND is_voided = 0 AND status = 'completed' AND payment_status != 'paid'
        ORDER BY date ASC, id ASC`
     )
     .all(customerId) as { id: number; invoice: string; date: string; total: number; amount_paid: number }[];
@@ -740,6 +862,11 @@ const recordPaymentInput = z.object({
   // per cheque. `amount` above is ignored when this is set; the real
   // total is the sum of these.
   cheques: z.array(chequeItemInput).optional(),
+  // Only valid with method 'other': settle the invoices out of the
+  // customer's own store credit instead of taking money — no cash book
+  // entry, since no money changed hands; the credit is spent down the
+  // same way checkout does it.
+  deduct_from_store_credit: z.boolean().optional(),
 });
 
 // POST /api/customers/:id/payment — record a real credit-customer
@@ -760,6 +887,11 @@ customersRouter.post(
 
     const data = recordPaymentInput.parse(req.body);
 
+    const deductFromCredit = !!data.deduct_from_store_credit;
+    if (deductFromCredit && data.method !== "other") {
+      throw new ApiError(400, "Deducting from store credit is only available under 'Other'.");
+    }
+
     const cheques = data.method === "cheque" ? data.cheques ?? [] : [];
     if (data.method === "cheque" && cheques.length === 0) {
       throw new ApiError(400, "Add at least one cheque");
@@ -767,6 +899,20 @@ customersRouter.post(
     const totalAmount = data.method === "cheque" ? cheques.reduce((sum, c) => sum + c.amount, 0) : data.amount;
     if (!totalAmount || totalAmount <= 0) {
       throw new ApiError(400, "Enter a valid amount");
+    }
+
+    // Same usable-credit rule as the customer's balance and checkout:
+    // expired grants don't count, money already spent always does.
+    if (deductFromCredit) {
+      const { balance } = db
+        .prepare(
+          `SELECT COALESCE(SUM(amount), 0) as balance FROM store_credit_transactions
+           WHERE customer_id = ? AND (expires_at IS NULL OR expires_at > datetime('now', '+330 minutes') OR amount < 0)`
+        )
+        .get(req.params.id) as { balance: number };
+      if (totalAmount > balance) {
+        throw new ApiError(409, `${customer.name} only has Rs. ${Math.max(0, balance).toLocaleString()} of store credit available.`);
+      }
     }
 
     const { allocations, unapplied } = computeFifoAllocation(Number(req.params.id), totalAmount);
@@ -816,6 +962,22 @@ customersRouter.post(
               c.payee_name?.trim() || null
             );
           chequeReceiptIds.push(Number(receiptResult.lastInsertRowid));
+        }
+      } else if (deductFromCredit) {
+        // One redemption row per invoice it settled, each pointing at
+        // that sale — exactly how checkout records credit being spent —
+        // so voiding a sale later can give its credit back. Only what was
+        // actually applied is spent; any unapplied excess is never taken.
+        for (const a of allocations) {
+          db.prepare(
+            `INSERT INTO store_credit_transactions (customer_id, amount, reason, reference_id, notes)
+             VALUES (?, ?, 'redemption', ?, ?)`
+          ).run(
+            req.params.id,
+            -a.applied,
+            a.sale_id,
+            `Applied to invoice ${a.invoice} (deducted from store credit)${data.notes?.trim() ? ` — ${data.notes.trim()}` : ""}`
+          );
         }
       } else {
         db.prepare(

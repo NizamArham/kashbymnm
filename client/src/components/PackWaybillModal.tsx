@@ -2,12 +2,13 @@ import { useState, useRef, useEffect, RefObject } from "react";
 import { X, Printer, Download, MapPin, Check, Plus, Truck } from "lucide-react";
 import JsBarcode from "jsbarcode";
 import { Delivery, BusinessInfo, Customer, CustomerAddress } from "../lib/types";
-import { waybillShopCode } from "../lib/delivery";
+import { waybillShopCode, useDeliveryPartners, partnerLabel, waybillItemsDescription, COURIER_API } from "../lib/delivery";
 import { WaybillLabel, WaybillLabelData } from "./WaybillLabel";
 import { generateWaybillLabelPdf } from "../lib/waybillLabelPdf";
 import { applyBusinessInfoToReturnAddress } from "../lib/businessInfo";
 import { api, ApiRequestError } from "../lib/api";
 import { Input, Label, FormGroup, ErrorText, Badge } from "./ui";
+import ChangePartnerModal from "./ChangePartnerModal";
 import { CityPicker } from "./CityPicker";
 
 function formatLabelDate(d: Date): string {
@@ -19,32 +20,50 @@ export default function PackWaybillModal({
   delivery,
   onClose,
   onPacked,
+  onPartnerChanged,
 }: {
   delivery: Delivery;
   onClose: () => void;
   onPacked: (trackingNumber: string) => void;
+  // Called after the courier is changed from inside this modal, so the
+  // parent can reload the order and reopen this on the updated details.
+  onPartnerChanged?: () => void | Promise<void>;
 }) {
-  const [trackingNumber, setTrackingNumber] = useState("");
+  const [changingPartner, setChangingPartner] = useState(false);
+  const [trackingNumber, setTrackingNumber] = useState(delivery.tracking_number ?? "");
   const [pcs, setPcs] = useState("1");
   const [weight, setWeight] = useState(delivery.package_weight_kg ? String(delivery.package_weight_kg) : "");
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
 
-  // Only CityPak has an API integration — D2D/DEX still need the
-  // tracking number created on their own portal and typed in below.
-  const [creatingCitypakOrder, setCreatingCitypakOrder] = useState(false);
-  const [citypakError, setCitypakError] = useState<string | null>(null);
+  // An on-demand app (Uber, PickMe Flash...) has no courier portal and
+  // issues no tracking numbers, so the invoice number — a unique,
+  // scannable code — stands in as the tracking ID/barcode.
+  const { partners } = useDeliveryPartners();
+  const isOnDemand = partners.find((p) => p.code === delivery.delivery_partner)?.kind === "on_demand";
+  useEffect(() => {
+    if (isOnDemand && !trackingNumber && delivery.invoice) setTrackingNumber(delivery.invoice);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOnDemand]);
 
-  async function createCitypakOrder() {
-    setCitypakError(null);
-    setCreatingCitypakOrder(true);
+  // CityPak and Fardar can be booked through their APIs — everyone else
+  // (D2D/DEX...) still needs the tracking number created on their own
+  // portal and typed in below.
+  const courierApi = delivery.delivery_partner ? COURIER_API[delivery.delivery_partner] : undefined;
+  const [creatingShipment, setCreatingShipment] = useState(false);
+  const [shipmentError, setShipmentError] = useState<string | null>(null);
+
+  async function createShipment() {
+    if (!courierApi) return;
+    setShipmentError(null);
+    setCreatingShipment(true);
     try {
-      const result = await api.post<{ tracking_number: string; order_id: number }>(`/deliveries/${delivery.id}/citypak-order`);
+      const result = await api.post<{ tracking_number: string }>(`/deliveries/${delivery.id}/${courierApi.endpoint}`);
       setTrackingNumber(result.tracking_number);
     } catch (err) {
-      setCitypakError(err instanceof ApiRequestError ? err.message : "Failed to create the shipment with CityPak");
+      setShipmentError(err instanceof ApiRequestError ? err.message : `Failed to create the shipment with ${courierApi.name}`);
     } finally {
-      setCreatingCitypakOrder(false);
+      setCreatingShipment(false);
     }
   }
 
@@ -183,7 +202,7 @@ export default function PackWaybillModal({
     weight,
     paymentType,
     codAmount,
-    description: delivery.items?.map((i) => `${i.product_title ?? "Item"} x${i.quantity}`).join(", ") ?? "",
+    description: waybillItemsDescription(delivery.items),
     trackingNumber,
     returnBusinessName,
     returnAddressLines: returnAddress.split("\n"),
@@ -267,9 +286,23 @@ export default function PackWaybillModal({
             <h3 className="text-base font-semibold text-gray-900">Generate waybill</h3>
             <p className="text-xs text-gray-400">
               {delivery.invoice} —{" "}
-              {delivery.delivery_partner === "CPAK"
-                ? "create the shipment with CityPak below, or paste in a tracking number manually"
+              {courierApi
+                ? `create the shipment with ${courierApi.name} below, or paste in a tracking number manually`
+                : isOnDemand
+                ? "no courier portal for this partner — the invoice number is used as the tracking barcode"
                 : "feed this into the courier portal, then paste back the tracking number"}
+            </p>
+            <p className="text-xs text-gray-500 mt-1">
+              Courier: <strong className="text-gray-900">{partnerLabel(delivery.delivery_partner)}</strong>
+              {onPartnerChanged && (
+                <button
+                  type="button"
+                  onClick={() => setChangingPartner(true)}
+                  className="ml-2 text-gray-500 hover:text-gray-900 underline decoration-dotted"
+                >
+                  change
+                </button>
+              )}
             </p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
@@ -281,23 +314,27 @@ export default function PackWaybillModal({
           <div className="overflow-y-auto p-5">
             <h4 className="text-sm font-semibold text-gray-900 mb-3">Only these need typing</h4>
 
-            {delivery.delivery_partner === "CPAK" && (
+            {courierApi && (
               <div className="mb-3">
                 <button
                   type="button"
-                  onClick={createCitypakOrder}
-                  disabled={creatingCitypakOrder}
+                  onClick={createShipment}
+                  disabled={creatingShipment}
                   className="w-full flex items-center justify-center gap-2 px-3 py-2.5 bg-gray-900 text-white rounded-xl text-sm font-medium hover:bg-gray-800 transition disabled:opacity-50"
                 >
                   <Truck size={14} />
-                  {creatingCitypakOrder ? "Creating shipment..." : "Create shipment with CityPak"}
+                  {creatingShipment ? "Creating shipment..." : `Create shipment with ${courierApi.name}`}
                 </button>
-                {citypakError && <ErrorText>{citypakError}</ErrorText>}
+                {shipmentError && <ErrorText>{shipmentError}</ErrorText>}
               </div>
             )}
 
             <FormGroup>
-              <Label>Tracking number {delivery.delivery_partner === "CPAK" ? "(or type it in manually)" : "(from courier portal)"}</Label>
+              <Label>
+                {isOnDemand
+                  ? "Tracking ID (invoice number, used as the barcode)"
+                  : `Tracking number ${courierApi ? "(or type it in manually)" : "(from courier portal)"}`}
+              </Label>
               <Input value={trackingNumber} onChange={(e) => setTrackingNumber(e.target.value)} autoFocus />
             </FormGroup>
             <div className="grid grid-cols-2 gap-3">
@@ -320,6 +357,19 @@ export default function PackWaybillModal({
                 <div className="flex justify-between mt-1">
                   <span className="text-gray-500">COD to collect</span>
                   <span className="font-semibold text-gray-900">Rs. {codAmount.toLocaleString()}</span>
+                </div>
+              )}
+              {delivery.delivery_paid_by && (
+                <div className="flex justify-between mt-1">
+                  <span className="text-gray-500">Delivery fare</span>
+                  <span className="font-medium text-gray-900">
+                    Rs. {(delivery.actual_fare ?? 0).toLocaleString()} ·{" "}
+                    {delivery.delivery_paid_by === "customer"
+                      ? "customer pays"
+                      : delivery.delivery_paid_by === "shop"
+                      ? "free — we pay"
+                      : "we paid upfront (on the bill)"}
+                  </span>
                 </div>
               )}
             </div>
@@ -448,6 +498,10 @@ export default function PackWaybillModal({
           </button>
         </div>
       </div>
+
+      {changingPartner && onPartnerChanged && (
+        <ChangePartnerModal delivery={delivery} onClose={() => setChangingPartner(false)} onChanged={onPartnerChanged} />
+      )}
     </div>
   );
 }

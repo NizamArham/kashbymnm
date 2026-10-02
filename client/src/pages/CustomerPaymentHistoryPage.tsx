@@ -14,6 +14,10 @@ interface LedgerEntry {
   amount: number;
   effect: number;
   running_balance: number;
+  // The running balance split in two: what's owed on invoices, and the
+  // store credit held (running_balance = owed_balance − credit_balance).
+  owed_balance: number;
+  credit_balance: number;
   sale_id?: number;
   sale_invoice?: string;
 }
@@ -82,7 +86,10 @@ export default function CustomerPaymentHistoryPage() {
   const displayEntries = [...filteredEntries].reverse();
 
   function formatEntryAmount(entry: LedgerEntry): string {
-    if (entry.effect === 0) return "—";
+    // Credit moved onto an invoice (or an overpayment kept as credit)
+    // doesn't change what's owed — shown in brackets so the amount is
+    // still visible without looking like it moved the balance.
+    if (entry.effect === 0) return entry.amount > 0 ? `(Rs. ${entry.amount.toLocaleString()})` : "—";
     return `${entry.type === "sale" ? "+" : "-"}Rs. ${entry.amount.toLocaleString()}`;
   }
 
@@ -136,7 +143,11 @@ export default function CustomerPaymentHistoryPage() {
         title={customer ? `${customer.name}'s payment history` : "Payment history"}
         subtitle={
           customer
-            ? `${filteredEntries.length} of ${allEntries.length} record${allEntries.length === 1 ? "" : "s"} shown · Rs. ${finalBalance.toLocaleString()} currently owed`
+            ? `${filteredEntries.length} of ${allEntries.length} record${allEntries.length === 1 ? "" : "s"} shown · Rs. ${(customer?.balance_due ?? finalBalance).toLocaleString()} owed on invoices${
+                (customer?.store_credit_balance ?? 0) > 0
+                  ? ` · Rs. ${customer!.store_credit_balance.toLocaleString()} store credit available · net Rs. ${finalBalance.toLocaleString()}`
+                  : ""
+              }`
             : undefined
         }
         action={
@@ -216,11 +227,23 @@ export default function CustomerPaymentHistoryPage() {
                     )}
                   </Td>
                   <Td className={`font-medium ${typeTone(entry.type)}`}>{formatEntryAmount(entry)}</Td>
-                  <Td>Rs. {entry.running_balance.toLocaleString()}</Td>
+                  <Td>
+                    <div>Rs. {entry.running_balance.toLocaleString()}</div>
+                    {(entry.credit_balance !== 0 || entry.type === "credit") && (
+                      <div className="text-[11px] text-gray-400 whitespace-nowrap mt-0.5" title="Balance = owed on invoices − store credit held">
+                        owed {entry.owed_balance.toLocaleString()} · credit {entry.credit_balance.toLocaleString()}
+                      </div>
+                    )}
+                  </Td>
                 </tr>
               ))}
             </tbody>
           </Table>
+          {filteredEntries.some((e) => e.effect === 0 && e.amount > 0) && (
+            <p className="text-xs text-gray-400 px-4 py-3 border-t border-gray-100">
+              Amounts in brackets are store credit applied to an invoice — they don't change the balance, because the credit was already counted when it was granted.
+            </p>
+          )}
         </Card>
       )}
     </div>

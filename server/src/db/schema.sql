@@ -517,10 +517,35 @@ CREATE TABLE IF NOT EXISTS sales (
   -- and why for anyone reviewing the history later.
   is_voided INTEGER NOT NULL DEFAULT 0,
   voided_at TEXT,
-  void_reason TEXT
+  void_reason TEXT,
+  -- A quotation is a real row in this same table — same invoice
+  -- numbering machinery, same items/discount/total columns, same
+  -- Sale Detail page and receipt printing — just one that was saved
+  -- before any money changed hands: no inventory unit was flipped to
+  -- 'sold', no cash book entry, no loyalty points, no delivery was
+  -- created for it. Converting it to a real sale (see
+  -- PUT /sales/:id/convert-to-sale) re-validates the items are still
+  -- available and then applies exactly those side effects, in place,
+  -- on this same row. Every report/listing that aggregates `sales`
+  -- for real revenue must filter status = 'completed' — see
+  -- analytics.ts and customers.ts.
+  status TEXT NOT NULL DEFAULT 'completed' CHECK (status IN ('quotation','completed')),
+  -- How long the quoted price/items are good for — set when the
+  -- quotation is created, cleared once it's converted to a real sale.
+  quotation_valid_until TEXT
+);
+
+-- High-water mark of the lifetime invoice/quotation sequence (see
+-- nextSequenceNumber in lib/codes.ts) — a single row. Lets the count
+-- keep climbing even after the highest-numbered row (a cancelled
+-- quotation, say) is deleted, so a number is never handed out twice.
+CREATE TABLE IF NOT EXISTS invoice_counter (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  last_seq INTEGER NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_sales_customer ON sales(customer_id);
+CREATE INDEX IF NOT EXISTS idx_sales_status ON sales(status);
 
 -- 6a. sale_items ----------------------------------------------------------
 CREATE TABLE IF NOT EXISTS sale_items (
@@ -791,9 +816,10 @@ CREATE TABLE IF NOT EXISTS deliveries (
   address_id INTEGER REFERENCES customer_addresses(id),
   courier_name TEXT,
   tracking_number TEXT,
-  -- Which of the 3 delivery partners this order ships with. Drives the
-  -- waybill's shop code (MNM X CPAK / MNM X D2D / MNM X DEX).
-  delivery_partner TEXT CHECK (delivery_partner IN ('CPAK','D2D','DEX')),
+  -- Which delivery partner this order ships with — a code from
+  -- delivery_partners (admin-managed, so deliberately NOT a fixed CHECK
+  -- list). Drives the waybill's shop code (e.g. MNM X CPAK).
+  delivery_partner TEXT,
   -- Set only when the shipment was created via CityPak's API (rather
   -- than manually on their portal with the tracking number pasted in
   -- here) — lets a later feature look the order back up with CityPak
@@ -830,10 +856,78 @@ CREATE TABLE IF NOT EXISTS deliveries (
   dispatched_at TEXT,
   delivery_date TEXT,
   delivery_fee REAL NOT NULL DEFAULT 0,
-  notes TEXT
+  notes TEXT,
+  -- Only for on-demand partners (Uber, PickMe Flash...), where the fare
+  -- is a real, one-off amount typed in at POS rather than a weight-based
+  -- tariff. delivery_paid_by says who bears it: 'customer' (charged to
+  -- them), 'shop' (free delivery — we pay), or 'shop_upfront' (we paid
+  -- the rider now on their behalf, and it's added to their bill).
+  -- actual_fare is what the ride really costs — kept even when
+  -- delivery_fee (what the customer is charged) is 0 because we pay.
+  delivery_paid_by TEXT CHECK (delivery_paid_by IN ('customer','shop','shop_upfront')),
+  actual_fare REAL,
+  -- How much of delivery_fee the customer already paid at checkout (a
+  -- prepaid online order that included delivery). sales.amount_paid only
+  -- ever counts payment toward the PRODUCT total — the delivery fee is
+  -- tracked here, never as an "overpayment" on the sale — but that money
+  -- really came in, so voiding the sale has to give it back too.
+  fee_paid REAL NOT NULL DEFAULT 0,
+  -- The courier's own latest status wording (e.g. "Out for delivery"),
+  -- and when they reported it — kept exactly as they sent it, alongside
+  -- our own delivery_status, so staff can see what the courier says even
+  -- when it isn't a state change we act on.
+  courier_status TEXT,
+  courier_status_at TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_deliveries_sale ON deliveries(sale_id);
+
+-- Every status a courier has reported (Fardar pushes them to us; CityPak
+-- is checked on a schedule) and what was done with it. Mainly so the
+-- wording each courier actually uses can be seen and the "delivered /
+-- returned" matching adjusted if one doesn't match.
+CREATE TABLE IF NOT EXISTS courier_status_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  courier TEXT NOT NULL,
+  tracking_number TEXT,
+  status_text TEXT,
+  courier_time TEXT,
+  action_taken TEXT NOT NULL,
+  received_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes'))
+);
+
+-- 9a. delivery_partners ------------------------------------------------------
+-- Admin-managed list of who an online order can ship with. Never deleted
+-- (past deliveries reference the code) — deactivate instead.
+-- kind 'courier' = a courier company with a weight-based tariff, its own
+-- tracking numbers, and COD settled with us periodically (CityPak, DEX,
+-- Fardar...). 'on_demand' = a ride/dispatch app (Uber, PickMe Flash...):
+-- fare typed in per order, no courier tracking (the invoice number is
+-- used as the tracking barcode), and no COD settlement.
+CREATE TABLE IF NOT EXISTS delivery_partners (
+  code TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'courier' CHECK (kind IN ('courier','on_demand')),
+  waybill_code TEXT NOT NULL,
+  -- e.g. https://track.example.com/?id={tracking} — {tracking} is
+  -- replaced with the order's tracking number to make a clickable link.
+  tracking_url_template TEXT,
+  -- Tariff for a 'courier': base_fee covers the first kg, extra_kg_fee
+  -- each additional kg (rounded up). Unused for 'on_demand'.
+  base_fee REAL NOT NULL DEFAULT 450,
+  extra_kg_fee REAL NOT NULL DEFAULT 100,
+  is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes'))
+);
+
+INSERT OR IGNORE INTO delivery_partners (code, name, kind, waybill_code, tracking_url_template, sort_order) VALUES
+  ('CPAK', 'CityPak', 'courier', 'MNM X CPAK', 'https://track.citypak.lk/track?tracking_number={tracking}', 1),
+  ('D2D', 'Dropp', 'courier', 'MNM X D2D', NULL, 2),
+  ('DEX', 'DEX (Daraz Express)', 'courier', 'MNM X DEX', 'https://www.dex.com.pk/tracking?references={tracking}', 3),
+  ('FDR', 'Fardar', 'courier', 'MNM X FDR', NULL, 4),
+  ('UBER', 'Uber', 'on_demand', 'MNM X UBER', NULL, 5),
+  ('PMF', 'PickMe Flash', 'on_demand', 'MNM X PMF', NULL, 6);
 
 -- 11. cash_book -----------------------------------------------------------
 CREATE TABLE IF NOT EXISTS cash_book (

@@ -1,10 +1,11 @@
 import { Router } from "express";
 import { z } from "zod";
 import { db } from "../db/connection";
-import { nextInvoiceCode, InvoiceCategory, nextTransactionCode } from "../lib/codes";
+import { nextInvoiceCode, InvoiceCategory, nextTransactionCode, nextQuotationCode, invoiceCodeFromQuotation } from "../lib/codes";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth, requireRole } from "../lib/auth";
 import { logAudit } from "../lib/auditLog";
+import { getPartner, planDelivery, DeliveryPartnerRow } from "../lib/deliveryPartners";
 
 export const salesRouter = Router();
 
@@ -14,7 +15,7 @@ salesRouter.use(requireAuth);
 // Loyalty points = 1% of the sale's total, rounded down to a whole point
 // (e.g. Rs. 2500 spent -> 25 points). Matches the business's real,
 // established rule.
-const LOYALTY_RATE_PERCENT = 0.01;
+export const LOYALTY_RATE_PERCENT = 0.01;
 
 const saleItemInput = z.object({
   inventory_id: z.number().int().positive(),
@@ -54,34 +55,196 @@ const saleInput = z.object({
   // first kg + Rs. 100/extra kg), which is skipped entirely if
   // is_free_delivery is set — though the underlying order total still
   // needs settling either now or as COD.
-  delivery_partner: z.enum(["CPAK", "D2D", "DEX"]).optional(),
+  // A code from the admin-managed delivery_partners table — checked
+  // against it (and that it's active) at checkout, not a fixed list.
+  delivery_partner: z.string().optional(),
   package_weight_kg: z.number().nonnegative().optional(),
   is_free_delivery: z.boolean().default(false),
+  // On-demand partners (Uber, PickMe Flash...) have no weight tariff —
+  // the actual fare is typed in per order, and delivery_paid_by says who
+  // bears it: 'customer' (charged to them), 'shop' (free delivery, we
+  // pay), or 'shop_upfront' (we've paid the rider on their behalf, so
+  // it's added to their bill). Ignored for ordinary couriers.
+  delivery_fare: z.number().nonnegative().optional(),
+  delivery_paid_by: z.enum(["customer", "shop", "shop_upfront"]).optional(),
   // When true, the product total is tracked as customer credit (balance
   // due) rather than collected at all today — only the delivery fee is
   // ever COD in this case, regardless of amount_paid.
   is_credit_order: z.boolean().default(false),
+  // Set when this checkout is the final step of a saved quotation that
+  // was reopened in POS — the quotation is consumed (deleted) in the
+  // same transaction that creates the real sale, so it can't be
+  // converted twice.
+  quotation_id: z.number().int().positive().optional(),
 });
 
-// Rs. 450 for the first kg, Rs. 100 for each additional kg (rounded up —
-// couriers bill by whole kg increments). Kept server-side as the single
-// source of truth so the fee actually charged can never drift from what
-// the frontend displayed.
-function calculateDeliveryFee(weightKg: number | undefined, isFree: boolean): number {
-  if (isFree || !weightKg || weightKg <= 0) return 0;
-  const extraKg = Math.max(0, Math.ceil(weightKg - 1));
-  return 450 + extraKg * 100;
+// A quotation only ever needs the "what are we selling, to whom, at
+// what price" half of saleInput — nothing about payment, since nothing
+// is being paid yet. Delivery details are decided later too, at real
+// checkout, once the customer has actually committed.
+const quotationInput = z.object({
+  customer_id: z.number().int().positive().optional(),
+  salesperson: z.string().optional(),
+  items: z.array(saleItemInput).min(1),
+  manual_discount_type: z.enum(["percent", "fixed"]).optional(),
+  manual_discount_value: z.number().nonnegative().optional(),
+  coupon_code: z.string().optional(),
+  sale_type: z.enum(["in_store", "online"]).default("in_store"),
+  // How many days this quote is good for, counted from today — a
+  // quotation has no real "expiry" mechanism (nothing is reserved), this
+  // is purely what prints on the bill so the customer knows by when to
+  // confirm and pay.
+  valid_days: z.number().int().positive().max(365).default(7),
+});
+
+// Validates every item against real stock and computes subtotal/discount/
+// total exactly once — shared by a real checkout (POST /) and a
+// quotation (POST /quotations), so a quoted price can never drift from
+// what the same cart would actually charge at real checkout time.
+interface ItemPricing {
+  inventoryRows: any[];
+  subtotal: number;
+  manual_discount: number;
+  coupon_discount: number;
+  coupon_code: string | null;
+  discount: number;
+  total: number;
+  loyalty_points_earned: number;
+}
+
+function priceItems(
+  items: { inventory_id: number; unit_price: number }[],
+  manualDiscountType: "percent" | "fixed" | undefined,
+  manualDiscountValue: number | undefined,
+  couponCodeInput: string | undefined
+): ItemPricing {
+  const inventoryRows = items.map((item) => {
+    const row = db.prepare(`SELECT * FROM inventory WHERE id = ?`).get(item.inventory_id) as any;
+    if (!row) {
+      throw new ApiError(400, `Inventory unit ${item.inventory_id} does not exist`);
+    }
+    if (row.status !== "available") {
+      throw new ApiError(
+        409,
+        `Inventory unit ${item.inventory_id} (SKU ${row.sku}) is already sold and cannot be sold again`
+      );
+    }
+    return row;
+  });
+
+  const subtotal = items.reduce((sum, item) => sum + item.unit_price, 0);
+
+  const manual_discount =
+    manualDiscountType === "percent" ? Math.round((subtotal * (manualDiscountValue ?? 0)) / 100) : manualDiscountValue ?? 0;
+
+  let coupon_discount = 0;
+  let coupon_code: string | null = null;
+  if (couponCodeInput) {
+    const code = couponCodeInput.trim().toUpperCase();
+    const coupon = db.prepare(`SELECT * FROM coupons WHERE code = ?`).get(code) as any;
+    if (!coupon) throw new ApiError(400, `No coupon with code "${code}"`);
+    if (!coupon.is_active) throw new ApiError(400, `Coupon "${code}" is no longer active`);
+    if (coupon.expires_at && new Date(coupon.expires_at) < new Date()) {
+      throw new ApiError(400, `Coupon "${code}" has expired`);
+    }
+    coupon_discount =
+      coupon.discount_type === "percent" ? Math.round((subtotal * coupon.discount_value) / 100) : coupon.discount_value;
+    coupon_code = code;
+  }
+
+  const discount = manual_discount + coupon_discount;
+  const total = Math.max(0, subtotal - discount);
+  const loyalty_points_earned = Math.floor(total * LOYALTY_RATE_PERCENT);
+
+  return { inventoryRows, subtotal, manual_discount, coupon_discount, coupon_code, discount, total, loyalty_points_earned };
+}
+
+// The cash/change/store-credit math for a real checkout (POST /).
+interface PaymentOutcomeInput {
+  total: number;
+  customer_id?: number;
+  amount_paid: number;
+  payment_method?: string;
+  amount_received?: number;
+  keep_cash_overpayment_as_credit: boolean;
+  store_credit_applied: number;
+  // Delivery fee the customer owes ON TOP of the product total and may
+  // pay at checkout (prepaid online order). 0 for in-store sales and for
+  // credit orders, where the fee is collected on delivery instead.
+  fee_payable: number;
+}
+interface PaymentOutcome {
+  storeCreditApplied: number;
+  effectiveAmountPaid: number;
+  // Payments cover the product total first, then the delivery fee —
+  // sales.amount_paid only ever records the product part (feePaid is
+  // kept on the delivery), so paying product + delivery up front never
+  // looks like an overpayment or a negative balance.
+  productAmountPaid: number;
+  feePaid: number;
+  payment_status: "paid" | "partial" | "unpaid";
+  change_due: number;
+  overpaid_amount: number;
+}
+
+function computePaymentOutcome(input: PaymentOutcomeInput): PaymentOutcome {
+  let storeCreditApplied = 0;
+  if (input.store_credit_applied > 0) {
+    if (!input.customer_id) {
+      throw new ApiError(400, "Store credit can only be applied for a selected customer.");
+    }
+    const balanceRow = db
+      .prepare(
+        `SELECT COALESCE(SUM(amount), 0) as balance FROM store_credit_transactions
+         WHERE customer_id = ? AND (expires_at IS NULL OR expires_at > datetime('now', '+330 minutes') OR amount < 0)`
+      )
+      .get(input.customer_id) as { balance: number };
+    storeCreditApplied = Math.min(input.store_credit_applied, balanceRow.balance, input.total);
+  }
+
+  const cashExtra =
+    input.payment_method === "cash" && input.amount_received != null && input.amount_received > input.total
+      ? input.amount_received - input.total
+      : 0;
+  const change_due = cashExtra > 0 && !input.keep_cash_overpayment_as_credit ? cashExtra : 0;
+
+  const effectiveAmountPaid = input.amount_paid - change_due + storeCreditApplied;
+
+  let payment_status: "paid" | "partial" | "unpaid" = "unpaid";
+  if (effectiveAmountPaid >= input.total && input.total > 0) payment_status = "paid";
+  else if (effectiveAmountPaid > 0) payment_status = "partial";
+
+  // Only what's beyond the product AND its delivery fee is an
+  // overpayment — the fee portion was legitimately owed.
+  const overpaid_amount =
+    input.payment_method !== "cash" && input.amount_paid > input.total + input.fee_payable
+      ? input.amount_paid - input.total - input.fee_payable
+      : cashExtra > 0 && input.keep_cash_overpayment_as_credit
+      ? cashExtra
+      : 0;
+
+  const feePaid = Math.min(Math.max(0, effectiveAmountPaid - input.total), input.fee_payable);
+  const productAmountPaid = effectiveAmountPaid - feePaid;
+
+  return { storeCreditApplied, effectiveAmountPaid, productAmountPaid, feePaid, payment_status, change_due, overpaid_amount };
 }
 
 // GET /api/sales — list all, with customer name. Optionally
 // ?customer_id=N to scope to just one customer's order history — used
 // by the customer order history page, so it doesn't have to fetch
 // every sale in the system just to filter client-side.
+//
+// Defaults to real sales only (status = 'completed') — a saved
+// quotation is a row in this same table, but it was never actually
+// sold, so Sale History, the Dashboard, and every other screen that
+// calls this with no ?status would otherwise show an unpaid draft
+// mixed in with real orders. Pass ?status=quotation to see quotations
+// instead (used by the Quotations page).
 salesRouter.get(
   "/",
   asyncHandler(async (req, res) => {
-    const conditions: string[] = [];
-    const params: any[] = [];
+    const conditions: string[] = ["sales.status = ?"];
+    const params: any[] = [req.query.status === "quotation" ? "quotation" : "completed"];
     if (req.query.customer_id) {
       conditions.push("sales.customer_id = ?");
       params.push(req.query.customer_id);
@@ -90,10 +253,11 @@ salesRouter.get(
     const rows = db
       .prepare(
         `SELECT sales.*, customers.name as customer_name, customers.customer_code,
-                deliveries.delivery_partner
+                deliveries.delivery_partner, delivery_partners.kind as delivery_partner_kind
          FROM sales
          LEFT JOIN customers ON customers.id = sales.customer_id
          LEFT JOIN deliveries ON deliveries.sale_id = sales.id
+         LEFT JOIN delivery_partners ON delivery_partners.code = deliveries.delivery_partner
          ${where}
          ORDER BY sales.id DESC`
       )
@@ -102,6 +266,62 @@ salesRouter.get(
   })
 );
 
+// Where the store credit applied to one sale actually came from — e.g.
+// "Return on invoice STR261X0240" — so a bill can say WHY a deduction
+// was made, not just that it was. Credit is spent oldest-first (the same
+// rule the customer's balance uses), so this replays the customer's
+// credit ledger in order and records which grants this sale's
+// redemption consumed.
+function storeCreditSources(saleId: number, customerId: number | null): { amount: number; label: string }[] {
+  if (!customerId) return [];
+  const rows = db
+    .prepare(
+      `SELECT id, amount, reason, reference_id, notes FROM store_credit_transactions
+       WHERE customer_id = ? ORDER BY created_at ASC, id ASC`
+    )
+    .all(customerId) as { id: number; amount: number; reason: string; reference_id: number | null; notes: string | null }[];
+
+  function labelFor(grant: { reason: string; reference_id: number | null; notes: string | null }): string {
+    if (grant.reason === "return_exchange" && grant.reference_id) {
+      const ret = db
+        .prepare(
+          `SELECT sales.invoice FROM returns
+           JOIN sale_items ON sale_items.id = returns.sale_item_id
+           JOIN sales ON sales.id = sale_items.sale_id
+           WHERE returns.id = ?`
+        )
+        .get(grant.reference_id) as { invoice: string } | undefined;
+      if (ret) return `Return on invoice ${ret.invoice}`;
+    }
+    if (grant.reason === "overpayment" && grant.reference_id) {
+      const sale = db.prepare(`SELECT invoice FROM sales WHERE id = ?`).get(grant.reference_id) as { invoice: string } | undefined;
+      if (sale) return `Overpayment on invoice ${sale.invoice}`;
+    }
+    if (grant.reason === "manual_adjustment") return "Manual credit adjustment";
+    return grant.notes ?? "Store credit";
+  }
+
+  const grants: { remaining: number; label: string }[] = [];
+  const used = new Map<string, number>();
+  for (const row of rows) {
+    if (row.amount > 0) {
+      grants.push({ remaining: row.amount, label: labelFor(row) });
+      continue;
+    }
+    let toSpend = -row.amount;
+    const isThisSale = row.reason === "redemption" && row.reference_id === saleId;
+    for (const g of grants) {
+      if (toSpend <= 0) break;
+      const taken = Math.min(g.remaining, toSpend);
+      if (taken <= 0) continue;
+      g.remaining -= taken;
+      toSpend -= taken;
+      if (isThisSale) used.set(g.label, (used.get(g.label) ?? 0) + taken);
+    }
+  }
+  return Array.from(used, ([label, amount]) => ({ amount, label }));
+}
+
 // GET /api/sales/:id — includes line items
 salesRouter.get(
   "/:id",
@@ -109,10 +329,17 @@ salesRouter.get(
     const sale = db
       .prepare(
         `SELECT sales.*, customers.name as customer_name, customers.customer_code,
-                customers.phone as customer_phone, deliveries.delivery_partner
+                customers.phone as customer_phone, deliveries.delivery_partner,
+                delivery_partners.name as delivery_partner_name,
+                delivery_partners.waybill_code as delivery_partner_waybill_code,
+                delivery_partners.kind as delivery_partner_kind,
+                deliveries.delivery_fee, deliveries.is_free_delivery as delivery_is_free,
+                deliveries.delivery_paid_by, deliveries.cod_amount as delivery_cod_amount,
+                deliveries.fee_paid as delivery_fee_paid, deliveries.delivery_status
          FROM sales
          LEFT JOIN customers ON customers.id = sales.customer_id
          LEFT JOIN deliveries ON deliveries.sale_id = sales.id
+         LEFT JOIN delivery_partners ON delivery_partners.code = deliveries.delivery_partner
          WHERE sales.id = ?`
       )
       .get(req.params.id) as any;
@@ -147,7 +374,24 @@ salesRouter.get(
         .get(req.params.id) as typeof delivery_address;
     }
 
-    res.json({ ...sale, items, delivery_address });
+    // How much of this sale was settled with the customer's store
+    // credit (e.g. from a return) — it's inside amount_paid but isn't
+    // cash, so a bill has to show it separately or the balance due
+    // looks wrong next to the total.
+    const { credit } = db
+      .prepare(
+        `SELECT COALESCE(SUM(-amount), 0) as credit FROM store_credit_transactions
+         WHERE reference_id = ? AND reason = 'redemption'`
+      )
+      .get(req.params.id) as { credit: number };
+
+    res.json({
+      ...sale,
+      items,
+      delivery_address,
+      store_credit_applied: credit,
+      store_credit_sources: credit > 0 ? storeCreditSources(sale.id, sale.customer_id) : [],
+    });
   })
 );
 
@@ -160,6 +404,20 @@ salesRouter.post(
   asyncHandler(async (req, res) => {
     const data = saleInput.parse(req.body);
 
+    // Checking out a reopened quotation — it must still be open, or it
+    // was already converted/cancelled from somewhere else (another
+    // tab, another cashier) and this would double-sell it.
+    let quotationInvoice: string | null = null;
+    if (data.quotation_id) {
+      const quote = db.prepare(`SELECT invoice FROM sales WHERE id = ? AND status = 'quotation'`).get(data.quotation_id) as
+        | { invoice: string }
+        | undefined;
+      if (!quote) {
+        throw new ApiError(409, "That quotation is no longer open — it may have already been converted or cancelled.");
+      }
+      quotationInvoice = quote.invoice;
+    }
+
     if (data.customer_id) {
       const customer = db.prepare(`SELECT id, is_suspended FROM customers WHERE id = ?`).get(data.customer_id) as
         | { id: number; is_suspended: number }
@@ -167,6 +425,20 @@ salesRouter.post(
       if (!customer) throw new ApiError(400, "Referenced customer does not exist");
       if (customer.is_suspended) {
         throw new ApiError(409, "This customer is suspended and can't be attached to a new sale until reactivated.");
+      }
+    }
+
+    // The delivery partner has to be a real, currently-active one — and
+    // an on-demand one (Uber, PickMe...) needs its fare, since there's
+    // no tariff to work it out from.
+    let partner: DeliveryPartnerRow | undefined;
+    if (data.sale_type === "online" && data.delivery_partner) {
+      partner = getPartner(data.delivery_partner);
+      if (!partner || !partner.is_active) {
+        throw new ApiError(400, "That delivery partner isn't available — pick another one.");
+      }
+      if (partner.kind === "on_demand" && !(data.delivery_fare && data.delivery_fare > 0)) {
+        throw new ApiError(400, `Enter the delivery fare for ${partner.name}.`);
       }
     }
 
@@ -178,105 +450,38 @@ salesRouter.post(
       throw new ApiError(400, "Credit sales require a selected customer — it isn't offered to walk-ins.");
     }
 
-    // Validate every inventory item up front: must exist and be available.
-    const inventoryRows = data.items.map((item) => {
-      const row = db
-        .prepare(`SELECT * FROM inventory WHERE id = ?`)
-        .get(item.inventory_id) as any;
-      if (!row) {
-        throw new ApiError(400, `Inventory unit ${item.inventory_id} does not exist`);
-      }
-      if (row.status !== "available") {
-        throw new ApiError(
-          409,
-          `Inventory unit ${item.inventory_id} (SKU ${row.sku}) is already sold and cannot be sold again`
-        );
-      }
-      return row;
+    // Validate every inventory item up front (must exist and be
+    // available) and compute subtotal/discount/total — shared with the
+    // quotation endpoint below so a quoted price is always exactly what
+    // a real checkout of the same cart would charge.
+    const { subtotal, manual_discount, coupon_discount, coupon_code, discount, total, loyalty_points_earned } = priceItems(
+      data.items,
+      data.manual_discount_type,
+      data.manual_discount_value,
+      data.coupon_code
+    );
+
+    // Store credit, cash/change, and the resulting payment_status —
+    // validated against the customer's REAL store credit balance, never
+    // trusted as a client-supplied number.
+    const deliveryPlan = data.sale_type === "online" ? planDelivery(data, partner) : null;
+    const { storeCreditApplied, productAmountPaid, feePaid, payment_status, change_due, overpaid_amount } = computePaymentOutcome({
+      total,
+      customer_id: data.customer_id,
+      amount_paid: data.amount_paid,
+      payment_method: data.payment_method,
+      amount_received: data.amount_received,
+      keep_cash_overpayment_as_credit: data.keep_cash_overpayment_as_credit,
+      store_credit_applied: data.store_credit_applied,
+      fee_payable: deliveryPlan && !data.is_credit_order ? deliveryPlan.fee : 0,
     });
 
-    const subtotal = data.items.reduce((sum, item) => sum + item.unit_price, 0);
-
-    // Manual discount: a flat amount, or a percentage of the subtotal.
-    const manual_discount =
-      data.manual_discount_type === "percent"
-        ? Math.round((subtotal * (data.manual_discount_value ?? 0)) / 100)
-        : data.manual_discount_value ?? 0;
-
-    // Coupon discount: validated server-side against the real coupon
-    // record — never trust a discount amount computed on the client,
-    // since that would let a stale/invalid/expired code still apply.
-    let coupon_discount = 0;
-    let coupon_code: string | null = null;
-    if (data.coupon_code) {
-      const code = data.coupon_code.trim().toUpperCase();
-      const coupon = db.prepare(`SELECT * FROM coupons WHERE code = ?`).get(code) as any;
-      if (!coupon) throw new ApiError(400, `No coupon with code "${code}"`);
-      if (!coupon.is_active) throw new ApiError(400, `Coupon "${code}" is no longer active`);
-      if (coupon.expires_at && new Date(coupon.expires_at) < new Date()) {
-        throw new ApiError(400, `Coupon "${code}" has expired`);
-      }
-      coupon_discount =
-        coupon.discount_type === "percent" ? Math.round((subtotal * coupon.discount_value) / 100) : coupon.discount_value;
-      coupon_code = code;
-    }
-
-    const discount = manual_discount + coupon_discount;
-    const total = Math.max(0, subtotal - discount);
-    const loyalty_points_earned = Math.floor(total * LOYALTY_RATE_PERCENT);
-
-    // Store credit applied — validated against the customer's REAL
-    // balance (sum of their store_credit_transactions), never trusted as
-    // a client-supplied number, and capped so it can never exceed either
-    // what they actually have or what's owed on this sale.
-    let storeCreditApplied = 0;
-    if (data.store_credit_applied > 0) {
-      if (!data.customer_id) {
-        throw new ApiError(400, "Store credit can only be applied for a selected customer.");
-      }
-      const balanceRow = db
-        .prepare(
-          `SELECT COALESCE(SUM(amount), 0) as balance FROM store_credit_transactions
-           WHERE customer_id = ? AND (expires_at IS NULL OR expires_at > datetime('now', '+330 minutes') OR amount < 0)`
-        )
-        .get(data.customer_id) as { balance: number };
-      storeCreditApplied = Math.min(data.store_credit_applied, balanceRow.balance, total);
-    }
-
-    // Cash tendered above the total is either change handed back (the
-    // default) or, if explicitly chosen at checkout, kept as store
-    // credit instead — never assumed either way.
-    const cashExtra =
-      data.payment_method === "cash" && data.amount_received != null && data.amount_received > total
-        ? data.amount_received - total
-        : 0;
-    const change_due = cashExtra > 0 && !data.keep_cash_overpayment_as_credit ? cashExtra : 0;
-
-    // Effective amount paid includes whatever store credit was applied,
-    // on top of whatever was actually handed over/transferred — MINUS
-    // any of that cash that immediately left the register again as
-    // change. Change given back was never really "paid toward" this
-    // sale; counting it would push amount_paid above total and make the
-    // customer's balance_due (total - amount_paid, summed account-wide)
-    // go negative — showing as phantom store credit they were never
-    // actually granted. When the extra is kept as credit instead,
-    // change_due is 0 here, so amount_paid correctly stays above total
-    // and overpaid_amount below tracks the real credit granted.
-    const effectiveAmountPaid = data.amount_paid - change_due + storeCreditApplied;
-
-    let payment_status: "paid" | "partial" | "unpaid" = "unpaid";
-    if (effectiveAmountPaid >= total && total > 0) payment_status = "paid";
-    else if (effectiveAmountPaid > 0) payment_status = "partial";
-
-    // Overpayment tracked for store credit — either a non-cash payment
-    // that came in above the total, or a cash payment where the extra
-    // was explicitly kept as credit rather than given back as change.
-    const overpaid_amount =
-      data.payment_method !== "cash" && data.amount_paid > total
-        ? data.amount_paid - total
-        : cashExtra > 0 && data.keep_cash_overpayment_as_credit
-        ? cashExtra
-        : 0;
+    // A sale settled entirely out of store credit took no money at all.
+    // The form's default method ("cash") would otherwise get stored and
+    // put it under Cash Sales with nothing in the till — so it's recorded
+    // as what it really was.
+    const storedPaymentMethod =
+      storeCreditApplied > 0 && data.amount_paid - change_due <= 0 && !isCredit ? "store_credit" : data.payment_method ?? null;
 
     // Which of the 5 invoice categories this sale falls into, driving
     // both the invoice prefix and its own independent sequence:
@@ -295,7 +500,11 @@ salesRouter.post(
       else invoiceCategory = "OCD";
     }
 
-    const invoice = nextInvoiceCode(invoiceCategory);
+    // A checked-out quotation keeps its number — same day code and
+    // sequence, just the real category prefix — so the customer's
+    // quote and their invoice are visibly the same order.
+    const invoice =
+      (quotationInvoice && invoiceCodeFromQuotation(quotationInvoice, invoiceCategory)) || nextInvoiceCode(invoiceCategory);
 
     // better-sqlite3 transactions are synchronous, which fits perfectly
     // here — no partial writes possible if something throws mid-way.
@@ -318,9 +527,9 @@ salesRouter.post(
           coupon_discount,
           coupon_code,
           total,
-          effectiveAmountPaid,
+          productAmountPaid,
           payment_status,
-          data.payment_method ?? null,
+          storedPaymentMethod,
           data.sale_type,
           loyalty_points_earned,
           data.amount_received ?? null,
@@ -394,7 +603,7 @@ salesRouter.post(
           defaultAddressId = defaultAddress?.id ?? null;
         }
 
-        const delivery_fee = calculateDeliveryFee(data.package_weight_kg, data.is_free_delivery);
+        const { isOnDemand, paidBy, actualFare, isFree, fee: delivery_fee } = deliveryPlan!;
         // COD to collect = whatever of the order wasn't already paid,
         // plus the delivery fee (0 if free) — a fixed figure computed
         // once at order time, not recalculated later against a sale
@@ -408,17 +617,31 @@ salesRouter.post(
         db.prepare(
           `INSERT INTO deliveries
              (sale_id, address_id, delivery_status, delivery_partner, package_weight_kg,
-              is_free_delivery, delivery_fee, cod_amount)
-           VALUES (?, ?, 'pending', ?, ?, ?, ?, ?)`
+              is_free_delivery, delivery_fee, cod_amount, tracking_number, delivery_paid_by, actual_fare, fee_paid)
+           VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).run(
           saleId,
           defaultAddressId,
           data.delivery_partner ?? null,
           data.package_weight_kg ?? null,
-          data.is_free_delivery ? 1 : 0,
+          isFree ? 1 : 0,
           delivery_fee,
-          cod_amount
+          cod_amount,
+          // An on-demand app has no tracking numbers of its own, so the
+          // invoice number doubles as the shipment's tracking barcode.
+          isOnDemand ? invoice : null,
+          paidBy,
+          actualFare,
+          feePaid
         );
+      }
+
+      // The quotation this sale came from is fully replaced by the
+      // real sale now — nothing about it (stock, cash, loyalty) was
+      // ever applied, so deleting it (cascading to its items) leaves
+      // nothing to reverse.
+      if (data.quotation_id) {
+        db.prepare(`DELETE FROM sales WHERE id = ? AND status = 'quotation'`).run(data.quotation_id);
       }
 
       return saleId;
@@ -435,6 +658,192 @@ salesRouter.post(
       .get(saleId);
 
     res.status(201).json(created);
+  })
+);
+
+// POST /api/sales/quotations — save the current cart as a quotation: a
+// price-confirmation bill to send the customer before they've actually
+// paid, not a real sale. Nothing is committed here — no inventory unit
+// is flipped to 'sold', no cash book entry, no loyalty points, no
+// delivery. Turning a quotation into a real sale happens by reopening it
+// in POS and checking out normally with quotation_id set — see POST /.
+salesRouter.post(
+  "/quotations",
+  asyncHandler(async (req, res) => {
+    const data = quotationInput.parse(req.body);
+
+    if (data.customer_id) {
+      const customer = db.prepare(`SELECT id, is_suspended FROM customers WHERE id = ?`).get(data.customer_id) as
+        | { id: number; is_suspended: number }
+        | undefined;
+      if (!customer) throw new ApiError(400, "Referenced customer does not exist");
+      if (customer.is_suspended) {
+        throw new ApiError(409, "This customer is suspended and can't be attached to a new quotation until reactivated.");
+      }
+    }
+
+    const { subtotal, manual_discount, coupon_discount, coupon_code, discount, total, loyalty_points_earned } = priceItems(
+      data.items,
+      data.manual_discount_type,
+      data.manual_discount_value,
+      data.coupon_code
+    );
+
+    const invoice = nextQuotationCode();
+    const { d: validUntil } = db
+      .prepare(`SELECT datetime('now', '+330 minutes', '+' || ? || ' days') as d`)
+      .get(data.valid_days) as { d: string };
+
+    const runQuotationTransaction = db.transaction(() => {
+      const saleResult = db
+        .prepare(
+          `INSERT INTO sales
+             (invoice, customer_id, salesperson, subtotal, discount, manual_discount, coupon_discount, coupon_code,
+              total, amount_paid, payment_status, sale_type, loyalty_points_earned, status, quotation_valid_until)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'unpaid', ?, ?, 'quotation', ?)`
+        )
+        .run(
+          invoice,
+          data.customer_id ?? null,
+          data.salesperson ?? null,
+          subtotal,
+          discount,
+          manual_discount,
+          coupon_discount,
+          coupon_code,
+          total,
+          data.sale_type,
+          loyalty_points_earned,
+          validUntil
+        );
+
+      const saleId = saleResult.lastInsertRowid;
+
+      // Items are recorded against the exact physical units in the
+      // cart, same shape as a real sale — but inventory status is left
+      // untouched ('available'), since nothing has actually sold yet.
+      // If one of these specific units gets sold to someone else before
+      // this quotation is converted, that's caught and surfaced at
+      // conversion time, not reserved against up front.
+      for (const item of data.items) {
+        db.prepare(
+          `INSERT INTO sale_items (sale_id, inventory_id, quantity, unit_price, line_total)
+           VALUES (?, ?, 1, ?, ?)`
+        ).run(saleId, item.inventory_id, item.unit_price, item.unit_price);
+      }
+
+      return saleId;
+    });
+
+    const saleId = runQuotationTransaction();
+
+    const created = db
+      .prepare(
+        `SELECT sales.*, customers.name as customer_name
+         FROM sales LEFT JOIN customers ON customers.id = sales.customer_id
+         WHERE sales.id = ?`
+      )
+      .get(saleId);
+
+    res.status(201).json(created);
+  })
+);
+
+// PUT /api/sales/quotations/:id — edit an open quotation after the
+// customer asked for changes: the whole cart is re-sent (items, discount,
+// coupon, customer, type) and replaces what was saved, keeping the same
+// number so a bill already sent to the customer still refers to it.
+// Pricing is recomputed with the same priceItems() as a new quote or a
+// real checkout, and the validity window restarts from today.
+salesRouter.put(
+  "/quotations/:id",
+  asyncHandler(async (req, res) => {
+    const data = quotationInput.parse(req.body);
+
+    const existing = db.prepare(`SELECT id, status FROM sales WHERE id = ?`).get(req.params.id) as
+      | { id: number; status: string }
+      | undefined;
+    if (!existing) throw new ApiError(404, "Quotation not found");
+    if (existing.status !== "quotation") throw new ApiError(409, "Only an open quotation can be edited.");
+
+    if (data.customer_id) {
+      const customer = db.prepare(`SELECT id, is_suspended FROM customers WHERE id = ?`).get(data.customer_id) as
+        | { id: number; is_suspended: number }
+        | undefined;
+      if (!customer) throw new ApiError(400, "Referenced customer does not exist");
+      if (customer.is_suspended) {
+        throw new ApiError(409, "This customer is suspended and can't be attached to a quotation until reactivated.");
+      }
+    }
+
+    const { subtotal, manual_discount, coupon_discount, coupon_code, discount, total, loyalty_points_earned } = priceItems(
+      data.items,
+      data.manual_discount_type,
+      data.manual_discount_value,
+      data.coupon_code
+    );
+
+    const { d: validUntil } = db
+      .prepare(`SELECT datetime('now', '+330 minutes', '+' || ? || ' days') as d`)
+      .get(data.valid_days) as { d: string };
+
+    db.transaction(() => {
+      db.prepare(
+        `UPDATE sales SET customer_id = ?, salesperson = ?, subtotal = ?, discount = ?, manual_discount = ?,
+                coupon_discount = ?, coupon_code = ?, total = ?, sale_type = ?, loyalty_points_earned = ?,
+                quotation_valid_until = ?
+         WHERE id = ?`
+      ).run(
+        data.customer_id ?? null,
+        data.salesperson ?? null,
+        subtotal,
+        discount,
+        manual_discount,
+        coupon_discount,
+        coupon_code,
+        total,
+        data.sale_type,
+        loyalty_points_earned,
+        validUntil,
+        existing.id
+      );
+
+      db.prepare(`DELETE FROM sale_items WHERE sale_id = ?`).run(existing.id);
+      for (const item of data.items) {
+        db.prepare(
+          `INSERT INTO sale_items (sale_id, inventory_id, quantity, unit_price, line_total)
+           VALUES (?, ?, 1, ?, ?)`
+        ).run(existing.id, item.inventory_id, item.unit_price, item.unit_price);
+      }
+    })();
+
+    const updated = db
+      .prepare(
+        `SELECT sales.*, customers.name as customer_name
+         FROM sales LEFT JOIN customers ON customers.id = sales.customer_id
+         WHERE sales.id = ?`
+      )
+      .get(existing.id);
+
+    res.json(updated);
+  })
+);
+
+// DELETE /api/sales/:id/quotation — cancel a quotation that was never
+// converted. Safe to actually delete (cascades to its sale_items) since
+// nothing about it was ever committed anywhere else — no stock, cash
+// book, or loyalty entry exists to reverse.
+salesRouter.delete(
+  "/:id/quotation",
+  asyncHandler(async (req, res) => {
+    const sale = db.prepare(`SELECT id, status FROM sales WHERE id = ?`).get(req.params.id) as
+      | { id: number; status: string }
+      | undefined;
+    if (!sale) throw new ApiError(404, "Quotation not found");
+    if (sale.status !== "quotation") throw new ApiError(409, "Only a quotation that hasn't been converted can be cancelled this way.");
+
+    db.prepare(`DELETE FROM sales WHERE id = ?`).run(sale.id);
+    res.status(204).send();
   })
 );
 
@@ -500,10 +909,17 @@ salesRouter.put(
     // invisible to courier settlement, since the system would think it
     // was already paid. No delivery record at all is treated the same
     // as self-delivered, since no courier was ever assigned to it.
-    const delivery = db.prepare(`SELECT delivery_partner FROM deliveries WHERE sale_id = ?`).get(req.params.id) as
-      | { delivery_partner: string | null }
-      | undefined;
-    if (delivery && delivery.delivery_partner && delivery.delivery_partner !== "D2D") {
+    // An on-demand partner (Uber, PickMe...) isn't a courier that holds
+    // COD for later settlement either — whoever delivers hands the cash
+    // straight over — so it's confirmed here like a self-delivery.
+    const delivery = db
+      .prepare(
+        `SELECT deliveries.delivery_partner, delivery_partners.kind as kind
+         FROM deliveries LEFT JOIN delivery_partners ON delivery_partners.code = deliveries.delivery_partner
+         WHERE deliveries.sale_id = ?`
+      )
+      .get(req.params.id) as { delivery_partner: string | null; kind: string | null } | undefined;
+    if (delivery && delivery.delivery_partner && delivery.delivery_partner !== "D2D" && delivery.kind !== "on_demand") {
       throw new ApiError(
         409,
         "This order was shipped via a courier — its COD is collected by them and settled separately, not confirmed here."
@@ -626,7 +1042,12 @@ salesRouter.put(
            WHERE reference_id = ? AND reason = 'redemption'`
         )
         .get(sale.id) as { total: number };
-      const cashPortionPaid = sale.amount_paid - creditRedeemed.total;
+      // A prepaid online order also took in its delivery fee up front
+      // (kept on the delivery, not in amount_paid) — give that back too.
+      const feePaidRow = db.prepare(`SELECT COALESCE(SUM(fee_paid), 0) as total FROM deliveries WHERE sale_id = ?`).get(sale.id) as {
+        total: number;
+      };
+      const cashPortionPaid = sale.amount_paid + feePaidRow.total - creditRedeemed.total;
       if (cashPortionPaid > 0) {
         db.prepare(
           `INSERT INTO cash_book (transaction_code, type, category, payment_method, reference_id, amount, notes)

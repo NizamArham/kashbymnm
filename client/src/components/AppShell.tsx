@@ -29,6 +29,7 @@ import {
   BarChart3,
   ClipboardList,
   Tag,
+  FileText,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "../context/AuthContext";
@@ -81,6 +82,7 @@ export default function AppShell() {
       subItems: [
         { id: "checkout", label: "Checkout", path: "/pos", icon: ShoppingCart },
         { id: "sales-history", label: "Sale History", path: "/sales", icon: History },
+        { id: "quotations", label: "Quotations", path: "/quotations", icon: FileText },
         { id: "promotions", label: "Promotions", path: "/promotions", icon: Tag, adminOnly: true },
       ],
     },
@@ -143,6 +145,7 @@ export default function AppShell() {
         { id: "deliveries", label: "Deliveries", path: "/deliveries", icon: Truck },
         { id: "couriers", label: "Couriers", path: "/couriers", icon: Send, adminOnly: true },
         { id: "waybill-generator", label: "Waybill Generator", path: "/waybill-generator", icon: PackageCheck },
+        { id: "delivery-partners", label: "Delivery Partners", path: "/delivery-partners", icon: Settings, adminOnly: true },
       ],
     },
     {
@@ -167,12 +170,12 @@ export default function AppShell() {
 
   useEffect(() => {
     const path = location.pathname;
-    const isOnPos = path === "/pos" || path === "/sales" || path === "/promotions";
+    const isOnPos = path === "/pos" || path === "/sales" || path === "/promotions" || path === "/quotations";
     const isOnInventory = path === "/inventory" || path === "/products" || path === "/products/add";
     const isOnDirectory = path === "/customers" || path === "/customers/add" || path === "/staff" || path === "/suppliers";
     const isOnPurchases = path === "/purchases" || path === "/supplier-payments";
     const isOnFinance = path === "/cash-book" || path === "/cheques";
-    const isOnDeliveries = path === "/deliveries" || path === "/couriers" || path === "/couriers/history" || path === "/waybill-generator";
+    const isOnDeliveries = path === "/deliveries" || path === "/couriers" || path === "/couriers/history" || path === "/waybill-generator" || path === "/delivery-partners";
     const isOnAdmin = path === "/attendance" || path === "/settings/general" || path === "/audit-log";
 
     if (isOnPos) setOpenMenuId("pos");

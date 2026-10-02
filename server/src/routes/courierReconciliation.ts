@@ -4,6 +4,7 @@ import { db } from "../db/connection";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { nextTransactionCode } from "../lib/codes";
 import { requireAuth, requireRole } from "../lib/auth";
+import { getPartner, tariffFor } from "../lib/deliveryPartners";
 
 export const courierReconciliationRouter = Router();
 courierReconciliationRouter.use(requireAuth, requireRole("admin"));
@@ -46,11 +47,21 @@ export function ensureTable() {
 // refuses or can't be reached, again to bring the package back — a
 // return isn't free just because the sale fell through. Same formula
 // both ways since it's the same parcel making the same trip in reverse.
-function chargeFor(delivery: { package_weight_kg: number | null; delivery_fee: number; is_free_delivery: number }): number {
-  if (delivery.is_free_delivery) return DEFAULT_CHARGE;
+function chargeFor(delivery: {
+  delivery_partner: string | null;
+  package_weight_kg: number | null;
+  delivery_fee: number;
+  is_free_delivery: number;
+}): number {
+  // Each courier bills on its own tariff (set on the Delivery Partners
+  // page); a partner that's since been removed falls back to the
+  // original flat default.
+  const partner = getPartner(delivery.delivery_partner);
+  const base = partner?.base_fee ?? DEFAULT_CHARGE;
+  if (delivery.is_free_delivery) return base;
   const weight = delivery.package_weight_kg || 0;
-  if (weight <= 0) return DEFAULT_CHARGE;
-  return DEFAULT_CHARGE + Math.max(0, Math.ceil(weight - 1)) * 100;
+  if (weight <= 0) return base;
+  return tariffFor(partner, weight);
 }
 
 function syncDispatchedRows() {
@@ -60,6 +71,7 @@ function syncDispatchedRows() {
     FROM deliveries
     WHERE delivery_status IN ('dispatched', 'delivered', 'returned')
       AND delivery_partner IS NOT NULL
+      AND delivery_partner NOT IN (SELECT code FROM delivery_partners WHERE kind = 'on_demand')
   `).all() as Array<{ id: number; delivery_partner: string; cod_amount: number; package_weight_kg: number | null; delivery_fee: number; is_free_delivery: number }>;
   const insert = db.prepare(`
     INSERT OR IGNORE INTO courier_reconciliations (delivery_id, courier_partner, cod_amount, courier_charge)
@@ -84,6 +96,9 @@ export function applyReturnCharge(delivery: {
   is_free_delivery: number;
 }) {
   if (!delivery.delivery_partner) return;
+  // An on-demand rider (Uber, PickMe...) isn't a courier we settle COD
+  // with, so there's no reconciliation row to add a return charge to.
+  if (getPartner(delivery.delivery_partner)?.kind === "on_demand") return;
   ensureTable();
   const charge = chargeFor(delivery);
   db.prepare(

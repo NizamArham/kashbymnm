@@ -140,24 +140,65 @@ export type InvoiceCategory = "STR" | "SCR" | "OCD" | "OCR" | "OPS";
 // that safely excludes all of them; nothing here parses those, they
 // stay as historical records.
 export function nextInvoiceCode(category: InvoiceCategory): string {
+  return `${category}${currentDayPart()}X${String(nextSequenceNumber()).padStart(4, "0")}`;
+}
+
+// {day-of-360}, same obfuscated date shown in every invoice code.
+function currentDayPart(): string {
   const { day360 } = db
     .prepare(
       `SELECT (CAST(strftime('%m', 'now', '+330 minutes') AS INTEGER) - 1) * 30
               + CAST(strftime('%d', 'now', '+330 minutes') AS INTEGER) AS day360`
     )
     .get() as { day360: number };
-  const dayPart = String(day360).padStart(3, "0");
+  return String(day360).padStart(3, "0");
+}
 
+// The next number in the one lifetime running sequence shared by every
+// invoice AND every quotation — so a quote and the invoice it becomes
+// carry the same number, and the count never starts over. It's the
+// highest number already used by any code containing an "X" (invoices
+// and quotes alike), or the persisted high-water mark if that's higher
+// — the mark is what stops a cancelled quote from freeing up its number
+// to be handed to someone else's quote later. Starts at 0240.
+function nextSequenceNumber(): number {
   const rows = db.prepare(`SELECT invoice FROM sales WHERE invoice LIKE '%X%'`).all() as { invoice: string }[];
-  let nextNum = 240;
+  let highest = 239;
   for (const { invoice } of rows) {
     const match = invoice.match(/^[A-Z]+\d{3}X(\d{4})$/);
     if (!match) continue;
     const n = parseInt(match[1], 10);
-    if (!isNaN(n) && n + 1 > nextNum) nextNum = n + 1;
+    if (!isNaN(n) && n > highest) highest = n;
   }
+  const mark = db.prepare(`SELECT last_seq FROM invoice_counter WHERE id = 1`).get() as { last_seq: number } | undefined;
+  if (mark && mark.last_seq > highest) highest = mark.last_seq;
 
-  return `${category}${dayPart}X${String(nextNum).padStart(4, "0")}`;
+  const next = highest + 1;
+  db.prepare(
+    `INSERT INTO invoice_counter (id, last_seq) VALUES (1, ?)
+     ON CONFLICT(id) DO UPDATE SET last_seq = excluded.last_seq`
+  ).run(next);
+  return next;
+}
+
+// Format: QUO{day-of-360}X{sequence}, e.g. QUO272X0263 — drawn from the
+// same running sequence as real invoices (see nextSequenceNumber), so
+// when the quotation is later checked out, its invoice is this exact
+// number with the category prefix swapped in (see
+// invoiceCodeFromQuotation) — e.g. QUO272X0263 -> STR272X0263.
+export function nextQuotationCode(): string {
+  return `QUO${currentDayPart()}X${String(nextSequenceNumber()).padStart(4, "0")}`;
+}
+
+// The invoice a quotation turns into: same day code and sequence
+// number, just with the real category prefix (STR/SCR/OCD/OCR/OPS) in
+// place of QUO — which category isn't known until checkout, since it
+// depends on how it ends up being paid. The day code stays the day it
+// was first quoted. Null if the quotation's own number isn't in this
+// format, in which case the caller issues a fresh invoice number.
+export function invoiceCodeFromQuotation(quotationInvoice: string, category: InvoiceCategory): string | null {
+  const match = quotationInvoice.match(/^QUO(\d{3}X\d{4})$/);
+  return match ? `${category}${match[1]}` : null;
 }
 
 // Format: P{YY}{MM}{sequence}, e.g. P26090001 — same style as invoice

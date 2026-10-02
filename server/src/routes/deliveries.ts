@@ -5,6 +5,10 @@ import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth, requireRole } from "../lib/auth";
 import { applyReturnCharge } from "./courierReconciliation";
 import { citypakCreateOrder } from "../lib/citypak";
+import { fardarCreateParcel } from "../lib/fardar";
+import { syncCitypak } from "../lib/courierSync";
+import { getPartner, planDelivery } from "../lib/deliveryPartners";
+import { logAudit } from "../lib/auditLog";
 
 export const deliveriesRouter = Router();
 
@@ -220,6 +224,207 @@ deliveriesRouter.post(
     db.prepare(`UPDATE deliveries SET citypak_order_id = ? WHERE id = ?`).run(result.order_id, req.params.id);
 
     res.json({ tracking_number: result.tracking_number, order_id: result.order_id });
+  })
+);
+
+// Sri Lankan mobile/landline numbers are stored however they were typed
+// (often without the leading 0, e.g. 775441297) — Fardar wants the usual
+// 10-digit form, so numbers are tidied to that before they're sent.
+function toLocalPhone(raw: string | null | undefined): string {
+  const digits = (raw ?? "").replace(/\D/g, "");
+  if (digits.startsWith("94") && digits.length === 11) return `0${digits.slice(2)}`;
+  if (digits.length === 9) return `0${digits}`;
+  return digits;
+}
+
+// POST /api/deliveries/:id/fardar-order — creates the parcel on Fardar's
+// side via their API and hands back the waybill number to use as this
+// order's tracking number (the same role as /citypak-order). Our own
+// waybill label is still what gets printed. The tracking number is saved
+// on the delivery straight away: Fardar has no way for this system to
+// cancel a parcel, so a second click (or reopening the window) must not
+// quietly book a duplicate.
+deliveriesRouter.post(
+  "/:id/fardar-order",
+  asyncHandler(async (req, res) => {
+    const delivery = db
+      .prepare(
+        `SELECT deliveries.*, sales.invoice,
+                customers.name as customer_name, customers.phone as customer_phone, customers.phone2 as customer_phone2,
+                customer_addresses.address_line1, customer_addresses.address_line2, customer_addresses.city
+         FROM deliveries
+         JOIN sales ON sales.id = deliveries.sale_id
+         LEFT JOIN customers ON customers.id = sales.customer_id
+         LEFT JOIN customer_addresses ON customer_addresses.id = deliveries.address_id
+         WHERE deliveries.id = ?`
+      )
+      .get(req.params.id) as any;
+    if (!delivery) throw new ApiError(404, "Delivery not found");
+    if (delivery.delivery_partner !== "FDR") {
+      throw new ApiError(400, "This order isn't assigned to Fardar as its delivery partner");
+    }
+    if (delivery.tracking_number && delivery.tracking_number !== delivery.invoice) {
+      throw new ApiError(
+        409,
+        `This order already has a Fardar waybill (${delivery.tracking_number}) — use that rather than booking a second parcel.`
+      );
+    }
+    if (!delivery.address_line1 || !delivery.city) {
+      throw new ApiError(400, "This order has no delivery address on file");
+    }
+    const phone1 = toLocalPhone(delivery.customer_phone);
+    if (!phone1) throw new ApiError(400, "This order's customer has no phone number on file");
+
+    // One entry per product, quantities added up — the same grouping the
+    // bill and the waybill label use.
+    const itemRows = db
+      .prepare(
+        `SELECT COALESCE(products.product_title, sale_items.product_snapshot, 'Item') AS title, SUM(sale_items.quantity) AS qty
+         FROM sale_items
+         LEFT JOIN inventory ON inventory.id = sale_items.inventory_id
+         LEFT JOIN products ON products.id = inventory.product_id
+         WHERE sale_items.sale_id = ?
+         GROUP BY title`
+      )
+      .all(delivery.sale_id) as { title: string; qty: number }[];
+    const description = itemRows.map((r) => `${r.title} x${r.qty}`).join(", ").slice(0, 150) || `Order ${delivery.invoice}`;
+
+    const phone2 = toLocalPhone(delivery.customer_phone2);
+    const waybill = await fardarCreateParcel({
+      order_id: delivery.invoice,
+      parcel_weight: delivery.package_weight_kg && delivery.package_weight_kg > 0 ? delivery.package_weight_kg : 0.5,
+      parcel_description: description,
+      recipient_name: delivery.customer_name || "Customer",
+      recipient_contact_1: phone1,
+      recipient_contact_2: phone2 && phone2 !== phone1 ? phone2 : undefined,
+      recipient_address: [delivery.address_line1, delivery.address_line2].filter(Boolean).join(", "),
+      // Postal-list names carry a district code ("Talawa(KG)") that
+      // isn't part of the city's name.
+      recipient_city: String(delivery.city).replace(/\s*\(.*?\)\s*$/, "").trim(),
+      // What the courier collects on delivery (0 when it's prepaid).
+      amount: delivery.cod_amount || 0,
+      exchange: false,
+    });
+
+    db.prepare(`UPDATE deliveries SET tracking_number = ? WHERE id = ?`).run(waybill, delivery.id);
+    res.json({ tracking_number: waybill });
+  })
+);
+
+// POST /api/deliveries/sync-couriers — ask CityPak right now where the
+// open parcels are, instead of waiting for the automatic check. (Fardar
+// has no lookup — it sends its updates to /api/webhooks/fardar itself.)
+deliveriesRouter.post(
+  "/sync-couriers",
+  asyncHandler(async (_req, res) => {
+    if (!process.env.CITYPAK_API_TOKEN) {
+      throw new ApiError(400, "CityPak isn't configured — add CITYPAK_BASE_URL and CITYPAK_API_TOKEN to server/.env, then restart the server.");
+    }
+    res.json(await syncCitypak());
+  })
+);
+
+// PUT /api/deliveries/:id/partner — switch which delivery partner an
+// order ships with, any time before the courier actually has it
+// (pending or packed — once dispatched, COD and settlement are already
+// tied to that courier).
+// - Another courier: only the partner changes. The delivery charge the
+//   customer was quoted (and any COD) is left exactly as agreed — the
+//   courier's own cost is worked out from ITS tariff at settlement.
+// - Uber / PickMe-style on-demand: priced the same way POS does it —
+//   the fare is typed in, plus who pays (customer / free / we pay now).
+// The previous courier's tracking number and waybill no longer mean
+// anything, so they're cleared (a packed order goes back to pending to
+// get a fresh waybill) and the old details are kept in the notes.
+deliveriesRouter.put(
+  "/:id/partner",
+  asyncHandler(async (req, res) => {
+    const data = z
+      .object({
+        delivery_partner: z.string().min(1),
+        delivery_fare: z.number().nonnegative().optional(),
+        delivery_paid_by: z.enum(["customer", "shop", "shop_upfront"]).optional(),
+      })
+      .parse(req.body);
+
+    const d = db
+      .prepare(
+        `SELECT deliveries.*, sales.invoice, sales.is_voided, sales.payment_method AS sale_payment_method
+         FROM deliveries JOIN sales ON sales.id = deliveries.sale_id
+         WHERE deliveries.id = ?`
+      )
+      .get(req.params.id) as any;
+    if (!d) throw new ApiError(404, "Delivery not found");
+    if (d.is_voided) throw new ApiError(409, "This order's sale was voided — there's nothing to reassign.");
+    if (d.delivery_status !== "pending" && d.delivery_status !== "packed") {
+      throw new ApiError(409, `This order is already ${d.delivery_status} — the courier has it, so its partner can't be changed anymore.`);
+    }
+
+    const partner = getPartner(data.delivery_partner);
+    if (!partner || !partner.is_active) throw new ApiError(400, "That delivery partner isn't available — pick another one.");
+    if (partner.code === d.delivery_partner) throw new ApiError(400, `This order is already assigned to ${partner.name}.`);
+    const oldPartner = getPartner(d.delivery_partner);
+
+    let fee: number = d.delivery_fee;
+    let cod: number = d.cod_amount;
+    let isFree: number = d.is_free_delivery;
+    let paidBy: string | null = null;
+    let actualFare: number | null = null;
+
+    if (partner.kind === "on_demand") {
+      if (!(data.delivery_fare && data.delivery_fare > 0)) {
+        throw new ApiError(400, `Enter the delivery fare for ${partner.name}.`);
+      }
+      const plan = planDelivery(
+        { is_free_delivery: false, delivery_fare: data.delivery_fare, delivery_paid_by: data.delivery_paid_by },
+        partner
+      );
+      if (d.fee_paid > plan.fee) {
+        throw new ApiError(
+          409,
+          `The customer already paid Rs. ${d.fee_paid.toLocaleString()} for delivery, which is more than the Rs. ${plan.fee.toLocaleString()} this would charge — choose "Customer pays" with a fare of at least that.`
+        );
+      }
+      // A credit order only ever collects the fee on delivery; an
+      // ordinary one owes whatever was unpaid, adjusted by how the
+      // delivery charge changed.
+      cod = d.sale_payment_method === "credit" ? plan.fee : Math.max(0, d.cod_amount - d.delivery_fee + plan.fee);
+      fee = plan.fee;
+      isFree = plan.isFree ? 1 : 0;
+      paidBy = plan.paidBy;
+      actualFare = plan.actualFare;
+    }
+
+    const trackingBefore: string | null = d.tracking_number && d.tracking_number !== d.invoice ? d.tracking_number : null;
+    const note = `Reassigned from ${oldPartner?.name ?? d.delivery_partner ?? "no partner"}${
+      trackingBefore ? ` (tracking ${trackingBefore})` : ""
+    } to ${partner.name}`;
+
+    db.prepare(
+      `UPDATE deliveries
+       SET delivery_partner = ?, delivery_fee = ?, cod_amount = ?, is_free_delivery = ?,
+           delivery_paid_by = ?, actual_fare = ?,
+           tracking_number = ?, citypak_order_id = NULL,
+           delivery_status = 'pending', waybill_number = NULL, packed_at = NULL,
+           notes = CASE WHEN notes IS NULL OR notes = '' THEN ? ELSE notes || char(10) || ? END
+       WHERE id = ?`
+    ).run(
+      partner.code,
+      fee,
+      cod,
+      isFree,
+      paidBy,
+      actualFare,
+      // an on-demand app has no tracking numbers, so the invoice number
+      // stands in; a courier gets its own once the waybill is generated
+      partner.kind === "on_demand" ? d.invoice : null,
+      note,
+      note,
+      d.id
+    );
+
+    logAudit(req.user!, "delivery_partner_change", "delivery", d.id, `${d.invoice}: ${note}`);
+    res.json(db.prepare(`SELECT * FROM deliveries WHERE id = ?`).get(d.id));
   })
 );
 

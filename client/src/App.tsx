@@ -16,6 +16,7 @@ import WaybillGeneratorPage from "./pages/WaybillGeneratorPage";
 import SupplierPaymentHistoryPage from "./pages/SupplierPaymentHistoryPage";
 import ViewCustomersPage from "./pages/ViewCustomersPage";
 import PosPage from "./pages/PosPage";
+import QuotationsPage from "./pages/QuotationsPage";
 import SaleHistoryPage from "./pages/SaleHistoryPage";
 import SaleDetailPage from "./pages/SaleDetailPage";
 import ProductDetailPage from "./pages/ProductDetailPage";
@@ -37,6 +38,7 @@ import FindPage from "./pages/FindPage";
 import AnalyticsPage from "./pages/AnalyticsPage";
 import AuditLogPage from "./pages/AuditLogPage";
 import PromotionsPage from "./pages/PromotionsPage";
+import DeliveryPartnersPage from "./pages/DeliveryPartnersPage";
 
 // Root path behaves differently per role: admin sees the Dashboard,
 // staff is redirected straight to POS, matching the access model.
@@ -105,6 +107,7 @@ export default function App() {
 
         <Route path="/sales" element={<SaleHistoryPage />} />
         <Route path="/sales/:id" element={<SaleDetailPage />} />
+        <Route path="/quotations" element={<QuotationsPage />} />
         <Route path="/returns" element={<ReturnsPage />} />
 
         <Route
@@ -212,6 +215,14 @@ export default function App() {
           element={
             <ProtectedRoute adminOnly>
               <AuditLogPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/delivery-partners"
+          element={
+            <ProtectedRoute adminOnly>
+              <DeliveryPartnersPage />
             </ProtectedRoute>
           }
         />

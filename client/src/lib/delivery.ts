@@ -1,32 +1,149 @@
-export type DeliveryPartner = "CPAK" | "D2D" | "DEX";
+import { useEffect, useState } from "react";
+import { api } from "./api";
 
-export const DELIVERY_PARTNERS: { value: DeliveryPartner; label: string; waybillCode: string }[] = [
-  { value: "CPAK", label: "CityPak", waybillCode: "MNM X CPAK" },
-  { value: "D2D", label: "Dropp", waybillCode: "MNM X D2D" },
-  { value: "DEX", label: "DEX (Daraz Express)", waybillCode: "MNM X DEX" },
+// A partner code is whatever the admin set on the Delivery Partners page
+// (CPAK, FDR, UBER...) — no longer a fixed list.
+export type DeliveryPartner = string;
+
+export interface DeliveryPartnerInfo {
+  code: string;
+  name: string;
+  // 'courier' = a courier company (weight tariff, its own tracking
+  // numbers, COD settled with us). 'on_demand' = a ride/dispatch app
+  // (Uber, PickMe Flash...): fare typed in per order, invoice number
+  // used as the tracking barcode, no COD settlement.
+  kind: "courier" | "on_demand";
+  waybill_code: string;
+  tracking_url_template: string | null;
+  base_fee: number;
+  extra_kg_fee: number;
+  is_active: number;
+  sort_order: number;
+}
+
+export type DeliveryPaidBy = "customer" | "shop" | "shop_upfront";
+
+// Couriers this system can book a shipment with directly through their
+// API (keyed by partner code) — the waybill window offers a "Create
+// shipment" button for them. Everyone else gets a tracking number from
+// their own portal and types it in.
+export const COURIER_API: Record<string, { name: string; endpoint: string }> = {
+  CPAK: { name: "CityPak", endpoint: "citypak-order" },
+  FDR: { name: "Fardar", endpoint: "fardar-order" },
+};
+
+// The waybill's item line — one entry per product with its quantities
+// added up ("Double Cotton Pant x25"), not one per physical unit (which
+// printed "Double Cotton Pant x1, Double Cotton Pant x1, ..." 25 times
+// and ran off the label), the same way the bill groups its items.
+export function waybillItemsDescription(items: { product_title?: string; quantity: number }[] | undefined): string {
+  const totals = new Map<string, number>();
+  for (const item of items ?? []) {
+    const name = item.product_title ?? "Item";
+    totals.set(name, (totals.get(name) ?? 0) + item.quantity);
+  }
+  return Array.from(totals, ([name, quantity]) => `${name} x${quantity}`).join(", ");
+}
+
+export const DELIVERY_PAID_BY_OPTIONS: { value: DeliveryPaidBy; label: string; hint: string }[] = [
+  { value: "customer", label: "Customer pays", hint: "The fare is charged to the customer." },
+  { value: "shop", label: "Free — we pay", hint: "Free delivery: we cover the fare, nothing is charged to the customer." },
+  { value: "shop_upfront", label: "We pay now, add to bill", hint: "We pay the rider upfront on their behalf, and the fare is added to their bill." },
 ];
 
-export function waybillShopCode(partner: DeliveryPartner | null | undefined): string {
-  return DELIVERY_PARTNERS.find((p) => p.value === partner)?.waybillCode ?? "MNM";
+// One shared copy of the partner list for the whole app — fetched once,
+// then every screen that needs a name, waybill code, tariff or tracking
+// link reads it from here instead of each carrying its own hardcoded
+// list. Refetched (and every subscribed screen updated) after the admin
+// edits a partner.
+let cache: DeliveryPartnerInfo[] | null = null;
+let inflight: Promise<DeliveryPartnerInfo[]> | null = null;
+const listeners = new Set<() => void>();
+
+export function loadDeliveryPartners(force = false): Promise<DeliveryPartnerInfo[]> {
+  if (cache && !force) return Promise.resolve(cache);
+  if (!inflight || force) {
+    inflight = api
+      .get<DeliveryPartnerInfo[]>("/delivery-partners")
+      .then((list) => {
+        cache = list;
+        listeners.forEach((notify) => notify());
+        return list;
+      })
+      .finally(() => {
+        inflight = null;
+      });
+  }
+  return inflight;
 }
 
-// Deep-links to each courier's own tracking page. D2D is our own delivery
-// — there's no external courier site to link out to for it.
+export function useDeliveryPartners() {
+  const [, setVersion] = useState(0);
+
+  useEffect(() => {
+    const notify = () => setVersion((v) => v + 1);
+    listeners.add(notify);
+    loadDeliveryPartners().catch(() => {
+      // the list failing to load leaves the pickers empty rather than
+      // crashing the page; the screens already handle an empty list
+    });
+    return () => {
+      listeners.delete(notify);
+    };
+  }, []);
+
+  const partners = cache ?? [];
+  return {
+    partners,
+    // What a picker offers for a NEW order — switched-off partners stay
+    // out of it, but history screens use the full list so an old
+    // delivery still shows its partner's real name.
+    activePartners: partners.filter((p) => p.is_active),
+    loaded: cache !== null,
+    refresh: () => loadDeliveryPartners(true),
+  };
+}
+
+export function findPartner(code: string | null | undefined): DeliveryPartnerInfo | undefined {
+  return code ? cache?.find((p) => p.code === code) : undefined;
+}
+
+export function partnerLabel(code: string | null | undefined): string {
+  if (!code) return "—";
+  return findPartner(code)?.name ?? code;
+}
+
+export function waybillShopCode(partner: DeliveryPartner | null | undefined): string {
+  if (!partner) return "MNM";
+  return findPartner(partner)?.waybill_code ?? `MNM X ${partner}`;
+}
+
+// Deep-link to a courier's own tracking page, from the template the
+// admin set on the partner (e.g. https://track.example.com/?id={tracking}).
+// A partner without one (own delivery, on-demand apps) has nowhere to
+// link out to.
 export function courierTrackingUrl(partner: DeliveryPartner | null | undefined, trackingNumber: string | null | undefined): string | null {
   if (!trackingNumber) return null;
-  const encoded = encodeURIComponent(trackingNumber);
-  if (partner === "CPAK") return `https://track.citypak.lk/track?tracking_number=${encoded}`;
-  if (partner === "DEX") return `https://www.dex.com.pk/tracking?references=${encoded}`;
-  return null;
+  const template = findPartner(partner)?.tracking_url_template;
+  if (!template) return null;
+  return template.replace("{tracking}", encodeURIComponent(trackingNumber));
 }
 
-// Common courier pricing: Rs. 450 for the first kg, Rs. 100 for each
-// additional kg (rounded up — couriers bill by whole kg increments).
-export function calculateDeliveryFee(weightKg: number, isFree: boolean): number {
+// Common courier pricing: the partner's base fee for the first kg, its
+// per-kg fee for each additional kg (rounded up — couriers bill by whole
+// kg increments). Defaults to Rs. 450 + Rs. 100/extra kg, which is what
+// every courier charged before tariffs became per-partner.
+export function calculateDeliveryFee(
+  weightKg: number,
+  isFree: boolean,
+  partner?: Pick<DeliveryPartnerInfo, "base_fee" | "extra_kg_fee">
+): number {
   if (isFree) return 0;
   if (!weightKg || weightKg <= 0) return 0;
+  const base = partner?.base_fee ?? 450;
+  const perKg = partner?.extra_kg_fee ?? 100;
   const extraKg = Math.max(0, Math.ceil(weightKg - 1));
-  return 450 + extraKg * 100;
+  return base + extraKg * perKg;
 }
 
 // COD to collect on delivery = (order total + delivery fee) minus

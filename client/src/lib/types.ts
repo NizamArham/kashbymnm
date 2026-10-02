@@ -233,9 +233,34 @@ export interface Sale {
   is_voided: number;
   voided_at: string | null;
   void_reason: string | null;
+  // A quotation is a row in this same table, saved before any money
+  // changed hands — see server/src/routes/sales.ts. "completed" is a
+  // real sale; "quotation" hasn't touched stock, cash book, or loyalty
+  // yet, and amount_paid/payment_status are left at 0/"unpaid" until
+  // it's converted.
+  status: "quotation" | "completed";
+  quotation_valid_until: string | null;
+  // Part of amount_paid that was settled with store credit rather than
+  // cash/card — only on the single-sale GET, not the list.
+  store_credit_applied?: number;
+  // Which credit that was, e.g. "Return on invoice STR261X0240".
+  store_credit_sources?: { amount: number; label: string }[];
   items?: SaleItem[];
   delivery_address?: { address_line1: string | null; address_line2: string | null; city: string | null } | null;
-  delivery_partner?: "CPAK" | "D2D" | "DEX" | null;
+  delivery_partner?: string | null;
+  // From the partner's own record, so a bill can print the real name
+  // without having the partner list loaded.
+  delivery_partner_name?: string | null;
+  delivery_partner_waybill_code?: string | null;
+  delivery_partner_kind?: "courier" | "on_demand" | null;
+  // What the customer is charged for delivery on this order, and how.
+  delivery_fee?: number | null;
+  delivery_is_free?: number | null;
+  delivery_paid_by?: "customer" | "shop" | "shop_upfront" | null;
+  delivery_cod_amount?: number | null;
+  // How much of that delivery fee was already paid at checkout.
+  delivery_fee_paid?: number | null;
+  delivery_status?: DeliveryStatus | null;
 }
 
 export interface Coupon {
@@ -333,7 +358,7 @@ export interface Delivery {
   address_id: number | null;
   courier_name: string | null;
   tracking_number: string | null;
-  delivery_partner: "CPAK" | "D2D" | "DEX" | null;
+  delivery_partner: string | null;
   citypak_order_id: number | null;
   package_weight_kg: number | null;
   address_confirmed: number;
@@ -346,6 +371,15 @@ export interface Delivery {
   dispatched_at: string | null;
   delivery_date: string | null;
   delivery_fee: number;
+  // On-demand partners only (Uber, PickMe Flash...): who bears the fare,
+  // and what the ride actually costs (kept even when we pay it and the
+  // customer's delivery_fee is 0).
+  delivery_paid_by?: "customer" | "shop" | "shop_upfront" | null;
+  actual_fare?: number | null;
+  // The courier's own latest status wording and when they reported it —
+  // shown as-is next to our delivery_status.
+  courier_status?: string | null;
+  courier_status_at?: string | null;
   notes: string | null;
   invoice?: string;
   sale_date?: string;

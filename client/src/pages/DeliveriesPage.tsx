@@ -4,7 +4,8 @@ import { api, ApiRequestError } from "../lib/api";
 import { Delivery, DeliveryStatus, BusinessInfo } from "../lib/types";
 import { PageHeader, Card, Table, Th, Td, Button, EmptyState, ErrorText, DateRangePicker, Badge, RowCard, RowCardStats, RowCardStat, RefLink } from "../components/ui";
 import PackWaybillModal from "../components/PackWaybillModal";
-import { DELIVERY_PARTNERS, courierTrackingUrl, waybillShopCode } from "../lib/delivery";
+import ChangePartnerModal from "../components/ChangePartnerModal";
+import { courierTrackingUrl, waybillShopCode, partnerLabel as partnerName, useDeliveryPartners, waybillItemsDescription } from "../lib/delivery";
 import { generateWaybillLabelPdf } from "../lib/waybillLabelPdf";
 import { WaybillLabelData } from "../components/WaybillLabel";
 import { applyBusinessInfoToReturnAddress } from "../lib/businessInfo";
@@ -50,7 +51,7 @@ async function redownloadWaybill(d: Delivery) {
     weight: d.package_weight_kg ? String(d.package_weight_kg) : "",
     paymentType: codAmount > 0 ? "COD" : "Prepaid",
     codAmount,
-    description: d.items?.map((i) => `${i.product_title ?? "Item"} x${i.quantity}`).join(", ") ?? "",
+    description: waybillItemsDescription(d.items),
     trackingNumber: d.tracking_number ?? "",
     returnBusinessName,
     returnAddressLines: returnAddress.split("\n"),
@@ -80,8 +81,14 @@ function money(n: number | null | undefined): string {
   return `Rs. ${(n ?? 0).toLocaleString()}`;
 }
 
-function partnerLabel(partner: string | null | undefined): string {
-  return DELIVERY_PARTNERS.find((p) => p.value === partner)?.label ?? "—";
+// "Uber · Rs. 650 · we paid upfront" for an on-demand order, where who
+// bears the fare matters; just the partner's name for a courier.
+function partnerLabel(d: Delivery): string {
+  const name = partnerName(d.delivery_partner);
+  if (!d.delivery_paid_by) return name;
+  const who =
+    d.delivery_paid_by === "customer" ? "customer pays" : d.delivery_paid_by === "shop" ? "free — we pay" : "we paid upfront, on the bill";
+  return `${name} · ${money(d.actual_fare)} · ${who}`;
 }
 
 function CodCell({ delivery }: { delivery: Delivery }) {
@@ -89,6 +96,19 @@ function CodCell({ delivery }: { delivery: Delivery }) {
     return <span className="font-semibold text-gray-900">{money(delivery.cod_amount)}</span>;
   }
   return <Badge label="Prepaid" tone="neutral" />;
+}
+
+// What the courier itself says about the parcel (e.g. "Out for delivery"),
+// beneath our own status — so staff can see it even when it isn't a change
+// the system acts on.
+function CourierStatusLine({ delivery }: { delivery: Delivery }) {
+  if (!delivery.courier_status) return null;
+  return (
+    <div className="text-[11px] text-gray-400 mt-0.5" title="Latest status reported by the courier">
+      Courier: {delivery.courier_status}
+      {delivery.courier_status_at ? ` · ${delivery.courier_status_at.slice(0, 16)}` : ""}
+    </div>
+  );
 }
 
 function TrackingLink({ delivery }: { delivery: Delivery }) {
@@ -254,14 +274,21 @@ const TABS: { key: DeliveryStatus; label: string; icon: any }[] = [
 ];
 
 export default function DeliveriesPage() {
+  // Loads the partner list (names, waybill codes, tracking links) the
+  // rows below read from.
+  useDeliveryPartners();
   const [activeTab, setActiveTab] = useState<DeliveryStatus>("pending");
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [packingDelivery, setPackingDelivery] = useState<Delivery | null>(null);
+  // The order whose courier is being changed from the list itself.
+  const [changingPartnerFor, setChangingPartnerFor] = useState<Delivery | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
   const [startDate, setStartDate] = useState<string | null>(() => {
     const d = new Date();
@@ -320,6 +347,42 @@ export default function DeliveriesPage() {
     setPackingDelivery(full);
   }
 
+  // After the courier changes from inside the waybill modal: refresh the
+  // list and reopen the modal on the updated order, so its waybill code,
+  // tracking field and COD all reflect the new courier.
+  async function handlePartnerChangedInModal() {
+    if (!packingDelivery) return;
+    const id = packingDelivery.id;
+    await load();
+    setPackingDelivery(await api.get<Delivery>(`/deliveries/${id}`));
+  }
+
+  // Asks CityPak right now where the open parcels are (this also happens
+  // automatically every 30 minutes). Fardar needs no check — it reports
+  // its own updates as they happen.
+  async function checkCourierStatus() {
+    setSyncing(true);
+    setSyncMessage(null);
+    setActionError(null);
+    try {
+      const r = await api.post<{ checked: number; updated: number; notFound: number; errors: number; changes: { invoice: string; to: string }[] }>(
+        "/deliveries/sync-couriers"
+      );
+      setSyncMessage(
+        r.checked === 0
+          ? "No open CityPak parcels to check."
+          : `Checked ${r.checked} CityPak parcel${r.checked === 1 ? "" : "s"} — ${
+              r.updated > 0 ? r.changes.map((c) => `${c.invoice} → ${c.to}`).join(", ") : "no status changes"
+            }${r.notFound > 0 ? ` (${r.notFound} not recognised by CityPak)` : ""}${r.errors > 0 ? ` (${r.errors} couldn't be checked)` : ""}.`
+      );
+      await load();
+    } catch (err) {
+      setActionError(err instanceof ApiRequestError ? err.message : "Couldn't check the courier status");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   async function handlePacked(trackingNumber: string) {
     if (!packingDelivery) return;
     try {
@@ -360,6 +423,24 @@ export default function DeliveriesPage() {
     } catch (err) {
       setActionError(err instanceof ApiRequestError ? err.message : "Failed to mark returned");
     }
+  }
+
+  // Only before the courier has it — once dispatched, COD and settlement
+  // are tied to that courier.
+  function ChangeCourierLink({ d }: { d: Delivery }) {
+    if (d.delivery_status !== "pending" && d.delivery_status !== "packed") return null;
+    return (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setChangingPartnerFor(d);
+        }}
+        className="ml-1.5 text-gray-400 hover:text-gray-800 underline decoration-dotted"
+      >
+        change
+      </button>
+    );
   }
 
   function PrimaryAction({ d }: { d: Delivery }) {
@@ -406,14 +487,19 @@ export default function DeliveriesPage() {
         title="Shipping"
         subtitle="Online orders move through this pipeline automatically once placed."
         action={
-          <DateRangePicker
-            startDate={startDate}
-            endDate={endDate}
-            onChange={(s, e) => {
-              setStartDate(s);
-              setEndDate(e);
-            }}
-          />
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button size="sm" onClick={checkCourierStatus} disabled={syncing} title="Ask CityPak where the open parcels are right now">
+              {syncing ? "Checking..." : "Check courier status"}
+            </Button>
+            <DateRangePicker
+              startDate={startDate}
+              endDate={endDate}
+              onChange={(s, e) => {
+                setStartDate(s);
+                setEndDate(e);
+              }}
+            />
+          </div>
         }
       />
 
@@ -470,6 +556,7 @@ export default function DeliveriesPage() {
 
       {error && <ErrorText>{error}</ErrorText>}
       {actionError && <ErrorText>{actionError}</ErrorText>}
+      {syncMessage && <p className="text-xs text-gray-500 mb-3">{syncMessage}</p>}
 
       {loading ? (
         <p className="text-sm text-gray-400">Loading...</p>
@@ -536,7 +623,11 @@ export default function DeliveriesPage() {
                         <Td className="text-gray-900">{d.customer_name ?? "Walk-in"}</Td>
                         <Td>
                           <TrackingLink delivery={d} />
-                          <div className="text-xs text-gray-500 mt-0.5">{partnerLabel(d.delivery_partner)}</div>
+                          <CourierStatusLine delivery={d} />
+                          <div className="text-xs text-gray-500 mt-0.5">
+                            {partnerLabel(d)}
+                            <ChangeCourierLink d={d} />
+                          </div>
                         </Td>
                         <Td>
                           <PrimaryAction d={d} />
@@ -596,8 +687,26 @@ export default function DeliveriesPage() {
 
                   <RowCardStats>
                     <RowCardStat label="COD" value={<CodCell delivery={d} />} />
-                    <RowCardStat label="Courier" value={partnerLabel(d.delivery_partner)} />
-                    {d.tracking_number && <RowCardStat label="Tracking" value={<TrackingLink delivery={d} />} />}
+                    <RowCardStat
+                      label="Courier"
+                      value={
+                        <span>
+                          {partnerLabel(d)}
+                          <ChangeCourierLink d={d} />
+                        </span>
+                      }
+                    />
+                    {d.tracking_number && (
+                      <RowCardStat
+                        label="Tracking"
+                        value={
+                          <>
+                            <TrackingLink delivery={d} />
+                            <CourierStatusLine delivery={d} />
+                          </>
+                        }
+                      />
+                    )}
                   </RowCardStats>
 
                   <div className="mt-3 pt-3 border-t border-gray-100">
@@ -619,7 +728,18 @@ export default function DeliveriesPage() {
         </>
       )}
 
-      {packingDelivery && <PackWaybillModal delivery={packingDelivery} onClose={() => setPackingDelivery(null)} onPacked={handlePacked} />}
+      {packingDelivery && (
+        <PackWaybillModal
+          key={`${packingDelivery.id}-${packingDelivery.delivery_partner}`}
+          delivery={packingDelivery}
+          onClose={() => setPackingDelivery(null)}
+          onPacked={handlePacked}
+          onPartnerChanged={handlePartnerChangedInModal}
+        />
+      )}
+      {changingPartnerFor && (
+        <ChangePartnerModal delivery={changingPartnerFor} onClose={() => setChangingPartnerFor(null)} onChanged={load} />
+      )}
     </div>
   );
 }

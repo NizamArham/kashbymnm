@@ -67,7 +67,7 @@ export const WaybillLabel = forwardRef<
               display: "flex",
               alignItems: "center",
               gap: 6,
-              fontSize: "1.2rem",
+              fontSize: "1.3rem",
               fontWeight: "bold",
               cursor: onShopCodeClick ? "pointer" : undefined,
               borderRadius: 6,
@@ -76,26 +76,26 @@ export const WaybillLabel = forwardRef<
               outline: onShopCodeClick ? "1px dashed #bbb" : undefined,
             }}
           >
-            <span style={{ fontSize: "1.5rem", fontWeight: 600 }}>[</span>
+            <span style={{ fontSize: "1.6rem", fontWeight: 600 }}>[</span>
             <span>{data.shopCode || "SHOP CODE"}</span>
-            <span style={{ fontSize: "1.5rem", fontWeight: 600 }}>]</span>
+            <span style={{ fontSize: "1.6rem", fontWeight: 600 }}>]</span>
           </div>
           <div style={{ textAlign: "right" }}>
-            <div style={{ fontFamily: '"Helvetica Neue", Helvetica, Arial, sans-serif', fontStyle: "italic", fontWeight: 700, fontSize: "1.2rem" }}>{data.date}</div>
+            <div style={{ fontFamily: '"Helvetica Neue", Helvetica, Arial, sans-serif', fontStyle: "italic", fontWeight: 700, fontSize: "1.3rem" }}>{data.date}</div>
           </div>
         </div>
         <div style={{ width: "100%", height: 2, background: "#000" }} />
 
         <div className="receiver-section" style={{ width: "100%", marginTop: 6, fontFamily: '"Helvetica Neue", Helvetica, Arial, sans-serif' }}>
-          <div style={{ display: "inline-block", fontSize: 13, fontWeight: "bold", padding: "4px 10px 4px 8px", marginBottom: 5, backgroundColor: "#000", color: "#f0f0f0" }}>
+          <div style={{ display: "inline-block", fontSize: 13.5, fontWeight: "bold", padding: "4px 10px 4px 8px", marginBottom: 5, backgroundColor: "#000", color: "#f0f0f0" }}>
             DELIVER [ TO ]
           </div>
           <div className="receiver-info">
-            <p style={{ margin: 0, fontSize: "1.15rem", fontWeight: 700 }}>{data.customerName || "Customer Name"}</p>
+            <p style={{ margin: 0, fontSize: "1.27rem", fontWeight: 700 }}>{data.customerName || "Customer Name"}</p>
             <p
               style={{
                 margin: "0.1rem 0 0 0",
-                fontSize: "0.92rem",
+                fontSize: "1rem",
                 fontWeight: 400,
                 lineHeight: 1.35,
                 whiteSpace: "pre-line",
@@ -103,14 +103,14 @@ export const WaybillLabel = forwardRef<
                 // trick — html2canvas (used for the PDF/print capture)
                 // doesn't compute that display:-webkit-box hack reliably
                 // and renders it as corrupted, ghosted text.
-                maxHeight: "60px",
+                maxHeight: "66px",
                 overflow: "hidden",
               }}
             >
               {addressTextWithComma}
             </p>
-            <p style={{ margin: "0.1rem 0 0 0", fontSize: "0.92rem", fontWeight: 400, lineHeight: 1.05 }}>{cityLine}</p>
-            <p style={{ margin: "0.25rem 0 0 0", fontSize: "0.85rem", fontWeight: 400, lineHeight: 1.1 }}>{phonesText}</p>
+            <p style={{ margin: "0.1rem 0 0 0", fontSize: "1rem", fontWeight: 400, lineHeight: 1.05 }}>{cityLine}</p>
+            <p style={{ margin: "0.25rem 0 0 0", fontSize: "0.95rem", fontWeight: 400, lineHeight: 1.1 }}>{phonesText}</p>
           </div>
         </div>
       </div>
@@ -119,16 +119,16 @@ export const WaybillLabel = forwardRef<
       <div className="label-middle">
         <div style={{ height: 2, background: "#000", margin: "4px 0" }} />
         <div className="delivery-section" style={{ fontFamily: '"Helvetica Neue", Helvetica, Arial, sans-serif', margin: "4px 0" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 6, fontSize: "1rem" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 6, fontSize: "1.07rem" }}>
             <div style={{ fontWeight: 600, textTransform: "uppercase" }}>Delivery Instruction</div>
             {data.paymentType === "COD" && data.codAmount > 0 && (
               <div style={{ background: "black", color: "white", padding: "0px 10px", textAlign: "center", display: "flex", flexDirection: "row", justifyContent: "center" }}>
-                <strong style={{ fontSize: "1.2rem", lineHeight: 1.2 }}>{Math.round(data.codAmount).toLocaleString("en-US")}</strong>
-                <span style={{ fontSize: "0.9rem", marginLeft: 4 }}>LKR</span>
+                <strong style={{ fontSize: "1.3rem", lineHeight: 1.2 }}>{Math.round(data.codAmount).toLocaleString("en-US")}</strong>
+                <span style={{ fontSize: "0.97rem", marginLeft: 4 }}>LKR</span>
               </div>
             )}
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 6, fontSize: "1rem" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 6, fontSize: "1.07rem" }}>
             <div style={{ fontWeight: "bold" }}>Ref: {data.orderRef || "—"}</div>
             <div style={{ fontWeight: 500 }}>1 of {data.pcs || 1} pcs</div>
             <div style={{ fontWeight: 600 }}>{data.weight ? `${data.weight} Kg` : "0.0 Kg"}</div>
@@ -137,12 +137,12 @@ export const WaybillLabel = forwardRef<
             <div
               style={{
                 flex: 1,
-                fontSize: "0.85rem",
+                fontSize: "0.92rem",
                 lineHeight: 1.3,
                 whiteSpace: "pre-line",
                 // Same plain max-height clip as the address block above —
                 // -webkit-line-clamp renders corrupted in html2canvas.
-                maxHeight: "36px",
+                maxHeight: "40px",
                 overflow: "hidden",
               }}
             >
@@ -159,18 +159,18 @@ export const WaybillLabel = forwardRef<
           <div style={{ width: "100%", display: "flex", justifyContent: "center", marginBottom: 5 }}>
             <svg ref={barcodeRef} style={{ width: "100%", maxWidth: 380, height: 60 }} />
           </div>
-          <div style={{ fontSize: "1rem", fontWeight: 600, textAlign: "center", color: "#000", marginTop: 3 }}>
+          <div style={{ fontSize: "1.07rem", fontWeight: 600, textAlign: "center", color: "#000", marginTop: 3 }}>
             {data.trackingNumber || "Tracking No:"}
           </div>
         </div>
         <div style={{ height: 2, background: "#000", margin: "4px 0" }} />
         <div style={{ display: "flex", flexDirection: "column" }}>
-          <div style={{ display: "inline-block", alignSelf: "flex-start", padding: "4px 10px 4px 8px", fontSize: 13, fontWeight: "bold", marginBottom: 5, backgroundColor: "#000", color: "#f0f0f0" }}>
+          <div style={{ display: "inline-block", alignSelf: "flex-start", padding: "4px 10px 4px 8px", fontSize: 13.5, fontWeight: "bold", marginBottom: 5, backgroundColor: "#000", color: "#f0f0f0" }}>
             In case of non-delivery, [ Return ]
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", width: "100%", marginTop: 3 }}>
-            <div style={{ maxWidth: "65%", fontSize: "0.78rem", lineHeight: 1.25, fontFamily: '"Helvetica Neue", Helvetica, Arial, sans-serif' }}>
-              <span style={{ fontSize: "1rem", fontWeight: 500 }}>{data.returnBusinessName || "M&M Clothing"}</span>
+            <div style={{ maxWidth: "64%", fontSize: "0.85rem", lineHeight: 1.25, fontFamily: '"Helvetica Neue", Helvetica, Arial, sans-serif' }}>
+              <span style={{ fontSize: "1.07rem", fontWeight: 500 }}>{data.returnBusinessName || "M&M Clothing"}</span>
               <br />
               {data.returnAddressLines.filter(Boolean).map((line, i) => (
                 <span key={i}>
@@ -185,7 +185,7 @@ export const WaybillLabel = forwardRef<
             <img
               src={NAME_LOGO_PNG_BASE64}
               alt="M&M Clothing"
-              style={{ width: 92, height: 92 / NAME_LOGO_ASPECT_RATIO, objectFit: "contain", flexShrink: 0 }}
+              style={{ width: 125, height: 125 / NAME_LOGO_ASPECT_RATIO, objectFit: "contain", flexShrink: 0 }}
             />
           </div>
         </div>

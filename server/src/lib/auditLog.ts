@@ -28,7 +28,11 @@ export type AuditAction =
   | "coupon_delete"
   | "gift_voucher_create"
   | "gift_voucher_edit"
-  | "gift_voucher_delete";
+  | "gift_voucher_delete"
+  | "delivery_partner_create"
+  | "delivery_partner_edit"
+  | "delivery_partner_change"
+  | "delivery_status_sync";
 
 export function logAudit(
   actor: AuthUser,
@@ -41,4 +45,14 @@ export function logAudit(
     `INSERT INTO audit_log (staff_id, staff_name, action, entity_type, entity_id, description)
      VALUES (?, ?, ?, ?, ?, ?)`
   ).run(actor.id, actor.name ?? actor.username, action, entityType, entityId, description);
+}
+
+// For changes the system makes by itself (a courier reporting a delivery),
+// where there's no logged-in person — recorded under the courier's name
+// with no staff member attached.
+export function logSystemAudit(actorName: string, action: AuditAction, entityType: string, entityId: number | null, description: string) {
+  db.prepare(
+    `INSERT INTO audit_log (staff_id, staff_name, action, entity_type, entity_id, description)
+     VALUES (NULL, ?, ?, ?, ?, ?)`
+  ).run(actorName, action, entityType, entityId, description);
 }

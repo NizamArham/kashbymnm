@@ -22,6 +22,19 @@ const RIGHT_X = PAGE_W - MARGIN;
 const TAG_PAD_X = 1.6;
 const TAG_PAD_Y = 1.1;
 
+// Every size below is written at an enlarged value and multiplied by
+// this. generateWaybillLabelPdf picks the biggest scale, up to MAX_SCALE,
+// at which the whole label still fits the page — so an ordinary order
+// prints at a comfortable, easy-to-read size, while one with a long
+// address, description and return block shrinks only as far as it must
+// (never below MIN_SCALE) instead of running off the bottom edge.
+// MAX_SCALE 0.9 puts the text roughly 8% above the label's original
+// size (and the logo about 40% bigger) — the full 1.0 read as too big.
+const MAX_SCALE = 0.9;
+const MIN_SCALE = 0.7;
+let SCALE = 1;
+const fs = (size: number) => size * SCALE;
+
 function divider(doc: jsPDF, y: number) {
   doc.setDrawColor(0, 0, 0);
   doc.setLineWidth(0.5);
@@ -71,13 +84,13 @@ function layoutTopGroup(doc: jsPDF, data: WaybillLabelData, startY: number, draw
   let y = 0;
 
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(14);
+  doc.setFontSize(fs(16));
   const headerText = `[ ${data.shopCode || "SHOP CODE"} ]`;
   const headerDims = doc.getTextDimensions(headerText);
   if (draw) {
     doc.text(headerText, MARGIN, startY + y + headerDims.h * 0.78);
     doc.setFont("helvetica", "bolditalic");
-    doc.setFontSize(14);
+    doc.setFontSize(fs(16));
     doc.text(data.date, RIGHT_X, startY + y + headerDims.h * 0.78, { align: "right" });
   }
   y += headerDims.h + 2;
@@ -85,9 +98,9 @@ function layoutTopGroup(doc: jsPDF, data: WaybillLabelData, startY: number, draw
   if (draw) divider(doc, startY + y);
   y += 4;
 
-  const deliverTagH = draw ? blackTag(doc, "DELIVER [ TO ]", MARGIN, startY + y, 10) : (() => {
+  const deliverTagH = draw ? blackTag(doc, "DELIVER [ TO ]", MARGIN, startY + y, fs(11.5)) : (() => {
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
+    doc.setFontSize(fs(11.5));
     return doc.getTextDimensions("DELIVER [ TO ]").h + TAG_PAD_Y * 2;
   })();
   y += deliverTagH + 3;
@@ -100,7 +113,7 @@ function layoutTopGroup(doc: jsPDF, data: WaybillLabelData, startY: number, draw
   // are trimmed slightly to make room, rather than touching line
   // spacing that actually helps legibility.
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(14);
+  doc.setFontSize(fs(17));
   const nameDims = doc.getTextDimensions(data.customerName || "Customer Name");
   if (draw) doc.text(data.customerName || "Customer Name", MARGIN, startY + y + nameDims.h * 0.78);
   y += nameDims.h + 0.4;
@@ -108,7 +121,7 @@ function layoutTopGroup(doc: jsPDF, data: WaybillLabelData, startY: number, draw
   const addressJoined = data.addressLines.filter(Boolean).join(", ") || "Address line 1";
   const addressText = `${addressJoined},`;
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
+  doc.setFontSize(fs(12));
   const addressLines: string[] = doc.splitTextToSize(addressText, CONTENT_W).slice(0, 3);
   const addressLineBase = doc.getTextDimensions("Mg").h;
   const addressLineSpacing = addressLineBase * 1.3;
@@ -119,13 +132,13 @@ function layoutTopGroup(doc: jsPDF, data: WaybillLabelData, startY: number, draw
   y += 0.5;
 
   const cityLine = data.city ? (data.cityPostalCode ? `${data.city} [${data.cityPostalCode}].` : `${data.city}.`) : "City";
-  doc.setFontSize(10);
+  doc.setFontSize(fs(12));
   const cityDims = doc.getTextDimensions(cityLine);
   if (draw) doc.text(cityLine, MARGIN, startY + y + cityDims.h * 0.78);
   y += cityDims.h + 1.0;
 
   const phonesText = data.phones.filter(Boolean).join(" / ") || "Telephone Number";
-  doc.setFontSize(9.5);
+  doc.setFontSize(fs(11.5));
   const phoneDims = doc.getTextDimensions(phonesText);
   if (draw) doc.text(phonesText, MARGIN, startY + y + phoneDims.h * 0.78);
   y += phoneDims.h;
@@ -139,20 +152,20 @@ function layoutMiddleGroup(doc: jsPDF, data: WaybillLabelData, startY: number, d
   y += 4.5;
 
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(10);
+  doc.setFontSize(fs(11.5));
   const headingDims = doc.getTextDimensions("DELIVERY INSTRUCTION");
   const rowH = headingDims.h;
   if (draw) {
     doc.text("DELIVERY INSTRUCTION", MARGIN, startY + y + rowH * 0.78);
     if (data.paymentType === "COD" && data.codAmount > 0) {
       const codText = `${Math.round(data.codAmount).toLocaleString("en-US")} LKR`;
-      blackTag(doc, codText, RIGHT_X, startY + y - 1, 11, "right");
+      blackTag(doc, codText, RIGHT_X, startY + y - 1, fs(13), "right");
     }
   }
   y += rowH + 3.3;
 
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(9.5);
+  doc.setFontSize(fs(11.5));
   const refText = `Ref: ${data.orderRef || "—"}`;
   const refDims = doc.getTextDimensions(refText);
   if (draw) {
@@ -179,7 +192,7 @@ function layoutMiddleGroup(doc: jsPDF, data: WaybillLabelData, startY: number, d
   y += refDims.h + 2.8;
 
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(8.5);
+  doc.setFontSize(fs(10));
   const descLines: string[] = doc.splitTextToSize(data.description || "—", CONTENT_W).slice(0, 2);
   const descLineH = doc.getTextDimensions("Mg").h;
   for (const line of descLines) {
@@ -204,7 +217,7 @@ function layoutBottomGroup(doc: jsPDF, data: WaybillLabelData, startY: number, d
   y += bcHeight + 2.5;
 
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
+  doc.setFontSize(fs(12.5));
   const trackingDims = doc.getTextDimensions(data.trackingNumber || "Tracking No:");
   if (draw) doc.text(data.trackingNumber || "Tracking No:", PAGE_W / 2, startY + y + trackingDims.h * 0.78, { align: "center" });
   y += trackingDims.h + 2.5;
@@ -212,11 +225,11 @@ function layoutBottomGroup(doc: jsPDF, data: WaybillLabelData, startY: number, d
   if (draw) divider(doc, startY + y);
   y += 4;
 
-  const logoWidth = 22;
+  const logoWidth = 34 * SCALE;
   const logoHeight = logoWidth / NAME_LOGO_ASPECT_RATIO;
-  const returnTagH = draw ? blackTag(doc, "In case of non-delivery, [ Return ]", MARGIN, startY + y, 10) : (() => {
+  const returnTagH = draw ? blackTag(doc, "In case of non-delivery, [ Return ]", MARGIN, startY + y, fs(11)) : (() => {
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
+    doc.setFontSize(fs(11));
     return doc.getTextDimensions("In case of non-delivery, [ Return ]").h + TAG_PAD_Y * 2;
   })();
   const returnBlockTop = y;
@@ -224,13 +237,13 @@ function layoutBottomGroup(doc: jsPDF, data: WaybillLabelData, startY: number, d
 
   const returnTextMaxWidth = CONTENT_W - logoWidth - 3;
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(9.5);
+  doc.setFontSize(fs(11));
   const bizDims = doc.getTextDimensions(data.returnBusinessName || "M&M Clothing");
   if (draw) doc.text(data.returnBusinessName || "M&M Clothing", MARGIN, startY + y + bizDims.h * 0.78);
   y += bizDims.h + 1.2;
 
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
+  doc.setFontSize(fs(9.5));
   const returnLineH = doc.getTextDimensions("Mg").h;
   const returnLines = [
     ...data.returnAddressLines.filter(Boolean),
@@ -259,13 +272,21 @@ export function generateWaybillLabelPdf(data: WaybillLabelData): jsPDF {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: [PAGE_W, PAGE_H], compress: true });
   doc.setTextColor(0, 0, 0);
 
-  const topHeight = layoutTopGroup(doc, data, 0, false);
-  const middleHeight = layoutMiddleGroup(doc, data, 0, false);
-  const bottomHeight = layoutBottomGroup(doc, data, 0, false);
-
   const usableHeight = PAGE_H - MARGIN * 2;
-  const fixedContent = topHeight + middleHeight + bottomHeight;
   const baseGap = 3.7; // minimum breathing room between groups even when content is near the page limit
+
+  // Largest scale at which the three groups plus their minimum gaps fit.
+  let topHeight = 0;
+  let middleHeight = 0;
+  let bottomHeight = 0;
+  for (SCALE = MAX_SCALE; ; SCALE = Math.round((SCALE - 0.02) * 100) / 100) {
+    topHeight = layoutTopGroup(doc, data, 0, false);
+    middleHeight = layoutMiddleGroup(doc, data, 0, false);
+    bottomHeight = layoutBottomGroup(doc, data, 0, false);
+    if (topHeight + middleHeight + bottomHeight + baseGap * 2 <= usableHeight || SCALE <= MIN_SCALE) break;
+  }
+
+  const fixedContent = topHeight + middleHeight + bottomHeight;
   const extraGap = Math.max(0, (usableHeight - fixedContent - baseGap * 2) / 2);
   const gap = baseGap + extraGap;
 

@@ -5,11 +5,26 @@ import { ApiError, asyncHandler } from "../lib/errors";
 import { nextTransactionCode } from "../lib/codes";
 import { requireAuth, requireRole } from "../lib/auth";
 import { logAudit } from "../lib/auditLog";
+import { LOYALTY_RATE_PERCENT } from "./sales";
 
 export const returnsRouter = Router();
 
 // Staff can submit requests and view history; only admins can approve/decline.
 returnsRouter.use(requireAuth);
+
+// The loyalty points the customer earned on ONE item of a sale — its
+// share of the points the sale earned (1% of what they actually paid
+// after discounts), taken from the sale's original subtotal/discount so
+// it stays accurate however many other items on the same sale have
+// already been returned. Points on goods that came back are taken back
+// again, whether the money goes back as a refund or as store credit —
+// otherwise a customer keeps the points on something they returned, and
+// then earns them a second time on the replacement they buy.
+function pointsEarnedOnItem(item: { unit_price: number; subtotal: number; discount: number; loyalty_points_earned: number }): number {
+  if (item.subtotal <= 0) return 0;
+  const paidShare = (item.subtotal - item.discount) / item.subtotal;
+  return Math.min(item.loyalty_points_earned, Math.max(0, Math.floor(item.unit_price * paidShare * LOYALTY_RATE_PERCENT)));
+}
 
 const requestInput = z.object({
   sale_item_id: z.number().int().positive(),
@@ -161,7 +176,8 @@ returnsRouter.put(
 
     const saleItem = db
       .prepare(
-        `SELECT sale_items.*, sales.invoice, sales.customer_id, sales.loyalty_points_earned, sales.total, sales.amount_paid
+        `SELECT sale_items.*, sales.invoice, sales.customer_id, sales.loyalty_points_earned, sales.total, sales.amount_paid,
+                sales.subtotal, sales.discount
          FROM sale_items JOIN sales ON sales.id = sale_items.sale_id
          WHERE sale_items.id = ?`
       )
@@ -211,10 +227,11 @@ returnsRouter.put(
 
     const refund_amount = request.resolution === "refund" ? Math.round(saleItem.unit_price * paidFraction) : 0;
     const ledgerWriteOff = request.resolution === "refund" ? saleItem.unit_price - refund_amount : 0;
+    // An immediate exchange creates no new sale for the replacement to
+    // earn its own points on, so those stay; a refund or a store-credit
+    // return doesn't (the replacement is a separate, new sale).
     const pointsToReverse =
-      request.resolution === "refund" && saleItem.total > 0
-        ? Math.floor((saleItem.unit_price / saleItem.total) * saleItem.loyalty_points_earned)
-        : 0;
+      request.resolution === "refund" || request.resolution === "store_credit_exchange" ? pointsEarnedOnItem(saleItem) : 0;
 
     const runApproval = db.transaction(() => {
       const returnResult = db
@@ -258,18 +275,18 @@ returnsRouter.put(
             saleItem.sale_id
           );
         }
+      }
 
-        if (pointsToReverse > 0) {
-          db.prepare(`UPDATE sales SET loyalty_points_earned = MAX(0, loyalty_points_earned - ?) WHERE id = ?`).run(
-            pointsToReverse,
-            saleItem.sale_id
-          );
-          if (saleItem.customer_id) {
-            db.prepare(
-              `INSERT INTO loyalty_transactions (customer_id, points, reason, reference_id, notes)
-               VALUES (?, ?, 'manual_adjustment', ?, ?)`
-            ).run(saleItem.customer_id, -pointsToReverse, saleItem.sale_id, `Reversed on return — invoice ${saleItem.invoice}`);
-          }
+      if (pointsToReverse > 0) {
+        db.prepare(`UPDATE sales SET loyalty_points_earned = MAX(0, loyalty_points_earned - ?) WHERE id = ?`).run(
+          pointsToReverse,
+          saleItem.sale_id
+        );
+        if (saleItem.customer_id) {
+          db.prepare(
+            `INSERT INTO loyalty_transactions (customer_id, points, reason, reference_id, notes)
+             VALUES (?, ?, 'manual_adjustment', ?, ?)`
+          ).run(saleItem.customer_id, -pointsToReverse, saleItem.sale_id, `Reversed on return — invoice ${saleItem.invoice}`);
         }
       }
 

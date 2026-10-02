@@ -63,10 +63,30 @@ function requireConfig(): { baseUrl: string; token: string } {
 export async function citypakCreateOrder(params: CitypakOrderParams): Promise<CitypakOrderResult> {
   const { baseUrl, token } = requireConfig();
 
+  const body = { token, ...params };
+
+  // ── DEBUG: show exactly what we're sending ─────────────────────────
+  // The city field on CityPak's API is address_line_4 (for both from
+  // and to). If the caller is putting the city into a different field,
+  // or leaving line_4 empty, this log will show it immediately.
+  // Also flags any non-ASCII characters — CityPak rejects those via
+  // a regex ([^\x00-\x7F]+) but only reports a generic error.
+  const nonAsciiFields = Object.entries(body).filter(
+    ([, v]) => typeof v === "string" && /[^\x00-\x7F]/.test(v)
+  );
+  console.log("── CityPak create-order request ──");
+  console.log("URL:", `${baseUrl}/customer_api/v1/orders`);
+  // The API token is deliberately left out of the log.
+  console.log("Body:", JSON.stringify({ ...body, token: "(hidden)" }, null, 2));
+  if (nonAsciiFields.length) {
+    console.log("⚠ Non-ASCII characters found in:", nonAsciiFields.map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(", "));
+  }
+  // ───────────────────────────────────────────────────────────────────
+
   const res = await fetch(`${baseUrl}/customer_api/v1/orders`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ token, ...params }),
+    body: JSON.stringify(body),
   });
 
   let json: any;
@@ -75,6 +95,17 @@ export async function citypakCreateOrder(params: CitypakOrderParams): Promise<Ci
   } catch {
     throw new ApiError(502, "CityPak returned an unreadable response");
   }
+
+  // ── DEBUG: show exactly what CityPak sent back ─────────────────────
+  // CityPak returns 200 for both success and failure, with a "success"
+  // boolean inside the JSON. The `message` and `data` fields carry the
+  // real reason for a rejection — logging the raw body here means we
+  // never have to guess why an order was refused.
+  console.log("── CityPak create-order response ──");
+  console.log("HTTP status:", res.status);
+  console.log("Body:", JSON.stringify(json, null, 2));
+  // ───────────────────────────────────────────────────────────────────
+
   if (!json?.success) {
     throw new ApiError(400, json?.message || "CityPak rejected the order");
   }

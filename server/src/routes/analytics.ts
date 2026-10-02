@@ -62,7 +62,7 @@ interface Totals {
 // period, so the two numbers are computed identically.
 function computeTotals(start: string, end: string): Totals {
   const salesInRange = db
-    .prepare(`SELECT total FROM sales WHERE is_voided = 0 AND date(date) BETWEEN date(?) AND date(?)`)
+    .prepare(`SELECT total FROM sales WHERE is_voided = 0 AND status = 'completed' AND date(date) BETWEEN date(?) AND date(?)`)
     .all(start, end) as { total: number }[];
 
   const revenue = salesInRange.reduce((sum, s) => sum + s.total, 0);
@@ -74,7 +74,7 @@ function computeTotals(start: string, end: string): Totals {
        FROM sale_items si
        JOIN sales s ON s.id = si.sale_id
        LEFT JOIN inventory i ON i.id = si.inventory_id
-       WHERE s.is_voided = 0 AND date(s.date) BETWEEN date(?) AND date(?)`
+       WHERE s.is_voided = 0 AND s.status = 'completed' AND date(s.date) BETWEEN date(?) AND date(?)`
     )
     .get(start, end) as { units: number; cost: number };
 
@@ -118,12 +118,12 @@ analyticsRouter.get(
          JOIN sales s ON s.id = si.sale_id
          LEFT JOIN inventory i ON i.id = si.inventory_id
          LEFT JOIN products p ON p.id = i.product_id
-         WHERE s.is_voided = 0 AND date(s.date) BETWEEN date(?) AND date(?)`
+         WHERE s.is_voided = 0 AND s.status = 'completed' AND date(s.date) BETWEEN date(?) AND date(?)`
       )
       .all(start, end) as ItemRow[];
 
     const salesInRange = db
-      .prepare(`SELECT id, date, total FROM sales WHERE is_voided = 0 AND date(date) BETWEEN date(?) AND date(?)`)
+      .prepare(`SELECT id, date, total FROM sales WHERE is_voided = 0 AND status = 'completed' AND date(date) BETWEEN date(?) AND date(?)`)
       .all(start, end) as { id: number; date: string; total: number }[];
 
     // ---- By product (item-level gross figures — pre order-level discount,

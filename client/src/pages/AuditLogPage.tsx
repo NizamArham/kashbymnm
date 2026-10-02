@@ -35,6 +35,10 @@ const ACTION_META: Record<string, { label: string; icon: typeof AlertTriangle; t
   gift_voucher_create: { label: "Issued gift voucher", icon: Gift, tone: "neutral" },
   gift_voucher_edit: { label: "Edited gift voucher", icon: Pencil, tone: "neutral" },
   gift_voucher_delete: { label: "Deleted gift voucher", icon: Trash2, tone: "danger" },
+  delivery_partner_create: { label: "Added delivery partner", icon: Pencil, tone: "neutral" },
+  delivery_partner_edit: { label: "Edited delivery partner", icon: Pencil, tone: "neutral" },
+  delivery_partner_change: { label: "Changed order's courier", icon: Pencil, tone: "neutral" },
+  delivery_status_sync: { label: "Courier updated delivery", icon: Pencil, tone: "neutral" },
 };
 
 function actionMeta(action: string) {

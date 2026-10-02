@@ -1827,6 +1827,7 @@ export const cities: CityEntry[] = [
   { name: "Thadduvankoddy(KO)", code: "42558" },
   { name: "Thalahitimulla(KG)", code: "60208" },
   { name: "Thalakolawewa(KG)", code: "60624" },
+  { name: "Thalawathugoda", code: "10116" },
   { name: "Thalayady(KO)", code: "42563" },
   { name: "Thalwita(KG)", code: "60572" },
   { name: "Thambagalla(KG)", code: "60584" },

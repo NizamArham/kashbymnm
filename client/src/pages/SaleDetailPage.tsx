@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Receipt, Printer, FileText, MessageCircle } from "lucide-react";
+import { ArrowLeft, Receipt, Printer, FileText, MessageCircle, ShoppingCart, XCircle } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Sale } from "../lib/types";
 import { downloadA4Pdf, downloadThermalPdf, sendWhatsAppBill, groupSaleItemsForDisplay } from "../lib/receipts";
 import { PageHeader, Card, Table, Th, Td, ErrorText, Badge, RefLink, Button } from "../components/ui";
 import ReceiptOptionsModal, { ModalOption } from "../components/ReceiptOptionsModal";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
+import { hasDraftInProgress } from "../lib/posDraft";
+import DeliveryChargeSummary from "../components/DeliveryChargeSummary";
 
 export default function SaleDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -18,13 +20,16 @@ export default function SaleDetailPage() {
   const [showReceiptOptions, setShowReceiptOptions] = useState(false);
   const [receiptError, setReceiptError] = useState<string | null>(null);
 
+  const isQuotation = sale?.status === "quotation";
+  const [cancellingQuotation, setCancellingQuotation] = useState(false);
+
   function receiptOptionsFor(sale: Sale): ModalOption[] {
     return [
       {
         key: "a4",
         icon: <FileText size={17} className="text-gray-700" />,
-        title: "A4 Invoice (PDF)",
-        subtitle: "Full-page printable invoice",
+        title: sale.status === "quotation" ? "A4 Quotation (PDF)" : "A4 Invoice (PDF)",
+        subtitle: sale.status === "quotation" ? "Full-page printable quote" : "Full-page printable invoice",
         onClick: () => downloadA4Pdf(sale),
       },
       {
@@ -50,6 +55,27 @@ export default function SaleDetailPage() {
         },
       },
     ];
+  }
+
+  // Reopens the quotation in POS with everything filled in — adjust it
+  // there, then re-save it or check out to make it the real sale.
+  function openInPos() {
+    if (!sale) return;
+    if (hasDraftInProgress() && !confirm("POS has a sale in progress. Replace it with this quotation?")) return;
+    navigate(`/pos?quotation=${sale.id}`);
+  }
+
+  async function handleCancelQuotation() {
+    if (!sale) return;
+    if (!confirm(`Cancel quotation ${sale.invoice}? This can't be undone.`)) return;
+    setCancellingQuotation(true);
+    try {
+      await api.delete(`/sales/${sale.id}/quotation`);
+      navigate("/quotations");
+    } catch (err) {
+      setError(err instanceof ApiRequestError ? err.message : "Failed to cancel this quotation");
+      setCancellingQuotation(false);
+    }
   }
 
   useEffect(() => {
@@ -97,24 +123,53 @@ export default function SaleDetailPage() {
           <PageHeader
             title={sale.invoice}
             subtitle={`${sale.date.slice(0, 16).replace("T", " ")} · ${sale.sale_type === "online" ? "Online" : "In-Store"}${
-              sale.is_voided ? " · Voided" : ""
-            }`}
+              isQuotation ? " · Quotation" : ""
+            }${sale.is_voided ? " · Voided" : ""}`}
             action={
-              <Button
-                variant="primary"
-                onClick={openReceiptOptions}
-                className="inline-flex items-center gap-1.5"
-                title="Get receipt (Ctrl/Cmd+Shift+D)"
-              >
-                <Printer size={14} />
-                Get Receipt
-              </Button>
+              <div className="flex items-center gap-2">
+                {isQuotation && (
+                  <Button
+                    variant="danger"
+                    onClick={handleCancelQuotation}
+                    disabled={cancellingQuotation}
+                    className="inline-flex items-center gap-1.5"
+                  >
+                    <XCircle size={14} />
+                    {cancellingQuotation ? "Cancelling..." : "Cancel"}
+                  </Button>
+                )}
+                {isQuotation && (
+                  <Button variant="primary" onClick={openInPos} className="inline-flex items-center gap-1.5">
+                    <ShoppingCart size={14} />
+                    Edit / Convert to Sale
+                  </Button>
+                )}
+                <Button
+                  variant={isQuotation ? "default" : "primary"}
+                  onClick={openReceiptOptions}
+                  className="inline-flex items-center gap-1.5"
+                  title="Get receipt (Ctrl/Cmd+Shift+D)"
+                >
+                  <Printer size={14} />
+                  {isQuotation ? "Get Quotation" : "Get Receipt"}
+                </Button>
+              </div>
             }
           />
 
+          {isQuotation && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 text-sm text-amber-800">
+              This is a quotation, not a sale yet — nothing has been charged and no stock has been reserved.
+              {sale.quotation_valid_until && (
+                <> Valid until {sale.quotation_valid_until.slice(0, 16).replace("T", " ")}.</>
+              )}{" "}
+              Need changes, or the customer confirmed? Use <strong>Edit / Convert to Sale</strong> — it reopens in POS with everything filled in.
+            </div>
+          )}
+
           {showReceiptOptions && (
             <ReceiptOptionsModal
-              heading="Get receipt"
+              heading={isQuotation ? "Get quotation" : "Get receipt"}
               subtitle={sale.invoice}
               options={receiptOptionsFor(sale)}
               error={receiptError}
@@ -126,11 +181,11 @@ export default function SaleDetailPage() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
               <div>
                 <p className="text-xs text-gray-400">Status</p>
-                <p className="text-gray-900 font-medium capitalize">{sale.payment_status}</p>
+                <p className="text-gray-900 font-medium capitalize">{isQuotation ? "Quotation" : sale.payment_status}</p>
               </div>
               <div>
                 <p className="text-xs text-gray-400">Payment</p>
-                <p className="text-gray-900 font-medium capitalize">{sale.payment_method?.replace("_", " ") ?? "—"}</p>
+                <p className="text-gray-900 font-medium capitalize">{isQuotation ? "Not yet paid" : sale.payment_method?.replace("_", " ") ?? "—"}</p>
               </div>
               <div>
                 <p className="text-xs text-gray-400">Bill to</p>
@@ -197,6 +252,7 @@ export default function SaleDetailPage() {
             {sale.discount > 0 && <span>Discount: -Rs. {sale.discount.toLocaleString()}</span>}
             <span className="font-semibold text-gray-900">Total: Rs. {sale.total.toLocaleString()}</span>
           </div>
+          <DeliveryChargeSummary sale={sale} className="justify-end mt-2" />
         </>
       ) : (
         !error && <p className="text-sm text-gray-400 flex items-center gap-2"><Receipt size={14} /> Invoice not found.</p>

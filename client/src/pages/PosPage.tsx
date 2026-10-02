@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, KeyboardEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Trash2,
   ShoppingCart,
@@ -19,16 +20,30 @@ import {
   Edit2,
   Plus,
   Minus,
+  FileText,
+  Printer,
+  Receipt,
+  MessageCircle,
 } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
-import { InventoryUnit, Customer, SaleType, CustomerAddress, Coupon, CustomerGender } from "../lib/types";
+import { InventoryUnit, Customer, SaleType, CustomerAddress, Coupon, CustomerGender, Sale } from "../lib/types";
 import { createProductSearchIndex, searchProductUnits } from "../lib/productSearch";
 import { Input, Label, FormGroup, ErrorText, SuccessText, Button, Dropdown, HelpHint, RefLink } from "../components/ui";
 import { CityPicker } from "../components/CityPicker";
 import { useAuth } from "../context/AuthContext";
-import { DELIVERY_PARTNERS, DeliveryPartner, calculateDeliveryFee, calculateCodAmount } from "../lib/delivery";
+import {
+  DeliveryPartner,
+  DeliveryPaidBy,
+  DELIVERY_PAID_BY_OPTIONS,
+  useDeliveryPartners,
+  partnerLabel,
+  calculateDeliveryFee,
+  calculateCodAmount,
+} from "../lib/delivery";
 import { saveDraftSale, loadDraftSale, clearDraftSale, PosDraftSale } from "../lib/posDraft";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
+import { downloadA4Pdf, downloadThermalPdf, sendWhatsAppBill } from "../lib/receipts";
+import ReceiptOptionsModal, { ModalOption } from "../components/ReceiptOptionsModal";
 
 // A cart line represents one or more physical units that share the same
 // product + color + size — merged into one row with a quantity, rather
@@ -46,6 +61,7 @@ function cartLineKey(u: InventoryUnit): string {
 export default function PosPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [saleType, setSaleType] = useState<SaleType>("in_store");
   const [cart, setCart] = useState<CartLine[]>([]);
@@ -75,6 +91,11 @@ export default function PosPage() {
   const [deliveryPartner, setDeliveryPartner] = useState<DeliveryPartner | "">("");
   const [packageWeight, setPackageWeight] = useState("");
   const [isFreeDelivery, setIsFreeDelivery] = useState(false);
+  // On-demand partners (Uber, PickMe Flash...): the fare is typed in
+  // here rather than worked out from a weight tariff, and the person at
+  // checkout says who bears it.
+  const [deliveryFare, setDeliveryFare] = useState("");
+  const [deliveryPaidBy, setDeliveryPaidBy] = useState<DeliveryPaidBy>("customer");
   const [advancePaid, setAdvancePaid] = useState("");
   // How the upfront amount (if any) was actually collected — needed to
   // correctly track cash-on-hand vs bank balance, same as an in-store sale.
@@ -161,6 +182,23 @@ export default function PosPage() {
   const [checkoutSuccess, setCheckoutSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // "Save as Quotation" — a price-confirmation bill sent to the
+  // customer before anything is actually paid for; see beginQuotation.
+  const [showQuotationModal, setShowQuotationModal] = useState(false);
+  const [quotationValidDays, setQuotationValidDays] = useState("7");
+  const [quotationError, setQuotationError] = useState<string | null>(null);
+  const [savingQuotation, setSavingQuotation] = useState(false);
+  // Set once a quotation has been saved — drives the "Get quotation"
+  // print/WhatsApp options, same pattern as Sale Detail's receipt modal.
+  const [savedQuotation, setSavedQuotation] = useState<Sale | null>(null);
+  const [quotationReceiptError, setQuotationReceiptError] = useState<string | null>(null);
+  // Set while a saved quotation is reopened here (from the Quotations
+  // page): everything below then edits/finalizes THAT quotation —
+  // "Quotation" updates it in place, "Checkout" turns it into the real
+  // sale — rather than creating a new, unrelated record.
+  const [editingQuotation, setEditingQuotation] = useState<{ id: number; invoice: string } | null>(null);
+  const [quotationLoadError, setQuotationLoadError] = useState<string | null>(null);
+
   const subtotal = cart.reduce((sum, line) => sum + line.unit_price * line.units.length, 0);
   const totalCartUnits = cart.reduce((sum, line) => sum + line.units.length, 0);
 
@@ -181,7 +219,19 @@ export default function PosPage() {
   const changeDue = paymentMethod === "cash" && paidAmount > remainingAfterCredit ? paidAmount - remainingAfterCredit : 0;
   const cashPresets = [500, 1000, 2000, 5000, 10000, 20000];
 
-  const deliveryFee = calculateDeliveryFee(parseFloat(packageWeight) || 0, isFreeDelivery);
+  const { partners, activePartners } = useDeliveryPartners();
+  const selectedPartner = partners.find((p) => p.code === deliveryPartner);
+  const isOnDemand = selectedPartner?.kind === "on_demand";
+  const fareAmount = parseFloat(deliveryFare) || 0;
+  // 'Free — we pay' waives it for the customer (we bear the fare); the
+  // other two both charge it to them — 'we pay now' because we've
+  // already paid the rider on their behalf, so it goes on their bill.
+  const deliveryIsFree = isOnDemand ? deliveryPaidBy === "shop" : isFreeDelivery;
+  const deliveryFee = isOnDemand
+    ? deliveryIsFree
+      ? 0
+      : fareAmount
+    : calculateDeliveryFee(parseFloat(packageWeight) || 0, isFreeDelivery, selectedPartner);
   const advanceAmount = parseFloat(advancePaid) || 0;
   // On a credit online order, the product price is tracked as balance
   // due (not collected at all today) — only the delivery fee is ever
@@ -248,6 +298,12 @@ export default function PosPage() {
   // have passed and another sale could have taken one of them; anything
   // no longer available is struck through rather than silently dropped.
   useEffect(() => {
+    const quotationParam = searchParams.get("quotation");
+    if (quotationParam) {
+      loadQuotationIntoCart(quotationParam);
+      return;
+    }
+
     const draft = loadDraftSale();
     if (!draft) return;
 
@@ -260,6 +316,8 @@ export default function PosPage() {
     setDeliveryPartner(draft.deliveryPartner as DeliveryPartner | "");
     setPackageWeight(draft.packageWeight);
     setIsFreeDelivery(draft.isFreeDelivery);
+    setDeliveryFare(draft.deliveryFare ?? "");
+    setDeliveryPaidBy(draft.deliveryPaidBy ?? "customer");
     setAdvancePaid(draft.advancePaid);
     setAdvancePaymentMethod(draft.advancePaymentMethod);
     setDiscountType(draft.discountType);
@@ -268,6 +326,7 @@ export default function PosPage() {
     setAppliedCoupon(draft.appliedCoupon);
     setUseStoreCredit(draft.useStoreCredit);
     setPaymentMethod(draft.paymentMethod);
+    setEditingQuotation(draft.quotation ?? null);
 
     if (draft.cart.length > 0) {
       const allIds = draft.cart.flatMap((line) => line.units.map((u) => u.id));
@@ -299,6 +358,8 @@ export default function PosPage() {
       deliveryPartner,
       packageWeight,
       isFreeDelivery,
+      deliveryFare,
+      deliveryPaidBy,
       advancePaid,
       advancePaymentMethod,
       discountType,
@@ -307,6 +368,7 @@ export default function PosPage() {
       appliedCoupon,
       useStoreCredit,
       paymentMethod,
+      quotation: editingQuotation,
     };
     saveDraftSale(draft);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -320,6 +382,8 @@ export default function PosPage() {
     deliveryPartner,
     packageWeight,
     isFreeDelivery,
+    deliveryFare,
+    deliveryPaidBy,
     advancePaid,
     advancePaymentMethod,
     discountType,
@@ -328,7 +392,108 @@ export default function PosPage() {
     appliedCoupon,
     useStoreCredit,
     paymentMethod,
+    editingQuotation,
   ]);
+
+  // Reopen a saved quotation here (arrived from the Quotations page via
+  // ?quotation=ID) so it can be adjusted and either re-saved or checked
+  // out as a real sale. Items keep the price they were quoted at; each
+  // unit is re-checked against real stock, since nothing was reserved
+  // when the quote was saved and another sale may have taken one.
+  async function loadQuotationIntoCart(idParam: string) {
+    setSearchParams({}, { replace: true });
+    setQuotationLoadError(null);
+    try {
+      const q = await api.get<Sale>(`/sales/${idParam}`);
+      if (q.status !== "quotation") {
+        setQuotationLoadError(`${q.invoice} isn't an open quotation anymore.`);
+        return;
+      }
+
+      const lines = new Map<string, CartLine>();
+      for (const item of q.items ?? []) {
+        if (!item.inventory_id) continue;
+        const unit: InventoryUnit = {
+          id: item.inventory_id,
+          product_id: item.product_id ?? 0,
+          size: item.size ?? null,
+          color: item.color ?? null,
+          sku: item.sku ?? "",
+          barcode: item.barcode ?? null,
+          selling_price: item.original_selling_price ?? null,
+          status: "available",
+          created_at: "",
+          product_title: item.product_title,
+          brand: item.brand,
+        };
+        const key = cartLineKey(unit);
+        const existing = lines.get(key);
+        if (existing) existing.units.push(unit);
+        else lines.set(key, { units: [unit], unit_price: item.unit_price });
+      }
+      const cartLines = Array.from(lines.values());
+
+      setSaleType(q.sale_type);
+      setCart(cartLines);
+      setEditingQuotation({ id: q.id, invoice: q.invoice });
+      setDiscountType("fixed");
+      setDiscountValue(String(q.manual_discount));
+
+      if (q.customer_id) {
+        api
+          .get<Customer>(`/customers/${q.customer_id}`)
+          .then((c) => {
+            setSelectedCustomer(c);
+            setCustomerQuery("");
+          })
+          .catch(() => {});
+      }
+
+      if (q.coupon_code) {
+        setCouponCode(q.coupon_code);
+        try {
+          const coupon = await api.get<Coupon>(`/coupons/validate/${encodeURIComponent(q.coupon_code)}`);
+          setAppliedCoupon(coupon);
+        } catch {
+          // The quoted price still has to hold — keep the coupon's
+          // discount as a plain manual discount instead of silently
+          // raising the customer's total.
+          setDiscountValue(String(q.manual_discount + q.coupon_discount));
+          setCouponCode("");
+          setCouponError(`Coupon ${q.coupon_code} is no longer valid — its Rs. ${q.coupon_discount.toLocaleString()} discount was kept as a manual discount to match the quoted price.`);
+        }
+      }
+
+      const ids = cartLines.flatMap((line) => line.units.map((u) => u.id));
+      if (ids.length > 0) {
+        api
+          .post<{ id: number; status: string }[]>("/inventory/check-status", { ids })
+          .then((results) => {
+            const stale = new Set(results.filter((r) => r.status !== "available").map((r) => r.id));
+            if (stale.size > 0) setStaleUnitIds(stale);
+          })
+          .catch(() => {});
+      }
+    } catch (err) {
+      setQuotationLoadError(err instanceof ApiRequestError ? err.message : "Failed to open this quotation");
+    }
+  }
+
+  function exitQuotationEdit() {
+    if (!confirm("Stop editing this quotation? The cart will be cleared — the quotation stays as it was last saved.")) return;
+    setEditingQuotation(null);
+    setCart([]);
+    setStaleUnitIds(new Set());
+    setSelectedCustomer(null);
+    setCustomerQuery("");
+    setDiscountType("fixed");
+    setDiscountValue("0");
+    setCouponCode("");
+    setAppliedCoupon(null);
+    setCouponError(null);
+    setAmountPaid("");
+    setAllAvailableUnits(null);
+  }
 
   async function ensureUnitsLoaded() {
     if (allAvailableUnits) return allAvailableUnits;
@@ -680,6 +845,10 @@ export default function PosPage() {
       setCheckoutError("Select a delivery partner for this online order.");
       return;
     }
+    if (saleType === "online" && isOnDemand && fareAmount <= 0) {
+      setCheckoutError(`Enter the delivery fare for ${selectedPartner?.name ?? "this partner"}.`);
+      return;
+    }
     if (isCreditSale) {
       const creditPaid = parseFloat(creditAmountPaid) || 0;
       if (creditPaid > total) {
@@ -757,17 +926,20 @@ export default function PosPage() {
         keep_cash_overpayment_as_credit: keepOverpaymentAsCredit === true,
         sale_type: saleType,
         is_credit_order: isCreditSale,
+        quotation_id: editingQuotation?.id,
         ...(saleType === "online"
           ? {
               delivery_partner: deliveryPartner,
               package_weight_kg: parseFloat(packageWeight) || undefined,
-              is_free_delivery: isFreeDelivery,
+              is_free_delivery: deliveryIsFree,
+              ...(isOnDemand ? { delivery_fare: fareAmount, delivery_paid_by: deliveryPaidBy } : {}),
             }
           : {}),
       });
 
       setCheckoutSuccess(`Sale complete — ${sale.invoice}${saleType === "online" ? ". A pending delivery was created automatically." : "."}`);
       clearDraftSale();
+      setEditingQuotation(null);
       setStaleUnitIds(new Set());
       setCart([]);
       setSelectedCustomer(null);
@@ -788,6 +960,8 @@ export default function PosPage() {
       setDeliveryPartner("");
       setPackageWeight("");
       setIsFreeDelivery(false);
+      setDeliveryFare("");
+      setDeliveryPaidBy("customer");
       setAdvancePaid("");
       setAdvancePaymentMethod("cash");
     } catch (err) {
@@ -795,6 +969,113 @@ export default function PosPage() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  // "Save as Quotation" — a price-confirmation bill for the customer to
+  // approve before anything is actually paid for. No delivery-partner or
+  // payment details are collected here (nothing's being shipped or
+  // charged yet) — just the items, customer, and discount/coupon already
+  // on the cart, locked in at today's price for however many days this
+  // quote stays valid.
+  function beginQuotation() {
+    setQuotationError(null);
+    if (cart.length === 0) {
+      setCheckoutError("Cart is empty");
+      return;
+    }
+    if (cart.some((line) => line.units.some((u) => staleUnitIds.has(u.id)))) {
+      setCheckoutError("One or more items in the cart are no longer in stock — remove them before saving a quotation.");
+      return;
+    }
+    setQuotationValidDays("7");
+    setShowQuotationModal(true);
+  }
+
+  async function handleSaveQuotation() {
+    setQuotationError(null);
+    const validDays = parseInt(quotationValidDays, 10);
+    if (!validDays || validDays <= 0) {
+      setQuotationError("Enter how many days this quote should stay valid for.");
+      return;
+    }
+
+    setSavingQuotation(true);
+    try {
+      const payload = {
+        customer_id: selectedCustomer?.id,
+        salesperson: user?.name ?? user?.username,
+        items: cart.flatMap((line) => line.units.map((u) => ({ inventory_id: u.id, unit_price: line.unit_price }))),
+        manual_discount_type: discountType,
+        manual_discount_value: parseFloat(discountValue) || 0,
+        coupon_code: appliedCoupon?.code,
+        sale_type: saleType,
+        valid_days: validDays,
+      };
+      // Editing a reopened quotation updates that same record (same
+      // number the customer may already have); otherwise it's a
+      // brand-new one.
+      const created = editingQuotation
+        ? await api.put<{ id: number }>(`/sales/quotations/${editingQuotation.id}`, payload)
+        : await api.post<{ id: number }>("/sales/quotations", payload);
+
+      // Fetch the fully joined record (items, customer phone, etc.) so
+      // the receipt/WhatsApp options below have everything they need —
+      // same pattern Sale History's own "Get receipt" uses.
+      const full = await api.get<Sale>(`/sales/${created.id}`);
+
+      setShowQuotationModal(false);
+      setSavedQuotation(full);
+      setEditingQuotation(null);
+      clearDraftSale();
+      setStaleUnitIds(new Set());
+      setCart([]);
+      setSelectedCustomer(null);
+      setCustomerQuery("");
+      setDiscountType("fixed");
+      setDiscountValue("0");
+      setCouponCode("");
+      setAppliedCoupon(null);
+      setCouponError(null);
+      setAllAvailableUnits(null);
+    } catch (err) {
+      setQuotationError(err instanceof ApiRequestError ? err.message : "Failed to save this quotation");
+    } finally {
+      setSavingQuotation(false);
+    }
+  }
+
+  function quotationReceiptOptions(sale: Sale): ModalOption[] {
+    return [
+      {
+        key: "a4",
+        icon: <FileText size={17} className="text-gray-700" />,
+        title: "A4 Quotation (PDF)",
+        subtitle: "Full-page printable quote",
+        onClick: () => downloadA4Pdf(sale),
+      },
+      {
+        key: "thermal",
+        icon: <Receipt size={17} className="text-gray-700" />,
+        title: "80mm Receipt (PDF)",
+        subtitle: "For thermal till printers",
+        onClick: () => downloadThermalPdf(sale),
+      },
+      {
+        key: "whatsapp",
+        icon: <MessageCircle size={17} className="text-green-600" />,
+        iconBgClass: "bg-green-50",
+        title: "Send via WhatsApp",
+        subtitle: "Text summary to customer's phone",
+        onClick: () => {
+          if (!sale.customer_phone) {
+            setQuotationReceiptError("This customer has no saved phone number — add one on the Customers page first.");
+            return;
+          }
+          setQuotationReceiptError(null);
+          sendWhatsAppBill(sale, sale.customer_phone);
+        },
+      },
+    ];
   }
 
   return (
@@ -857,6 +1138,27 @@ export default function PosPage() {
                 </button>
               </div>
             </div>
+
+            {quotationLoadError && (
+              <div className="mt-3">
+                <ErrorText>{quotationLoadError}</ErrorText>
+              </div>
+            )}
+
+            {editingQuotation && (
+              <div className="mt-3 flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-xl px-3.5 py-2.5">
+                <p className="text-xs text-amber-800 min-w-0">
+                  <strong>Editing quotation {editingQuotation.invoice}</strong> — add or adjust items, then{" "}
+                  <strong>Update quote</strong> to save the changes, or <strong>Checkout</strong> to turn it into the real sale.
+                </p>
+                <button
+                  onClick={exitQuotationEdit}
+                  className="text-xs text-amber-700 hover:text-amber-900 underline flex-shrink-0"
+                >
+                  Stop editing
+                </button>
+              </div>
+            )}
 
             <div className="mt-3 relative" ref={productBoxRef}>
               <div className="relative">
@@ -1210,22 +1512,53 @@ export default function PosPage() {
                           value={deliveryPartner}
                           onChange={(v) => setDeliveryPartner(v as DeliveryPartner)}
                           placeholder="— Select —"
-                          options={DELIVERY_PARTNERS.map((p) => ({ value: p.value, label: p.label }))}
+                          options={activePartners.map((p) => ({ value: p.code, label: p.name }))}
                         />
                       </FormGroup>
 
-                      <FormGroup>
-                        <Label>Package weight (kg)</Label>
-                        <Input
-                          type="number"
-                          min="0"
-                          step="0.1"
-                          value={packageWeight}
-                          onChange={(e) => setPackageWeight(e.target.value)}
-                          disabled={isFreeDelivery}
-                        />
-                      </FormGroup>
+                      {isOnDemand ? (
+                        <FormGroup>
+                          <Label>
+                            Delivery fare (Rs.)
+                            <HelpHint text={`${selectedPartner?.name} has no tariff — enter what the ride/delivery actually costs.`} />
+                          </Label>
+                          <Input type="number" min="0" value={deliveryFare} onChange={(e) => setDeliveryFare(e.target.value)} placeholder="0" />
+                        </FormGroup>
+                      ) : (
+                        <FormGroup>
+                          <Label>Package weight (kg)</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.1"
+                            value={packageWeight}
+                            onChange={(e) => setPackageWeight(e.target.value)}
+                            disabled={isFreeDelivery}
+                          />
+                        </FormGroup>
+                      )}
                     </div>
+
+                    {isOnDemand && (
+                      <FormGroup>
+                        <Label>Who pays for the delivery?</Label>
+                        <div className="grid grid-cols-1 gap-1.5">
+                          {DELIVERY_PAID_BY_OPTIONS.map((opt) => (
+                            <button
+                              key={opt.value}
+                              type="button"
+                              onClick={() => setDeliveryPaidBy(opt.value)}
+                              className={`text-left rounded-lg border px-3 py-2 transition ${
+                                deliveryPaidBy === opt.value ? "border-black bg-black text-white" : "border-gray-300 hover:border-gray-400"
+                              }`}
+                            >
+                              <span className="text-xs font-medium block">{opt.label}</span>
+                              <span className={`text-[11px] ${deliveryPaidBy === opt.value ? "text-gray-300" : "text-gray-500"}`}>{opt.hint}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </FormGroup>
+                    )}
                   </div>
                 )}
               </div>
@@ -1262,10 +1595,12 @@ export default function PosPage() {
 
                 {saleType === "online" ? (
                   <>
-                    <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                      <input type="checkbox" checked={isFreeDelivery} onChange={(e) => setIsFreeDelivery(e.target.checked)} className="rounded" />
-                      Free delivery (customer still pays for the order itself)
-                    </label>
+                    {!isOnDemand && (
+                      <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                        <input type="checkbox" checked={isFreeDelivery} onChange={(e) => setIsFreeDelivery(e.target.checked)} className="rounded" />
+                        Free delivery (customer still pays for the order itself)
+                      </label>
+                    )}
 
                     {isAdmin && (
                       <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
@@ -1341,8 +1676,12 @@ export default function PosPage() {
                         <span>Rs. {(total + deliveryFee).toLocaleString()}</span>
                       </div>
                       <div className="flex justify-between text-xs text-gray-600">
-                        <span>Delivery fee (450 first kg + 100/extra kg)</span>
-                        <span>{isFreeDelivery ? "Waived" : `Rs. ${deliveryFee.toLocaleString()}`}</span>
+                        <span>
+                          {isOnDemand
+                            ? `Delivery fare (${selectedPartner?.name}${deliveryPaidBy === "shop_upfront" ? " — we paid upfront" : ""})`
+                            : `Delivery fee (${(selectedPartner?.base_fee ?? 450).toLocaleString()} first kg + ${(selectedPartner?.extra_kg_fee ?? 100).toLocaleString()}/extra kg)`}
+                        </span>
+                        <span>{deliveryIsFree ? "Waived" : `Rs. ${deliveryFee.toLocaleString()}`}</span>
                       </div>
                       {isCreditSale ? (
                         <div className="flex justify-between text-xs text-amber-700">
@@ -1516,8 +1855,17 @@ export default function PosPage() {
                 {checkoutSuccess && <SuccessText>{checkoutSuccess}</SuccessText>}
 
                 <div className="flex gap-2">
-                  <button onClick={clearCart} className="flex-1 px-4 py-2 border border-gray-300 rounded-xl hover:bg-gray-50 transition text-sm font-medium">
+                  <button onClick={clearCart} className="px-4 py-2 border border-gray-300 rounded-xl hover:bg-gray-50 transition text-sm font-medium">
                     Clear
+                  </button>
+                  <button
+                    onClick={beginQuotation}
+                    disabled={cart.length === 0}
+                    title="Save as a price quotation to send the customer before they pay"
+                    className="flex-1 px-4 py-2 border border-gray-300 rounded-xl hover:bg-gray-50 transition text-sm font-medium disabled:opacity-50 inline-flex items-center justify-center gap-1.5"
+                  >
+                    <FileText size={14} />
+                    {editingQuotation ? "Update quote" : "Quotation"}
                   </button>
                   <button
                     onClick={beginCheckout}
@@ -1902,7 +2250,7 @@ export default function PosPage() {
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-500">Delivery partner</span>
                     <span className="text-gray-900 font-medium">
-                      {DELIVERY_PARTNERS.find((p) => p.value === deliveryPartner)?.label ?? "—"}
+                      {partnerLabel(deliveryPartner)}
                     </span>
                   </div>
                 )}
@@ -1945,7 +2293,7 @@ export default function PosPage() {
                   <>
                     <div className="flex justify-between text-sm text-gray-500">
                       <span>Delivery fee</span>
-                      <span>{isFreeDelivery ? "Free" : `Rs. ${deliveryFee.toLocaleString()}`}</span>
+                      <span>{deliveryIsFree ? "Free" : `Rs. ${deliveryFee.toLocaleString()}`}</span>
                     </div>
                     <div className="flex justify-between text-sm font-semibold">
                       <span>COD to collect</span>
@@ -2038,6 +2386,78 @@ export default function PosPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {showQuotationModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl">
+            <div className="p-5 border-b border-gray-100">
+              <h2 className="text-base font-semibold text-gray-900">
+                {editingQuotation ? `Update quotation ${editingQuotation.invoice}` : "Save as quotation"}
+                <HelpHint text="Saves this cart as a price-confirmation bill, with nothing charged or reserved yet. Print or send it to the customer — once they confirm, pull it up again and convert it to a real sale to collect payment." />
+              </h2>
+              <p className="text-xs text-gray-400 mt-1">
+                {totalCartUnits} item{totalCartUnits !== 1 ? "s" : ""} · Rs. {total.toLocaleString()}
+                {selectedCustomer ? ` · ${selectedCustomer.name}` : " · Walk-in"}
+              </p>
+            </div>
+            <div className="p-5">
+              <FormGroup>
+                <Label>Valid for (days)</Label>
+                <div className="flex gap-1.5 flex-wrap mb-1.5">
+                  {[3, 7, 14, 30].map((d) => (
+                    <button
+                      key={d}
+                      onClick={() => setQuotationValidDays(String(d))}
+                      className={`px-3 py-1 rounded-lg text-xs font-medium border transition ${
+                        quotationValidDays === String(d) ? "bg-black text-white border-black" : "border-gray-300 text-gray-600 hover:border-gray-400"
+                      }`}
+                    >
+                      {d} days
+                    </button>
+                  ))}
+                </div>
+                <Input
+                  type="number"
+                  min={1}
+                  value={quotationValidDays}
+                  onChange={(e) => setQuotationValidDays(e.target.value)}
+                />
+              </FormGroup>
+
+              {quotationError && <ErrorText>{quotationError}</ErrorText>}
+
+              <div className="flex gap-2 mt-3">
+                <button
+                  onClick={() => setShowQuotationModal(false)}
+                  className="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-medium hover:bg-gray-50 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveQuotation}
+                  disabled={savingQuotation}
+                  className="flex-1 bg-black text-white rounded-xl py-2.5 text-sm font-medium hover:bg-gray-800 transition disabled:opacity-50"
+                >
+                  {savingQuotation ? "Saving..." : editingQuotation ? "Update quotation" : "Save quotation"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {savedQuotation && (
+        <ReceiptOptionsModal
+          heading="Quotation saved"
+          subtitle={savedQuotation.invoice}
+          options={quotationReceiptOptions(savedQuotation)}
+          error={quotationReceiptError}
+          onClose={() => {
+            setSavedQuotation(null);
+            setQuotationReceiptError(null);
+          }}
+        />
       )}
     </div>
   );

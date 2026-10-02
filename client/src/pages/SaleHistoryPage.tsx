@@ -9,6 +9,7 @@ import { useSortableData } from "../lib/useSortableData";
 import { useCopyToClipboard } from "../lib/useCopyToClipboard";
 import { PageHeader, Card, Table, Th, Td, Badge, SortHeader, paymentStatusTone, EmptyState, ErrorText, DateRangePicker, Button, HelpHint, RowCard, RowCardStats, RowCardStat } from "../components/ui";
 import ReceiptOptionsModal, { ModalOption } from "../components/ReceiptOptionsModal";
+import DeliveryChargeSummary from "../components/DeliveryChargeSummary";
 import { useAuth } from "../context/AuthContext";
 
 type HistoryTab = "today" | "week" | "month" | "cash" | "credit_cod" | "voided";
@@ -441,6 +442,7 @@ export default function SaleHistoryPage() {
             {sale.coupon_discount > 0 && ` (coupon ${sale.coupon_code}: Rs. ${sale.coupon_discount.toLocaleString()})`}
           </p>
         )}
+        <DeliveryChargeSummary sale={sale} className="mt-2" />
         {!sale.is_voided && <p className="text-xs text-gray-400 mt-1">Loyalty points earned: {sale.loyalty_points_earned}</p>}
         {sale.is_voided && (
           <p className="text-xs text-red-500 mt-2">
@@ -475,7 +477,7 @@ export default function SaleHistoryPage() {
         {sale.invoice.startsWith("OCD") &&
           !sale.is_voided &&
           sale.payment_status !== "paid" &&
-          (!sale.delivery_partner || sale.delivery_partner === "D2D") && (
+          (!sale.delivery_partner || sale.delivery_partner === "D2D" || sale.delivery_partner_kind === "on_demand") && (
             <button
               onClick={() => {
                 setOpenMenuId(null);
@@ -492,7 +494,7 @@ export default function SaleHistoryPage() {
         {sale.invoice.startsWith("OCD") &&
           !sale.is_voided &&
           sale.payment_status === "paid" &&
-          (!sale.delivery_partner || sale.delivery_partner === "D2D") && (
+          (!sale.delivery_partner || sale.delivery_partner === "D2D" || sale.delivery_partner_kind === "on_demand") && (
             <button
               onClick={() => handleUndoCod(sale)}
               disabled={undoingId === sale.id}

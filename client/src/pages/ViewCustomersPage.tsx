@@ -14,7 +14,12 @@ function whatsappLink(phone: string): string {
   return `https://wa.me/94${digitsOnly}`;
 }
 
-function paymentReceiptMessage(name: string, amount: number, remainingBalance: number): string {
+function paymentReceiptMessage(name: string, amount: number, remainingBalance: number, fromStoreCredit = false): string {
+  if (fromStoreCredit) {
+    return remainingBalance <= 0
+      ? `Hi ${name}, we've used Rs. ${amount.toLocaleString()} of your M&M Clothing store credit toward your account — it's now fully settled. Thank you so much, and see you again soon.`
+      : `Hi ${name}, we've used Rs. ${amount.toLocaleString()} of your M&M Clothing store credit toward your account. Your balance now stands at Rs. ${remainingBalance.toLocaleString()}. Thank you!`;
+  }
   if (remainingBalance <= 0) {
     return `Hi ${name}, we've received your payment of Rs. ${amount.toLocaleString()} — your account with M&M Clothing is now fully settled. Thank you so much for your trust, and see you again soon.`;
   }
@@ -160,6 +165,9 @@ export default function ViewCustomersPage() {
   const [paymentStep, setPaymentStep] = useState<1 | 2>(1);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [paymentAmount, setPaymentAmount] = useState("");
+  // Under "Other": settle out of the customer's store credit instead of
+  // taking money — see the payment endpoint.
+  const [deductFromCredit, setDeductFromCredit] = useState(false);
   const [chequeNumber, setChequeNumber] = useState("");
   const [chequeBankName, setChequeBankName] = useState("");
   const [chequeBranch, setChequeBranch] = useState("");
@@ -298,6 +306,7 @@ export default function ViewCustomersPage() {
     setPaymentStep(1);
     setPaymentMethod("cash");
     setPaymentAmount("");
+    setDeductFromCredit(false);
     setPaymentNotes("");
     setPaymentPreview(null);
     setPaymentError(null);
@@ -312,6 +321,7 @@ export default function ViewCustomersPage() {
 
   function chooseMethod(m: PaymentMethod) {
     setPaymentMethod(m);
+    setDeductFromCredit(false);
     setPaymentStep(2);
   }
 
@@ -382,6 +392,11 @@ export default function ViewCustomersPage() {
       setPaymentError(paymentMethod === "cheque" ? "Add at least one cheque" : "Enter an amount greater than 0");
       return;
     }
+    const usingCredit = paymentMethod === "other" && deductFromCredit;
+    if (usingCredit && amount > payingCustomer.store_credit_balance) {
+      setPaymentError(`Only Rs. ${payingCustomer.store_credit_balance.toLocaleString()} of store credit is available.`);
+      return;
+    }
 
     setPaymentSubmitting(true);
     try {
@@ -391,6 +406,7 @@ export default function ViewCustomersPage() {
           amount: paymentMethod === "cheque" ? undefined : amount,
           method: paymentMethod,
           notes: paymentNotes.trim() || undefined,
+          deduct_from_store_credit: paymentMethod === "other" && deductFromCredit ? true : undefined,
           cheques:
             paymentMethod === "cheque"
               ? chequeList.map((c) => ({
@@ -408,7 +424,7 @@ export default function ViewCustomersPage() {
       );
 
       const remainingBalance = result.customer.balance_due;
-      const message = paymentReceiptMessage(payingCustomer.name, amount, remainingBalance);
+      const message = paymentReceiptMessage(payingCustomer.name, amount, remainingBalance, usingCredit);
       setReceiptAfterPayment({ name: payingCustomer.name, phone: payingCustomer.phone, message });
 
       setPayingCustomer(null);
@@ -1436,8 +1452,43 @@ export default function ViewCustomersPage() {
                   <div className="col-span-3 px-6 py-5 space-y-4 border-r border-gray-100 overflow-y-auto">
                     {paymentMethod !== "cheque" ? (
                       <>
+                        {paymentMethod === "other" && (
+                          <div
+                            className={`rounded-lg border px-3.5 py-3 ${
+                              payingCustomer.store_credit_balance > 0 ? "bg-blue-50 border-blue-200" : "bg-gray-50 border-gray-200"
+                            }`}
+                          >
+                            <label
+                              className={`flex items-center gap-2 text-sm ${
+                                payingCustomer.store_credit_balance > 0 ? "text-blue-900 cursor-pointer" : "text-gray-400 cursor-not-allowed"
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={deductFromCredit}
+                                disabled={payingCustomer.store_credit_balance <= 0}
+                                onChange={(e) => {
+                                  setDeductFromCredit(e.target.checked);
+                                  if (e.target.checked) {
+                                    // Start at the most this can settle — all the credit, or
+                                    // what they owe if that's less.
+                                    setPaymentAmount(String(Math.min(payingCustomer.store_credit_balance, payingCustomer.balance_due)));
+                                  }
+                                }}
+                                className="rounded"
+                              />
+                              Deduct from store credit
+                            </label>
+                            <p className={`text-xs mt-1 ${payingCustomer.store_credit_balance > 0 ? "text-blue-700" : "text-gray-400"}`}>
+                              {payingCustomer.store_credit_balance > 0
+                                ? `Rs. ${payingCustomer.store_credit_balance.toLocaleString()} store credit available — no money is taken; the credit is used up against what they owe.`
+                                : "This customer has no store credit available."}
+                            </p>
+                          </div>
+                        )}
+
                         <div>
-                          <Label>Amount received (Rs.)</Label>
+                          <Label>{paymentMethod === "other" && deductFromCredit ? "Amount to deduct from store credit (Rs.)" : "Amount received (Rs.)"}</Label>
                           <input
                             type="number"
                             min="0"
@@ -1629,7 +1680,7 @@ export default function ViewCustomersPage() {
                   onClick={handleRecordPayment}
                   disabled={paymentSubmitting}
                 >
-                  {paymentSubmitting ? "Recording..." : "Confirm payment"}
+                  {paymentSubmitting ? "Recording..." : paymentMethod === "other" && deductFromCredit ? "Deduct from store credit" : "Confirm payment"}
                 </Button>
               )}
             </div>

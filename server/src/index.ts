@@ -25,6 +25,9 @@ import { couponsRouter } from "./routes/coupons";
 import { auditLogRouter } from "./routes/auditLog";
 import { backupRouter } from "./routes/backup";
 import { giftVouchersRouter } from "./routes/giftVouchers";
+import { deliveryPartnersRouter } from "./routes/deliveryPartners";
+import { webhooksRouter } from "./routes/webhooks";
+import { startCourierSync } from "./lib/courierSync";
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -64,6 +67,10 @@ app.use("/api/coupons", couponsRouter);
 app.use("/api/audit-log", auditLogRouter);
 app.use("/api/backup", backupRouter);
 app.use("/api/gift-vouchers", giftVouchersRouter);
+app.use("/api/delivery-partners", deliveryPartnersRouter);
+// Called by outside services rather than logged-in staff, so each route
+// guards itself (a secret in its address) — see routes/webhooks.ts.
+app.use("/api/webhooks", webhooksRouter);
 
 // Must be registered last — Express error-handling middleware.
 app.use(errorHandler);
@@ -71,4 +78,5 @@ app.use(errorHandler);
 app.listen(PORT, HOST, () => {
   console.log(`M&M Clothing server running at http://localhost:${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/api/health`);
+  startCourierSync();
 });

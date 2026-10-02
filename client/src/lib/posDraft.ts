@@ -32,6 +32,8 @@ export interface PosDraftSale {
   deliveryPartner: string;
   packageWeight: string;
   isFreeDelivery: boolean;
+  deliveryFare?: string;
+  deliveryPaidBy?: "customer" | "shop" | "shop_upfront";
   advancePaid: string;
   advancePaymentMethod: "cash" | "card" | "bank_transfer";
   discountType: "percent" | "fixed";
@@ -40,6 +42,10 @@ export interface PosDraftSale {
   appliedCoupon: Coupon | null;
   useStoreCredit: boolean;
   paymentMethod: string;
+  // Set while a saved quotation is reopened for editing/checkout, so a
+  // refresh or navigating away and back doesn't silently turn it into
+  // an unrelated new sale (and leave the quotation open forever).
+  quotation?: { id: number; invoice: string } | null;
 }
 
 export function saveDraftSale(draft: PosDraftSale) {
@@ -75,4 +81,12 @@ export function clearDraftSale() {
   } catch {
     // nothing to do if this fails — worst case, a stale draft lingers
   }
+}
+
+// True when POS holds a cart with something in it — used before
+// reopening a quotation there, so it doesn't silently replace a sale
+// someone is in the middle of ringing up.
+export function hasDraftInProgress(): boolean {
+  const draft = loadDraftSale();
+  return !!draft && draft.cart.length > 0;
 }

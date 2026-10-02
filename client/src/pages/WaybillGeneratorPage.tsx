@@ -3,7 +3,7 @@ import { Printer, Download, User } from "lucide-react";
 import JsBarcode from "jsbarcode";
 import { WaybillLabel, WaybillLabelData } from "../components/WaybillLabel";
 import { generateWaybillLabelPdf } from "../lib/waybillLabelPdf";
-import { DELIVERY_PARTNERS } from "../lib/delivery";
+import { useDeliveryPartners, waybillShopCode } from "../lib/delivery";
 import { PageHeader, Card, Input, Label, FormGroup, ErrorText, Dropdown, TabToggle } from "../components/ui";
 import { CityPicker } from "../components/CityPicker";
 import { api } from "../lib/api";
@@ -32,7 +32,8 @@ export default function WaybillGeneratorPage() {
   // The shop code shown in the label's "[ ... ]" header — picked by
   // tapping directly on that part of the preview, rather than a separate
   // form field, since it's really just a property of the label itself.
-  const [shopCode, setShopCode] = useState(DELIVERY_PARTNERS.find((p) => p.value === "D2D")?.waybillCode ?? "MNM");
+  const { activePartners } = useDeliveryPartners();
+  const [shopCode, setShopCode] = useState(waybillShopCode("D2D"));
   const [shopCodePickerOpen, setShopCodePickerOpen] = useState(false);
   const [customShopCodeInput, setCustomShopCodeInput] = useState("");
   const shopCodePickerRef = useRef<HTMLDivElement>(null);
@@ -331,7 +332,7 @@ export default function WaybillGeneratorPage() {
     setCity("");
     setPhone1("");
     setPhone2("");
-    setShopCode(DELIVERY_PARTNERS.find((p) => p.value === "D2D")?.waybillCode ?? "MNM");
+    setShopCode(waybillShopCode("D2D"));
     setShopCodePickerOpen(false);
     setCustomShopCodeInput("");
     setCustomerNoAddressNotice(false);
@@ -624,16 +625,16 @@ export default function WaybillGeneratorPage() {
                 style={{ position: "absolute", top: 40, left: 8, width: 280, zIndex: 30 }}
               >
                 <p className="text-xs text-gray-400 px-3 pt-2.5 pb-1">Delivery partner</p>
-                {DELIVERY_PARTNERS.map((p) => (
+                {activePartners.map((p) => (
                   <button
-                    key={p.value}
-                    onClick={() => selectShopCode(p.waybillCode)}
+                    key={p.code}
+                    onClick={() => selectShopCode(p.waybill_code)}
                     className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50 transition-colors ${
-                      shopCode === p.waybillCode ? "bg-gray-50 font-medium" : ""
+                      shopCode === p.waybill_code ? "bg-gray-50 font-medium" : ""
                     }`}
                   >
-                    <span>{p.label}</span>
-                    <span className="text-xs text-gray-400">{p.waybillCode}</span>
+                    <span>{p.name}</span>
+                    <span className="text-xs text-gray-400">{p.waybill_code}</span>
                   </button>
                 ))}
                 <div className="border-t border-gray-100 px-3 py-2">
