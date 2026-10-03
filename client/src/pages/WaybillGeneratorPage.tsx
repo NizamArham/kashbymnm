@@ -10,6 +10,7 @@ import { api } from "../lib/api";
 import { Customer, BusinessInfo } from "../lib/types";
 import { applyBusinessInfoToReturnAddress } from "../lib/businessInfo";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
+import { previewPdf } from "../lib/pdfPreview";
 
 function formatLabelDate(d: Date): string {
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -292,7 +293,7 @@ export default function WaybillGeneratorPage() {
     setProcessing(true);
     try {
       const pdf = generateWaybillLabelPdf(labelData);
-      pdf.save(`M&M_Waybill_${trackingNumber}.pdf`);
+      previewPdf(pdf, `M&M_Waybill_${trackingNumber}.pdf`);
     } catch {
       setError("Failed to generate the PDF — try again");
     } finally {
@@ -439,22 +440,22 @@ export default function WaybillGeneratorPage() {
                 </FormGroup>
               </div>
               {phoneMatchCustomer && (
-                <div className="bg-blue-50 border border-blue-200 rounded-xl px-3.5 py-2.5 flex items-start gap-2.5">
-                  <User size={15} className="text-blue-600 flex-shrink-0 mt-0.5" />
+                <div className="bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2.5 flex items-start gap-2.5">
+                  <User size={14} className="text-gray-500 flex-shrink-0 mt-0.5" />
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm text-blue-900">
+                    <p className="text-sm text-gray-800">
                       This number matches an existing customer — <span className="font-medium">{phoneMatchCustomer.name}</span>. Load their saved name &amp; address?
                     </p>
                     <div className="flex gap-2 mt-2">
                       <button
                         onClick={confirmLoadPhoneMatch}
-                        className="px-3 py-1 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 transition"
+                        className="px-3 py-1.5 bg-black text-white rounded-xl text-xs font-medium hover:bg-gray-800 transition"
                       >
                         Load saved details
                       </button>
                       <button
                         onClick={dismissPhoneMatch}
-                        className="px-3 py-1 border border-blue-300 text-blue-700 rounded-lg text-xs font-medium hover:bg-blue-100 transition"
+                        className="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 rounded-xl text-xs font-medium hover:bg-gray-50 transition"
                       >
                         No, keep as is
                       </button>
@@ -571,18 +572,18 @@ export default function WaybillGeneratorPage() {
                   <button
                     onClick={handlePrint}
                     disabled={processing}
-                    className="flex items-center gap-2 px-5 py-2.5 border border-gray-300 rounded-full text-sm font-medium hover:bg-gray-50 transition disabled:opacity-50"
+                    className="flex items-center gap-2 px-5 py-2.5 border border-gray-300 rounded-xl text-sm font-medium hover:bg-gray-50 transition disabled:opacity-50"
                   >
-                    <Printer size={15} />
+                    <Printer size={14} />
                     Print
                   </button>
                   <button
                     onClick={handleSavePdf}
                     disabled={processing}
                     title="Save as PDF (Ctrl/Cmd+Shift+D)"
-                    className="flex items-center gap-2 px-5 py-2.5 bg-black text-white rounded-full text-sm font-medium hover:bg-gray-800 transition disabled:opacity-50"
+                    className="flex items-center gap-2 px-5 py-2.5 bg-black text-white rounded-xl text-sm font-medium hover:bg-gray-800 transition disabled:opacity-50"
                   >
-                    <Download size={15} />
+                    <Download size={14} />
                     {processing ? "Working..." : "Save as PDF"}
                   </button>
                 </div>
@@ -649,7 +650,7 @@ export default function WaybillGeneratorPage() {
                     />
                     <button
                       onClick={applyCustomShopCode}
-                      className="px-3 py-1.5 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition flex-shrink-0"
+                      className="px-3 py-1.5 bg-black text-white rounded-xl text-sm font-medium hover:bg-gray-800 transition flex-shrink-0"
                     >
                       Use
                     </button>

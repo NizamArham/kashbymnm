@@ -111,13 +111,13 @@ export default function AddStaffPage() {
             <h2 className="text-base font-semibold text-gray-900 mb-4 flex items-center gap-2"><UserRound size={18} className="text-gray-600" /> Staff Preview</h2>
             <div className="mb-4 pb-4 border-b border-gray-100"><p className="text-lg font-semibold text-gray-900">{newName.trim() || "New staff member"}</p><p className="text-xs text-gray-400 mt-1">Preview updates as you type</p></div>
             <div className="space-y-3 text-sm">
-              <div className="flex items-center gap-2"><UserRound size={15} className="text-gray-400" /><span>@{newUsername.trim() || "username"}</span></div>
-              <div className="flex items-center gap-2"><ShieldCheck size={15} className="text-gray-400" /><span className="capitalize">{newRole} account</span></div>
-              <div className="flex items-center gap-2"><BriefcaseBusiness size={15} className="text-gray-400" /><span>{newJobTitle || "No job title selected"}</span></div>
-              <div className="flex items-center gap-2"><Phone size={15} className="text-gray-400" /><span>{newPhone.trim() || "No phone added"}</span></div>
-              <div className="flex items-center gap-2"><CalendarDays size={15} className="text-gray-400" /><span>{newJoinedDate || "No joining date"}</span></div>
-              <div className="flex items-center gap-2"><DollarSign size={15} className="text-gray-400" /><span>{newSalary ? `Rs. ${parseFloat(newSalary).toLocaleString()}` : "No salary added"}</span></div>
-              <div className="flex items-start gap-2"><Landmark size={15} className="text-gray-400 mt-0.5" /><span>{newBankName.trim() || "No bank details added"}</span></div>
+              <div className="flex items-center gap-2"><UserRound size={14} className="text-gray-400" /><span>@{newUsername.trim() || "username"}</span></div>
+              <div className="flex items-center gap-2"><ShieldCheck size={14} className="text-gray-400" /><span className="capitalize">{newRole} account</span></div>
+              <div className="flex items-center gap-2"><BriefcaseBusiness size={14} className="text-gray-400" /><span>{newJobTitle || "No job title selected"}</span></div>
+              <div className="flex items-center gap-2"><Phone size={14} className="text-gray-400" /><span>{newPhone.trim() || "No phone added"}</span></div>
+              <div className="flex items-center gap-2"><CalendarDays size={14} className="text-gray-400" /><span>{newJoinedDate || "No joining date"}</span></div>
+              <div className="flex items-center gap-2"><DollarSign size={14} className="text-gray-400" /><span>{newSalary ? `Rs. ${parseFloat(newSalary).toLocaleString()}` : "No salary added"}</span></div>
+              <div className="flex items-start gap-2"><Landmark size={14} className="text-gray-400 mt-0.5" /><span>{newBankName.trim() || "No bank details added"}</span></div>
             </div>
           </Card>
         </div>

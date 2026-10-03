@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "../context/AuthContext";
+import { useNavShortcuts, navShortcutHint } from "../lib/navShortcuts";
 
 interface MenuSubItem {
   id: string;
@@ -56,6 +57,7 @@ export default function AppShell() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const isAdmin = user?.role === "admin";
+  useNavShortcuts(isAdmin);
 
   // Accordion — only one section's sub-items are ever open at a time.
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -225,6 +227,7 @@ export default function AppShell() {
     .toUpperCase();
 
   const isOnProfile = location.pathname === "/profile";
+  const isPosScreen = location.pathname === "/pos";
 
   return (
     <div className="min-h-screen flex bg-gray-50 text-black">
@@ -268,6 +271,7 @@ export default function AppShell() {
                 {item.subItems ? (
                   <button
                     onClick={() => toggleMenu(item.id)}
+                    title={navShortcutHint(item.path)}
                     className={`w-full flex items-center justify-between gap-2 lg:gap-3 px-3 lg:px-4 py-2 lg:py-3 rounded-xl transition text-sm lg:text-base
                       ${active ? "bg-white text-black font-medium" : "text-gray-300 hover:bg-gray-900"}`}
                   >
@@ -281,6 +285,7 @@ export default function AppShell() {
                   <Link
                     to={item.path}
                     onClick={handleLinkClick}
+                    title={navShortcutHint(item.path)}
                     className={`flex items-center gap-2 lg:gap-3 px-3 lg:px-4 py-2 lg:py-3 rounded-xl transition text-sm lg:text-base
                       ${active ? "bg-white text-black font-medium" : "text-gray-300 hover:bg-gray-900"}`}
                   >
@@ -299,6 +304,7 @@ export default function AppShell() {
                           key={sub.id}
                           to={sub.path}
                           onClick={handleLinkClick}
+                          title={navShortcutHint(sub.path)}
                           className={`flex items-center gap-2 lg:gap-3 px-3 lg:px-4 py-1.5 lg:py-2 text-xs lg:text-sm rounded-lg transition
                             ${subActive ? "bg-gray-800 text-white font-medium" : "text-gray-400 hover:text-white hover:bg-gray-800/50"}`}
                         >
@@ -341,8 +347,11 @@ export default function AppShell() {
         </div>
       </div>
 
-      <div className="flex-1 min-w-0 lg:ml-64 min-h-screen bg-gray-50">
-        <div className="sticky top-0 z-30 bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-3 lg:hidden">
+      {/* The POS is a till, not a document: it takes exactly the screen's
+          height (its cart scrolls inside, its buttons stay put) instead of
+          sitting in the padded, scrolling page card the other screens use. */}
+      <div className={`flex-1 min-w-0 lg:ml-64 bg-gray-50 ${isPosScreen ? "h-[100dvh] flex flex-col overflow-hidden" : "min-h-screen"}`}>
+        <div className="sticky top-0 z-30 bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-3 lg:hidden flex-shrink-0">
           <button
             onClick={() => setSidebarOpen(true)}
             className="p-1.5 hover:bg-gray-100 rounded-lg transition"
@@ -357,11 +366,17 @@ export default function AppShell() {
           </h2>
         </div>
 
-        <div className="p-4 lg:p-6">
-          <div className="bg-white border border-gray-200 rounded-2xl p-4 lg:p-6 shadow-sm">
+        {isPosScreen ? (
+          <div className="flex-1 min-h-0 flex flex-col">
             <Outlet />
           </div>
-        </div>
+        ) : (
+          <div className="p-4 lg:p-6">
+            <div className="bg-white border border-gray-200 rounded-2xl p-4 lg:p-6 shadow-sm">
+              <Outlet />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

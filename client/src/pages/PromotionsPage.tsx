@@ -648,7 +648,7 @@ function VoucherFormModal({ voucher, onClose, onSaved }: { voucher?: GiftVoucher
         <div className="mb-4 p-3.5 bg-gray-50 rounded-xl border border-gray-100 flex items-center gap-2.5 text-sm">
           {voucher.activated_at ? (
             <>
-              <CheckCircle2 size={15} className="text-green-600 flex-shrink-0" />
+              <CheckCircle2 size={14} className="text-green-600 flex-shrink-0" />
               <span className="text-gray-700">
                 Sold {voucher.activated_at.slice(0, 10)} — expires{" "}
                 {voucher.expires_at ? `${voucher.expires_at.slice(0, 10)} (${daysUntil(voucher.expires_at)} days left)` : "—"}
@@ -656,7 +656,7 @@ function VoucherFormModal({ voucher, onClose, onSaved }: { voucher?: GiftVoucher
             </>
           ) : (
             <>
-              <Clock size={15} className="text-amber-600 flex-shrink-0" />
+              <Clock size={14} className="text-amber-600 flex-shrink-0" />
               <span className="text-gray-700">Not yet sold — the countdown below only starts once it's sold at POS.</span>
             </>
           )}

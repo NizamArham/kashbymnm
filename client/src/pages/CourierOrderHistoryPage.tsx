@@ -158,7 +158,7 @@ export default function CourierOrderHistoryPage() {
   return (
     <div>
       <button onClick={() => navigate(-1)} className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 mb-3">
-        <ArrowLeft size={15} />
+        <ArrowLeft size={14} />
         Back
       </button>
 

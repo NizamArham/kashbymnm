@@ -179,7 +179,7 @@ export default function SupplierPaymentHistoryPage() {
         onClick={goBack}
         className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 mb-3"
       >
-        <ArrowLeft size={15} />
+        <ArrowLeft size={14} />
         Back
       </button>
 
@@ -254,14 +254,14 @@ export default function SupplierPaymentHistoryPage() {
                 return (
                   <tr
                     key={entry.id ?? `${entry.type}-${entry.date}-${i}`}
-                    className={`${i % 2 === 1 ? "bg-gray-50/60" : ""} ${clickable ? "cursor-pointer hover:bg-sky-50/60" : ""}`}
+                    className={`${i % 2 === 1 ? "bg-gray-50/60" : ""} ${clickable ? "cursor-pointer hover:bg-gray-50" : ""}`}
                     onClick={clickable ? () => setChequePreview(entry) : undefined}
                   >
                     <Td>{entry.date.slice(0, 10)}</Td>
                     <Td>
                       {entry.label}
                       {clickable && (
-                        <span className="inline-flex items-center gap-1 ml-2 text-[11px] text-sky-600 align-middle">
+                        <span className="inline-flex items-center gap-1 ml-2 text-[11px] text-gray-500 align-middle">
                           <CreditCard size={12} />
                           View cheque
                         </span>

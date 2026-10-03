@@ -259,7 +259,7 @@ export default function FindPage() {
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2.5">
             <span className="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0">
-              <Icon size={17} className="text-gray-700" />
+              <Icon size={16} className="text-gray-700" />
             </span>
             <Badge label={meta.label} tone="neutral" />
           </div>
@@ -464,7 +464,7 @@ export default function FindPage() {
                       className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left hover:bg-gray-50 transition border-b border-gray-50 last:border-0"
                     >
                       <span className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0">
-                        <Icon size={13} className="text-gray-600" />
+                        <Icon size={12} className="text-gray-600" />
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block text-sm text-gray-900 truncate">{s.title}</span>

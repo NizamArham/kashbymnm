@@ -27,21 +27,21 @@ export default function SaleDetailPage() {
     return [
       {
         key: "a4",
-        icon: <FileText size={17} className="text-gray-700" />,
+        icon: <FileText size={16} className="text-gray-700" />,
         title: sale.status === "quotation" ? "A4 Quotation (PDF)" : "A4 Invoice (PDF)",
         subtitle: sale.status === "quotation" ? "Full-page printable quote" : "Full-page printable invoice",
         onClick: () => downloadA4Pdf(sale),
       },
       {
         key: "thermal",
-        icon: <Receipt size={17} className="text-gray-700" />,
+        icon: <Receipt size={16} className="text-gray-700" />,
         title: "80mm Receipt (PDF)",
         subtitle: "For thermal till printers",
         onClick: () => downloadThermalPdf(sale),
       },
       {
         key: "whatsapp",
-        icon: <MessageCircle size={17} className="text-green-600" />,
+        icon: <MessageCircle size={16} className="text-green-600" />,
         iconBgClass: "bg-green-50",
         title: "Send via WhatsApp",
         subtitle: "Text summary to customer's phone",
@@ -110,7 +110,7 @@ export default function SaleDetailPage() {
         onClick={() => navigate(-1)}
         className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 mb-3"
       >
-        <ArrowLeft size={15} />
+        <ArrowLeft size={14} />
         Back
       </button>
 

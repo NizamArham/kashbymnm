@@ -304,21 +304,21 @@ export default function SaleHistoryPage() {
     return [
       {
         key: "a4",
-        icon: <FileText size={17} className="text-gray-700" />,
+        icon: <FileText size={16} className="text-gray-700" />,
         title: "A4 Invoice (PDF)",
         subtitle: "Full-page printable invoice",
         onClick: () => downloadA4Pdf(sale),
       },
       {
         key: "thermal",
-        icon: <Receipt size={17} className="text-gray-700" />,
+        icon: <Receipt size={16} className="text-gray-700" />,
         title: "80mm Receipt (PDF)",
         subtitle: "For thermal till printers",
         onClick: () => downloadThermalPdf(sale),
       },
       {
         key: "whatsapp",
-        icon: <MessageCircle size={17} className="text-green-600" />,
+        icon: <MessageCircle size={16} className="text-green-600" />,
         iconBgClass: "bg-green-50",
         title: "Send via WhatsApp",
         subtitle: "Text summary to customer's phone",

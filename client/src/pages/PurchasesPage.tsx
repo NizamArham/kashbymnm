@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Package, Clock, Trash2, Download } from "lucide-react";
+import { Package, Clock, Trash2, Download, X } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Supplier, Purchase, AvailableUnit } from "../lib/types";
 import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
@@ -1289,7 +1289,7 @@ export default function PurchasesPage() {
             <div className="p-5 border-b border-gray-100 flex items-center justify-between">
               <h2 className="text-base font-semibold text-gray-900">Edit {editingPurchase.purchase_code}</h2>
               <button onClick={() => setEditingPurchase(null)} className="text-gray-400 hover:text-gray-600">
-                ✕
+                <X size={18} />
               </button>
             </div>
             <div className="p-5">

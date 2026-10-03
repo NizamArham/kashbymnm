@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { Banknote, CheckCircle2, XCircle, Plus, Pencil, Trash2, X, Download } from "lucide-react";
+import { Banknote, Check, Plus, Pencil, Trash2, X, Download } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Supplier } from "../lib/types";
 import { downloadTabularReport, buildReportFilename, todayLongDate } from "../lib/reportPdf";
-import { PageHeader, Card, Table, Th, Td, SortHeader, Button, EmptyState, ErrorText, Badge, TabToggle, Input, Label, FormGroup, Dropdown, DatePicker, HelpHint } from "../components/ui";
+import { PageHeader, Card, Table, Th, Td, SortHeader, Button, EmptyState, ErrorText, Badge, RowActions, TabToggle, Input, Label, FormGroup, Dropdown, DatePicker, HelpHint } from "../components/ui";
 import { useSortableData } from "../lib/useSortableData";
 
 interface ChequeRow {
@@ -420,7 +420,7 @@ export default function ChequesPage() {
             </Button>
             {activeTab === "issued" && (
               <Button variant="primary" onClick={() => setShowIssueForm(true)} className="inline-flex items-center gap-1.5">
-                <Plus size={15} />
+                <Plus size={14} />
                 Issue a cheque
               </Button>
             )}
@@ -466,47 +466,34 @@ export default function ChequesPage() {
                         <div className="text-xs text-gray-400 mt-0.5">{c.bounced_reason}</div>
                       )}
                     </Td>
-                    <Td>
+                    <Td className="text-right">
                       {c.status === "pending" && (
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => openEdit(c.id, true, c)}
-                            className="text-gray-400 hover:text-gray-700"
-                            title="Edit"
-                          >
-                            <Pencil size={14} />
-                          </button>
-                          <button
-                            onClick={() => handleDeleteCheque(c.id, true)}
-                            disabled={deletingId === c.id}
-                            className="text-gray-400 hover:text-red-600"
-                            title="Delete"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                          <button
-                            onClick={() => {
-                              setClearingId(c.id);
-                              setClearingIsIssued(true);
-                              setClearMethod("bank_transfer");
-                            }}
-                            className="text-gray-400 hover:text-green-600"
-                            title="Mark cleared"
-                          >
-                            <CheckCircle2 size={16} />
-                          </button>
-                          <button
-                            onClick={() => {
-                              setBouncingId(c.id);
-                              setBouncingIsIssued(true);
-                              setBounceReason("");
-                            }}
-                            className="text-gray-400 hover:text-red-500"
-                            title="Mark bounced"
-                          >
-                            <XCircle size={16} />
-                          </button>
-                        </div>
+                        <RowActions
+                          actions={[
+                            { label: "Edit", icon: <Pencil size={14} />, onClick: () => openEdit(c.id, true, c) },
+                            { label: "Delete", icon: <Trash2 size={14} />, tone: "bad", disabled: deletingId === c.id, onClick: () => handleDeleteCheque(c.id, true) },
+                            {
+                              label: "Mark cleared",
+                              icon: <Check size={14} />,
+                              tone: "good",
+                              onClick: () => {
+                                setClearingId(c.id);
+                                setClearingIsIssued(true);
+                                setClearMethod("bank_transfer");
+                              },
+                            },
+                            {
+                              label: "Mark bounced",
+                              icon: <X size={14} />,
+                              tone: "bad",
+                              onClick: () => {
+                                setBouncingId(c.id);
+                                setBouncingIsIssued(true);
+                                setBounceReason("");
+                              },
+                            },
+                          ]}
+                        />
                       )}
                     </Td>
                   </tr>
@@ -558,47 +545,38 @@ export default function ChequesPage() {
                       <div className="text-xs text-gray-400 mt-0.5">{c.bounced_reason}</div>
                     )}
                   </Td>
-                  <Td>
+                  <Td className="text-right">
                     {(c.status === "in_hand" || c.status === "given_to_supplier" || c.status === "deposited") && (
-                      <div className="flex items-center gap-2">
-                        {c.status === "in_hand" && (
-                          <>
-                            <button onClick={() => openEdit(c.id, false, c)} className="text-gray-400 hover:text-gray-700" title="Edit">
-                              <Pencil size={14} />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteCheque(c.id, false)}
-                              disabled={deletingId === c.id}
-                              className="text-gray-400 hover:text-red-600"
-                              title="Delete"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </>
-                        )}
-                        <button
-                          onClick={() => {
-                            setClearingId(c.id);
-                            setClearingIsIssued(false);
-                            setClearMethod("bank_transfer");
-                          }}
-                          className="text-gray-400 hover:text-green-600"
-                          title="Mark cleared"
-                        >
-                          <CheckCircle2 size={16} />
-                        </button>
-                        <button
-                          onClick={() => {
-                            setBouncingId(c.id);
-                            setBouncingIsIssued(false);
-                            setBounceReason("");
-                          }}
-                          className="text-gray-400 hover:text-red-500"
-                          title="Mark bounced"
-                        >
-                          <XCircle size={16} />
-                        </button>
-                      </div>
+                      <RowActions
+                        actions={[
+                          ...(c.status === "in_hand"
+                            ? [
+                                { label: "Edit", icon: <Pencil size={14} />, onClick: () => openEdit(c.id, false, c) },
+                                { label: "Delete", icon: <Trash2 size={14} />, tone: "bad" as const, disabled: deletingId === c.id, onClick: () => handleDeleteCheque(c.id, false) },
+                              ]
+                            : []),
+                          {
+                            label: "Mark cleared",
+                            icon: <Check size={14} />,
+                            tone: "good" as const,
+                            onClick: () => {
+                              setClearingId(c.id);
+                              setClearingIsIssued(false);
+                              setClearMethod("bank_transfer");
+                            },
+                          },
+                          {
+                            label: "Mark bounced",
+                            icon: <X size={14} />,
+                            tone: "bad" as const,
+                            onClick: () => {
+                              setBouncingId(c.id);
+                              setBouncingIsIssued(false);
+                              setBounceReason("");
+                            },
+                          },
+                        ]}
+                      />
                     )}
                   </Td>
                 </tr>
@@ -696,7 +674,7 @@ export default function ChequesPage() {
                 <HelpHint text="A cheque written from your own account, straight to a supplier. Their balance reduces now; the Cash Book updates once it clears." />
               </h2>
               <button onClick={() => setShowIssueForm(false)} className="text-gray-400 hover:text-gray-600">
-                ✕
+                <X size={18} />
               </button>
             </div>
             {/* Laid out like the cheque itself reads — bank details up

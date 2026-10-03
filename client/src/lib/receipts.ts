@@ -4,6 +4,7 @@ import { NAME_LOGO_PNG_BASE64, NAME_LOGO_ASPECT_RATIO } from "./logoAsset";
 import { barcodePng } from "./waybillLabelPdf";
 import { waybillShopCode } from "./delivery";
 import { api } from "./api";
+import { previewPdf } from "./pdfPreview";
 
 // ---------------------------------------------------------------------
 // Shared helpers
@@ -79,11 +80,11 @@ function money(n: number): string {
 // numbers, and only a real "total" figure (the grand total, and the
 // amount owed on a credit bill) carries an explicit LKR marker, since
 // those are the numbers most likely to be read on their own.
-function amountOnly(n: number): string {
+export function amountOnly(n: number): string {
   return `${n.toLocaleString()}/-`;
 }
 
-function amountLKR(n: number): string {
+export function amountLKR(n: number): string {
   return `LKR ${n.toLocaleString()}/-`;
 }
 
@@ -97,6 +98,16 @@ function amountLKR(n: number): string {
 const SHOP_ACCOUNT_NAME = "M&M Clothing";
 const SHOP_ACCOUNT_NUMBER = "028010029170";
 const SHOP_BANK_NAME = "Hatton National Bank";
+
+// The shop's bank details for anything a customer pays into — from General
+// Settings, falling back to the defaults above if they were never filled in.
+export function shopBankDetails(info: BusinessInfo | null | undefined) {
+  return {
+    accountName: info?.bank_account_name || SHOP_ACCOUNT_NAME,
+    accountNumber: info?.bank_account_no || SHOP_ACCOUNT_NUMBER,
+    bankName: info?.bank_name || SHOP_BANK_NAME,
+  };
+}
 
 // "bank_transfer" -> "Bank Transfer", "cash" -> "Cash", etc. — used
 // anywhere a stored payment_method value is shown to a person, since the
@@ -590,9 +601,7 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
   }
 
   if (needsPayHere) {
-    const accountName = businessInfo?.bank_account_name || SHOP_ACCOUNT_NAME;
-    const accountNumber = businessInfo?.bank_account_no || SHOP_ACCOUNT_NUMBER;
-    const bankName = businessInfo?.bank_name || SHOP_BANK_NAME;
+    const { accountName, accountNumber, bankName } = shopBankDetails(businessInfo);
     kvRow("Pay Here", (x, yy) => doc.text(accountName, x, yy));
     doc.setTextColor(20);
     doc.text(accountNumber, valueX, y);
@@ -641,7 +650,7 @@ export async function downloadA4Pdf(sale: Sale) {
   // (or the request fails) rather than leaving the invoice blank.
   const businessInfo = await api.get<BusinessInfo | null>("/business-info").catch(() => null);
   const doc = generateA4Pdf(sale, businessInfo);
-  doc.save(`${sale.status === "quotation" ? "Quotation" : "Invoice"}${sale.invoice}.pdf`);
+  previewPdf(doc, `${sale.status === "quotation" ? "Quotation" : "Invoice"}${sale.invoice}.pdf`);
 }
 
 // ---------------------------------------------------------------------
@@ -860,7 +869,7 @@ export function generateThermalPdf(sale: Sale): jsPDF {
 
 export function downloadThermalPdf(sale: Sale) {
   const doc = generateThermalPdf(sale);
-  doc.save(`${sale.status === "quotation" ? "Quotation" : "Invoice"}${sale.invoice}.pdf`);
+  previewPdf(doc, `${sale.status === "quotation" ? "Quotation" : "Invoice"}${sale.invoice}.pdf`);
 }
 
 // ---------------------------------------------------------------------

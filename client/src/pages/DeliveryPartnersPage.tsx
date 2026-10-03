@@ -43,7 +43,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
         className="bg-white rounded-2xl max-w-xl w-full max-h-[90vh] overflow-y-auto shadow-2xl p-7"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-lg font-semibold text-gray-900 mb-5">{title}</h2>
+        <h2 className="text-base font-semibold text-gray-900 mb-5">{title}</h2>
         {children}
       </div>
     </div>
@@ -299,7 +299,7 @@ export default function DeliveryPartnersPage() {
                           title="Edit"
                           className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition"
                         >
-                          <Pencil size={15} />
+                          <Pencil size={14} />
                         </button>
                       </div>
                     </Td>
@@ -322,7 +322,7 @@ export default function DeliveryPartnersPage() {
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <Badge label={p.is_active ? "active" : "off"} tone={p.is_active ? "success" : "neutral"} />
                     <button onClick={() => setEditing(p)} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition">
-                      <Pencil size={15} />
+                      <Pencil size={14} />
                     </button>
                   </div>
                 </div>

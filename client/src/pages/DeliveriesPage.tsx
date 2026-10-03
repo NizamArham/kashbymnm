@@ -9,6 +9,7 @@ import { courierTrackingUrl, waybillShopCode, partnerLabel as partnerName, useDe
 import { generateWaybillLabelPdf } from "../lib/waybillLabelPdf";
 import { WaybillLabelData } from "../components/WaybillLabel";
 import { applyBusinessInfoToReturnAddress } from "../lib/businessInfo";
+import { previewPdf } from "../lib/pdfPreview";
 
 function formatLabelDate(d: Date): string {
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -60,7 +61,7 @@ async function redownloadWaybill(d: Delivery) {
   };
 
   const pdf = generateWaybillLabelPdf(labelData);
-  pdf.save(`M&M_Waybill_${d.tracking_number}.pdf`);
+  previewPdf(pdf, `M&M_Waybill_${d.tracking_number}.pdf`);
 }
 
 // No fetch needed — phone and invoice are already on the delivery
@@ -519,7 +520,7 @@ export default function DeliveriesPage() {
                 isActive ? "bg-black text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
               }`}
             >
-              <Icon size={15} />
+              <Icon size={14} />
               {tab.label}
               <span className={`text-xs px-1.5 py-0.5 rounded-full ${isActive ? "bg-white/20" : "bg-white text-gray-500"}`}>{count}</span>
             </button>
@@ -535,7 +536,7 @@ export default function DeliveriesPage() {
             activeTab === "returned" ? "bg-red-600 text-white" : "bg-red-50 text-red-600 hover:bg-red-100"
           }`}
         >
-          <RotateCcw size={15} />
+          <RotateCcw size={14} />
           Returned
           <span className={`text-xs px-1.5 py-0.5 rounded-full ${activeTab === "returned" ? "bg-white/20" : "bg-white"}`}>{returnedCount}</span>
         </button>
@@ -548,7 +549,7 @@ export default function DeliveriesPage() {
             activeTab === "cancelled" ? "bg-gray-700 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
           }`}
         >
-          <Ban size={15} />
+          <Ban size={14} />
           Cancelled
           <span className={`text-xs px-1.5 py-0.5 rounded-full ${activeTab === "cancelled" ? "bg-white/20" : "bg-white"}`}>{cancelledCount}</span>
         </button>
@@ -633,7 +634,7 @@ export default function DeliveriesPage() {
                           <PrimaryAction d={d} />
                         </Td>
                         <Td className="w-8">
-                          {isExpanded ? <ChevronDown size={15} className="text-gray-400" /> : <ChevronRight size={15} className="text-gray-400" />}
+                          {isExpanded ? <ChevronDown size={14} className="text-gray-400" /> : <ChevronRight size={14} className="text-gray-400" />}
                         </Td>
                       </tr>
 

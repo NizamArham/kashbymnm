@@ -1,5 +1,6 @@
 import jsPDF from "jspdf";
 import { NAME_LOGO_PNG_BASE64, NAME_LOGO_ASPECT_RATIO } from "./logoAsset";
+import { previewPdf } from "./pdfPreview";
 
 export interface ReportColumn {
   label: string;
@@ -381,7 +382,8 @@ export function downloadTabularReport(opts: TabularReportOptions): void {
     drawHeaderFooter(p, totalPages);
   }
 
-  doc.save(opts.filename);
+  // Opens a preview (Download / Print inside) rather than saving at once.
+  previewPdf(doc, opts.filename);
 }
 
 export function rangeLabelFor(startDate: string | null | undefined, endDate: string | null | undefined): string {

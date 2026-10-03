@@ -332,7 +332,7 @@ function RequestReturnTab() {
                       <div className="px-3.5 pb-4 pt-1 bg-gray-50/60 space-y-3">
                         {isFinalSale && (
                           <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                            <AlertTriangle size={13} className="text-amber-600 flex-shrink-0 mt-0.5" />
+                            <AlertTriangle size={12} className="text-amber-600 flex-shrink-0 mt-0.5" />
                             <p className="text-xs text-amber-800">
                               This product is marked Final Sale — No Returns. You can still submit a request, but it will need an
                               explicit admin override to be approved.
@@ -376,7 +376,7 @@ function RequestReturnTab() {
                             </FormGroup>
                             {!sale.customer_id ? (
                               <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                                <AlertTriangle size={13} className="text-amber-600 flex-shrink-0 mt-0.5" />
+                                <AlertTriangle size={12} className="text-amber-600 flex-shrink-0 mt-0.5" />
                                 <p className="text-xs text-amber-800">
                                   This is a walk-in sale with no customer attached — store credit needs a real customer account. Use a
                                   cash refund instead.
@@ -625,7 +625,7 @@ function AllReturnsTab({ isAdmin }: { isAdmin: boolean }) {
 
         {r.is_admin_override === 1 && (
           <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-            <AlertTriangle size={13} className="text-amber-600 flex-shrink-0 mt-0.5" />
+            <AlertTriangle size={12} className="text-amber-600 flex-shrink-0 mt-0.5" />
             <p className="text-xs text-amber-800">This item is Final Sale — approving it needs an explicit override.</p>
           </div>
         )}
@@ -954,7 +954,7 @@ function AllReturnsTab({ isAdmin }: { isAdmin: boolean }) {
                         </Td>
                         <Td>{r.decided_by_name ?? "—"}</Td>
                         <Td className="w-8">
-                          {isExpanded ? <ChevronDown size={15} className="text-gray-400" /> : <ChevronRight size={15} className="text-gray-400" />}
+                          {isExpanded ? <ChevronDown size={14} className="text-gray-400" /> : <ChevronRight size={14} className="text-gray-400" />}
                         </Td>
                       </tr>
 

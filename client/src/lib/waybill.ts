@@ -1,5 +1,6 @@
 import jsPDF from "jspdf";
 import { Delivery } from "./types";
+import { previewPdf } from "./pdfPreview";
 
 // Standard shipping-waybill layout: sender/receiver blocks, a large
 // waybill number, package/item summary, and a signature line. This is a
@@ -112,5 +113,5 @@ export function generateWaybillPdf(delivery: Delivery): jsPDF {
 
 export function downloadWaybillPdf(delivery: Delivery) {
   const doc = generateWaybillPdf(delivery);
-  doc.save(`${delivery.waybill_number ?? delivery.invoice ?? "waybill"}.pdf`);
+  previewPdf(doc, `${delivery.waybill_number ?? delivery.invoice ?? "waybill"}.pdf`);
 }

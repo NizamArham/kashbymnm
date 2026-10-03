@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Building2, MapPin, Phone, Mail, Globe, Landmark, Pencil, Keyboard, DatabaseBackup, Download, Send } from "lucide-react";
 import { api, ApiRequestError, downloadFile } from "../lib/api";
 import { BusinessInfo } from "../lib/types";
+import { NAV_SHORTCUTS } from "../lib/navShortcuts";
 import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, TabToggle } from "../components/ui";
 
 type SettingsTab = "business" | "reference" | "backup";
@@ -13,10 +14,12 @@ interface ShortcutEntry {
 }
 
 const SHORTCUTS: ShortcutEntry[] = [
-  { keys: "Ctrl/Cmd + Shift + D", action: "Download this page's report", where: "Sale History, Analytics, Purchases (History tab)" },
-  { keys: "Ctrl/Cmd + Shift + D", action: "Download this statement", where: "Customer / Supplier Payment History" },
-  { keys: "Ctrl/Cmd + Shift + D", action: "Save the waybill as PDF", where: "Waybill Generator, on the final (package) step" },
+  { keys: "Ctrl/Cmd + Shift + D", action: "Open this page's report (preview, then Download)", where: "Sale History, Analytics, Purchases (History tab)" },
+  { keys: "Ctrl/Cmd + Shift + D", action: "Open this statement (preview, then Download)", where: "Customer / Supplier Payment History" },
+  { keys: "Ctrl/Cmd + Shift + D", action: "Open the waybill PDF (preview, then Download)", where: "Waybill Generator, on the final (package) step" },
   { keys: "Ctrl/Cmd + Shift + D", action: "Open “Get Receipt”", where: "Sale Detail" },
+  { keys: "Esc", action: "Close the PDF preview", where: "Any report, invoice, statement or waybill preview" },
+  { keys: "Enter / Esc", action: "Save / cancel the row you're editing", where: "Cash Book (inline edit)" },
   { keys: "↑ / ↓", action: "Recall a recently-looked-up code", where: "Find" },
   { keys: "Esc", action: "Clear the search box and result", where: "Find" },
   {
@@ -65,6 +68,9 @@ export default function GeneralSettingsPage() {
   const [saving, setSaving] = useState(false);
 
   const [downloadingBackup, setDownloadingBackup] = useState(false);
+  // The backup holds every customer's data, so the first click only asks
+  // "are you sure?" — a stray touch can't save a copy of it.
+  const [confirmingBackup, setConfirmingBackup] = useState(false);
   const [backupDownloadError, setBackupDownloadError] = useState<string | null>(null);
   const [emailingBackup, setEmailingBackup] = useState(false);
   const [backupEmailError, setBackupEmailError] = useState<string | null>(null);
@@ -144,6 +150,7 @@ export default function GeneralSettingsPage() {
   const address = [saved.address_line1, saved.address_line2, saved.city].filter(Boolean).join(", ");
 
   async function handleDownloadBackup() {
+    setConfirmingBackup(false);
     setBackupDownloadError(null);
     setDownloadingBackup(true);
     try {
@@ -196,13 +203,13 @@ export default function GeneralSettingsPage() {
           <div className="flex items-start justify-between">
             <div className="flex items-start gap-3">
               <div className="w-12 h-12 rounded-xl bg-gray-900 text-white flex items-center justify-center flex-shrink-0">
-                <Building2 size={22} />
+                <Building2 size={20} />
               </div>
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">{saved.business_name || "Business name not set"}</h2>
                 {address && (
                   <p className="text-sm text-gray-500 flex items-start gap-1 mt-0.5">
-                    <MapPin size={13} className="mt-0.5 flex-shrink-0" />
+                    <MapPin size={12} className="mt-0.5 flex-shrink-0" />
                     {address}
                   </p>
                 )}
@@ -234,7 +241,7 @@ export default function GeneralSettingsPage() {
 
           <div className="mt-4 pt-4 border-t border-gray-100">
             <p className="text-xs text-gray-400 mb-2 flex items-center gap-1">
-              <Landmark size={13} />
+              <Landmark size={12} />
               Bank details
             </p>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
@@ -397,7 +404,37 @@ export default function GeneralSettingsPage() {
       <Card className="max-w-2xl mt-4">
         <h2 className="text-base font-semibold text-gray-900 mb-1 flex items-center gap-1.5">
           <Keyboard size={16} className="text-gray-400" />
-          Keyboard shortcuts
+          Jump to a page
+        </h2>
+        <p className="text-xs text-gray-500 mb-3">
+          Hold <kbd className="font-mono bg-gray-100 text-gray-700 rounded px-1.5 py-0.5">Alt</kbd> (<kbd className="font-mono bg-gray-100 text-gray-700 rounded px-1.5 py-0.5">Option</kbd> on a Mac) and press the letter — from any page, even while typing.
+          Dashboard and Inventory also answer to <kbd className="font-mono bg-gray-100 text-gray-700 rounded px-1.5 py-0.5">Ctrl/Cmd</kbd> + D / I. Staff accounts only get the pages they can open.
+          Hover a sidebar item to see its shortcut.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8">
+          {NAV_SHORTCUTS.map((s) => (
+            <div key={s.letter} className="flex items-center justify-between gap-3 py-1.5 border-b border-gray-100 text-sm">
+              <span className="min-w-0">
+                <span className="block text-gray-900 truncate">
+                  {s.label}
+                  {s.adminOnly && <span className="ml-1.5 text-[10px] text-gray-400 align-middle">admin</span>}
+                </span>
+                {s.withCtrlCmd && <span className="block text-[11px] text-gray-400">also Ctrl/Cmd + {s.letter.toUpperCase()}</span>}
+              </span>
+              <span className="font-mono text-xs bg-gray-100 text-gray-700 rounded-md px-2 py-1 flex-shrink-0">Alt/Option + {s.letter.toUpperCase()}</span>
+            </div>
+          ))}
+        </div>
+        <p className="text-xs text-gray-400 mt-3">
+          Plain letters (just “S” or “C”) aren't used on purpose — they'd fire while you type or while a barcode scanner is entering a code — and Ctrl/Cmd + S or C
+          are Save and Copy.
+        </p>
+      </Card>
+
+      <Card className="max-w-2xl mt-4">
+        <h2 className="text-base font-semibold text-gray-900 mb-1 flex items-center gap-1.5">
+          <Keyboard size={16} className="text-gray-400" />
+          On a page
         </h2>
         <p className="text-xs text-gray-500 mb-3">Available on the pages listed — a text field always keeps its own keystrokes.</p>
         <div className="grid grid-cols-1 gap-1.5 text-sm">
@@ -429,10 +466,22 @@ export default function GeneralSettingsPage() {
             <p className="text-sm font-medium text-gray-900">Download backup now</p>
             <p className="text-xs text-gray-400">Saves a .db file straight to your computer.</p>
           </div>
-          <Button onClick={handleDownloadBackup} disabled={downloadingBackup} className="inline-flex items-center gap-1.5">
-            <Download size={14} />
-            {downloadingBackup ? "Preparing..." : "Download"}
-          </Button>
+          {confirmingBackup ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500">Save a full copy of your data?</span>
+              <Button variant="primary" size="sm" onClick={handleDownloadBackup}>
+                Yes, download
+              </Button>
+              <Button size="sm" onClick={() => setConfirmingBackup(false)}>
+                Cancel
+              </Button>
+            </div>
+          ) : (
+            <Button onClick={() => setConfirmingBackup(true)} disabled={downloadingBackup} className="inline-flex items-center gap-1.5">
+              <Download size={14} />
+              {downloadingBackup ? "Preparing..." : "Download"}
+            </Button>
+          )}
         </div>
         {backupDownloadError && <ErrorText>{backupDownloadError}</ErrorText>}
 

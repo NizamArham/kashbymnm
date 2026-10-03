@@ -52,21 +52,21 @@ export default function QuotationsPage() {
     return [
       {
         key: "a4",
-        icon: <FileText size={17} className="text-gray-700" />,
+        icon: <FileText size={16} className="text-gray-700" />,
         title: "A4 Quotation (PDF)",
         subtitle: "Full-page printable quote",
         onClick: () => downloadA4Pdf(sale),
       },
       {
         key: "thermal",
-        icon: <Receipt size={17} className="text-gray-700" />,
+        icon: <Receipt size={16} className="text-gray-700" />,
         title: "80mm Receipt (PDF)",
         subtitle: "For thermal till printers",
         onClick: () => downloadThermalPdf(sale),
       },
       {
         key: "whatsapp",
-        icon: <MessageCircle size={17} className="text-green-600" />,
+        icon: <MessageCircle size={16} className="text-green-600" />,
         iconBgClass: "bg-green-50",
         title: "Send via WhatsApp",
         subtitle: "Text summary to customer's phone",
@@ -149,14 +149,14 @@ export default function QuotationsPage() {
                           title="Get quotation"
                           className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition"
                         >
-                          <Printer size={15} />
+                          <Printer size={14} />
                         </button>
                         <button
                           onClick={() => openInPos(q)}
                           title="Edit / convert to sale in POS"
                           className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition"
                         >
-                          <ShoppingCart size={15} />
+                          <ShoppingCart size={14} />
                         </button>
                         <button
                           onClick={() => handleCancel(q)}
@@ -164,7 +164,7 @@ export default function QuotationsPage() {
                           title="Cancel quotation"
                           className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition disabled:opacity-50"
                         >
-                          <XCircle size={15} />
+                          <XCircle size={14} />
                         </button>
                       </div>
                     </Td>
@@ -192,20 +192,20 @@ export default function QuotationsPage() {
                       onClick={() => openReceipt(q)}
                       className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition"
                     >
-                      <Printer size={15} />
+                      <Printer size={14} />
                     </button>
                     <button
                       onClick={() => openInPos(q)}
                       className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition"
                     >
-                      <ShoppingCart size={15} />
+                      <ShoppingCart size={14} />
                     </button>
                     <button
                       onClick={() => handleCancel(q)}
                       disabled={cancellingId === q.id}
                       className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition disabled:opacity-50"
                     >
-                      <XCircle size={15} />
+                      <XCircle size={14} />
                     </button>
                   </div>
                 </div>

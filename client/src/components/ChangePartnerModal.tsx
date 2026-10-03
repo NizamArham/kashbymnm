@@ -67,7 +67,7 @@ export default function ChangePartnerModal({
   return (
     <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-lg font-semibold text-gray-900">Change courier</h2>
+        <h2 className="text-base font-semibold text-gray-900">Change courier</h2>
         <p className="text-xs text-gray-400 mt-0.5 mb-4">
           {delivery.invoice} · currently {partnerLabel(delivery.delivery_partner)}
         </p>

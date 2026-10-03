@@ -1,5 +1,5 @@
 import { useEffect, useState, Fragment, useRef } from "react";
-import { Package, ChevronDown, ChevronRight, Plus, X, Pencil, AlertTriangle, MinusCircle, CheckCircle, Search, Trash2, Settings } from "lucide-react";
+import { Package, ChevronDown, ChevronRight, Plus, X, Pencil, MinusCircle, CheckCircle, Search, Trash2, Settings } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Product, InventoryUnit, Supplier, RemovalReason, Purchase, Category, SubCategory } from "../lib/types";
 import { compareSizes } from "../lib/sizeSort";
@@ -355,7 +355,7 @@ function CategoryRow({
                 className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
                 title="Rename"
               >
-                <Pencil size={13} />
+                <Pencil size={12} />
               </button>
               <button
                 onClick={handleDelete}
@@ -363,7 +363,7 @@ function CategoryRow({
                 className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50"
                 title="Delete"
               >
-                <Trash2 size={13} />
+                <Trash2 size={12} />
               </button>
             </div>
           </>
@@ -420,7 +420,7 @@ function CategoryRow({
         ))}
         {subError && <ErrorText>{subError}</ErrorText>}
         <button onClick={() => onAddSub(category)} className="text-xs text-gray-400 hover:text-gray-700 flex items-center gap-1 mt-1">
-          <Plus size={11} />
+          <Plus size={12} />
           Add sub-category
         </button>
       </div>
@@ -949,7 +949,7 @@ export default function ManageProductsPage() {
                       <Fragment key={p.id}>
                         <tr onClick={() => toggleExpand(p)} className="cursor-pointer hover:bg-gray-50">
                           <Td className="w-8">
-                            {isExpanded ? <ChevronDown size={15} className="text-gray-400" /> : <ChevronRight size={15} className="text-gray-400" />}
+                            {isExpanded ? <ChevronDown size={14} className="text-gray-400" /> : <ChevronRight size={14} className="text-gray-400" />}
                           </Td>
                           <Td className="font-medium">{p.product_title}</Td>
                           <Td>{p.brand ?? "—"}</Td>
@@ -959,10 +959,7 @@ export default function ManageProductsPage() {
                             <div className="flex items-center gap-2">
                               <span>{p.qty}</span>
                               {p.qty < LOW_STOCK_THRESHOLD && (
-                                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
-                                  <AlertTriangle size={11} />
-                                  Low
-                                </span>
+                                <Badge label="Low" tone="warning" />
                               )}
                             </div>
                           </Td>
@@ -1029,7 +1026,7 @@ export default function ManageProductsPage() {
                                                         {row.hasMixedBatches && (
                                                           <button
                                                             onClick={() => setBatchDetailKey(batchDetailKey === rowKey ? null : rowKey)}
-                                                            className="ml-2 inline-flex items-center text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 hover:bg-amber-100"
+                                                            className="ml-2 inline-flex items-center text-[11px] font-medium text-gray-900 bg-gray-100 rounded-full px-2 py-0.5 hover:bg-gray-200"
                                                             title="This variant has units from more than one batch"
                                                           >
                                                             mixed batches

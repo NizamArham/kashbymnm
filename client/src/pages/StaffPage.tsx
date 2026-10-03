@@ -193,7 +193,7 @@ export default function StaffPage() {
       <Card className="p-0 overflow-hidden">
         <div className="border-b border-gray-100 p-3">
           <div className="relative max-w-sm">
-            <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <Input
               ref={searchInputRef}
               value={searchQuery}
@@ -339,7 +339,7 @@ export default function StaffPage() {
                                     Cancel
                                   </Button>
                                   <Button size="sm" onClick={() => openResetPassword(s)} className="inline-flex items-center gap-1.5">
-                                    <KeyRound size={13} />
+                                    <KeyRound size={12} />
                                     Reset password
                                   </Button>
                                   {s.id !== user?.id && !isProtected && (

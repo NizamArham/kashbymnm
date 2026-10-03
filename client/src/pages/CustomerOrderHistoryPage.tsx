@@ -121,21 +121,21 @@ export default function CustomerOrderHistoryPage() {
     return [
       {
         key: "a4",
-        icon: <FileText size={17} className="text-gray-700" />,
+        icon: <FileText size={16} className="text-gray-700" />,
         title: "A4 Invoice (PDF)",
         subtitle: "Full-page printable invoice",
         onClick: () => downloadA4Pdf(sale),
       },
       {
         key: "thermal",
-        icon: <ReceiptIcon size={17} className="text-gray-700" />,
+        icon: <ReceiptIcon size={16} className="text-gray-700" />,
         title: "80mm Receipt (PDF)",
         subtitle: "For thermal till printers",
         onClick: () => downloadThermalPdf(sale),
       },
       {
         key: "whatsapp",
-        icon: <MessageCircle size={17} className="text-green-600" />,
+        icon: <MessageCircle size={16} className="text-green-600" />,
         iconBgClass: "bg-green-50",
         title: "Send via WhatsApp",
         subtitle: "Text summary to customer's phone",
@@ -160,7 +160,7 @@ export default function CustomerOrderHistoryPage() {
         onClick={() => navigate(-1)}
         className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 mb-3"
       >
-        <ArrowLeft size={15} />
+        <ArrowLeft size={14} />
         Back
       </button>
 
@@ -204,7 +204,7 @@ export default function CustomerOrderHistoryPage() {
                       className={`cursor-pointer ${index % 2 === 1 ? "bg-gray-50/60 hover:bg-gray-100" : "hover:bg-gray-100"}`}
                     >
                       <Td className="w-8">
-                        {isExpanded ? <ChevronDown size={15} className="text-gray-400" /> : <ChevronRight size={15} className="text-gray-400" />}
+                        {isExpanded ? <ChevronDown size={14} className="text-gray-400" /> : <ChevronRight size={14} className="text-gray-400" />}
                       </Td>
                       <Td className="font-medium">{sale.invoice}</Td>
                       <Td>{sale.date.slice(0, 10)}</Td>
@@ -227,7 +227,7 @@ export default function CustomerOrderHistoryPage() {
                           className="text-gray-400 hover:text-gray-700 p-1 rounded hover:bg-gray-100 disabled:opacity-50"
                           title="Get receipt"
                         >
-                          <MoreVertical size={15} />
+                          <MoreVertical size={14} />
                         </button>
                       </Td>
                     </tr>

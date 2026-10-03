@@ -275,7 +275,7 @@ function ProductDownloadModal({
             className="w-full flex items-center gap-3 px-4 py-3 border border-gray-200 rounded-xl hover:border-black hover:shadow-sm transition text-left"
           >
             <div className="w-9 h-9 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
-              <FileText size={17} className="text-gray-700" />
+              <FileText size={16} className="text-gray-700" />
             </div>
             <div>
               <p className="text-sm font-medium text-gray-900">Stock Breakdown (PDF)</p>
@@ -285,7 +285,7 @@ function ProductDownloadModal({
 
           {error && (
             <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-1">
-              <AlertTriangle size={13} className="text-amber-600 flex-shrink-0 mt-0.5" />
+              <AlertTriangle size={12} className="text-amber-600 flex-shrink-0 mt-0.5" />
               <p className="text-xs text-amber-800">{error}</p>
             </div>
           )}
@@ -826,10 +826,10 @@ export default function InventoryCategoriesPage() {
                 setSelectedFilter((f) => ({ ...f, brand: undefined }));
                 setPinnedProductId(null);
               }}
-              className="inline-flex items-center gap-1.5 text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-full pl-2.5 pr-1.5 py-1 transition"
+              className="inline-flex items-center gap-1.5 text-xs bg-gray-100 text-gray-900 hover:bg-gray-200 rounded-full pl-2.5 pr-1.5 py-1 transition"
             >
               Brand: {selectedFilter.brand}
-              <X size={11} />
+              <X size={12} />
             </button>
           )}
         </div>
@@ -853,12 +853,12 @@ export default function InventoryCategoriesPage() {
                   className="inline-flex items-center gap-1.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-full pl-2.5 pr-1.5 py-1 transition-colors flex-shrink-0"
                   title={`Search: ${appliedQuery}`}
                 >
-                  <Search size={11} />
+                  <Search size={12} />
                   <span className="max-w-[160px] truncate">"{appliedQuery}"</span>
                   <span className="text-[10px] bg-gray-200 text-gray-600 rounded-full px-1.5 py-0.5 tabular-nums">
                     {groups.length}
                   </span>
-                  <X size={11} />
+                  <X size={12} />
                 </button>
               )}
               <p className="text-sm text-gray-500 truncate">
@@ -970,9 +970,9 @@ export default function InventoryCategoriesPage() {
                       >
                         <Td className="w-6">
                           {isExpanded ? (
-                            <ChevronDown size={13} className="text-gray-400" />
+                            <ChevronDown size={12} className="text-gray-400" />
                           ) : (
-                            <ChevronRight size={13} className="text-gray-400" />
+                            <ChevronRight size={12} className="text-gray-400" />
                           )}
                         </Td>
                         <Td className="font-medium text-gray-900 truncate" title={group.product_title}>

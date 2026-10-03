@@ -164,17 +164,17 @@ export default function AddCustomerPage() {
             </div>
             <div className="space-y-3 text-sm">
               <div className="flex items-center gap-2">
-                <Phone size={15} className="text-gray-400" />
+                <Phone size={14} className="text-gray-400" />
                 <span className="text-gray-700">{phone.trim() || "No primary phone"}</span>
               </div>
               {phone2.trim() && (
                 <div className="flex items-center gap-2">
-                  <Phone size={15} className="text-gray-400" />
+                  <Phone size={14} className="text-gray-400" />
                   <span className="text-gray-700">{phone2.trim()}</span>
                 </div>
               )}
               <div className="flex items-start gap-2">
-                <MapPin size={15} className="text-gray-400 mt-0.5" />
+                <MapPin size={14} className="text-gray-400 mt-0.5" />
                 <span className="text-gray-700">
                   {[addLine1.trim(), addLine2.trim(), city.trim()].filter(Boolean).join(", ") || "No address added"}
                 </span>

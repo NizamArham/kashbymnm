@@ -10,6 +10,7 @@ import { api, ApiRequestError } from "../lib/api";
 import { Input, Label, FormGroup, ErrorText, Badge } from "./ui";
 import ChangePartnerModal from "./ChangePartnerModal";
 import { CityPicker } from "./CityPicker";
+import { previewPdf } from "../lib/pdfPreview";
 
 function formatLabelDate(d: Date): string {
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -248,8 +249,11 @@ export default function PackWaybillModal({
     setProcessing(true);
     try {
       const pdf = generateWaybillLabelPdf(labelData);
-      pdf.save(`M&M_Waybill_${trackingNumber}.pdf`);
-      onPacked(trackingNumber.trim());
+      // The order is only marked packed once the waybill is really taken —
+      // downloaded or printed from the preview — so closing the preview
+      // without it leaves everything as it was.
+      const packedAs = trackingNumber.trim();
+      previewPdf(pdf, `M&M_Waybill_${trackingNumber}.pdf`, { onSaved: () => onPacked(packedAs) });
     } catch {
       setError("Failed to generate the PDF — try again");
     } finally {
@@ -398,14 +402,14 @@ export default function PackWaybillModal({
                         }`}
                       >
                         <span className="flex items-start gap-1.5 min-w-0">
-                          <MapPin size={13} className="text-gray-400 flex-shrink-0 mt-0.5" />
+                          <MapPin size={12} className="text-gray-400 flex-shrink-0 mt-0.5" />
                           <span className="min-w-0 text-gray-800">
                             {[a.address_line1, a.address_line2, a.city].filter(Boolean).join(", ") || "No address text"}
                           </span>
                         </span>
                         <span className="flex items-center gap-1.5 flex-shrink-0">
                           {a.is_default === 1 && <Badge label="Default" tone="neutral" />}
-                          {isActive && <Check size={13} className="text-black" />}
+                          {isActive && <Check size={12} className="text-black" />}
                         </span>
                       </button>
                     );
@@ -436,7 +440,7 @@ export default function PackWaybillModal({
                       <button
                         onClick={submitNewAddress}
                         disabled={savingNewAddress}
-                        className="flex-1 px-3 py-1.5 bg-black text-white rounded-lg text-xs font-medium hover:bg-gray-800 transition disabled:opacity-50"
+                        className="flex-1 px-3 py-1.5 bg-black text-white rounded-xl text-xs font-medium hover:bg-gray-800 transition disabled:opacity-50"
                       >
                         {savingNewAddress ? "Saving..." : "Save & use this"}
                       </button>
@@ -445,9 +449,9 @@ export default function PackWaybillModal({
                 ) : (
                   <button
                     onClick={openAddAddress}
-                    className="mt-1.5 w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-dashed border-gray-300 text-xs font-medium text-gray-600 hover:bg-gray-50 transition"
+                    className="mt-1.5 w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-dashed border-gray-300 text-xs font-medium text-gray-600 hover:bg-gray-50 transition"
                   >
-                    <Plus size={13} />
+                    <Plus size={12} />
                     Add new address
                   </button>
                 )}
@@ -485,7 +489,7 @@ export default function PackWaybillModal({
             disabled={processing}
             className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 border border-gray-300 rounded-xl hover:bg-gray-50 transition font-medium text-sm disabled:opacity-50"
           >
-            <Printer size={15} />
+            <Printer size={14} />
             Print
           </button>
           <button
@@ -493,7 +497,7 @@ export default function PackWaybillModal({
             disabled={processing}
             className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-black text-white rounded-xl hover:bg-gray-800 transition font-medium text-sm disabled:opacity-50"
           >
-            <Download size={15} />
+            <Download size={14} />
             {processing ? "Working..." : "Save as PDF"}
           </button>
         </div>

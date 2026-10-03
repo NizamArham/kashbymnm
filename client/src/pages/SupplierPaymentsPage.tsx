@@ -828,7 +828,7 @@ export default function SupplierPaymentsPage() {
                     <Fragment key={b.id}>
                       <tr onClick={() => toggleSupplierExpand(b.id)} className="cursor-pointer hover:bg-gray-50">
                         <Td className="w-8">
-                          {isExpanded ? <ChevronDown size={15} className="text-gray-400" /> : <ChevronRight size={15} className="text-gray-400" />}
+                          {isExpanded ? <ChevronDown size={14} className="text-gray-400" /> : <ChevronRight size={14} className="text-gray-400" />}
                         </Td>
                         <Td>{b.supplier_code}</Td>
                         <Td className="font-medium">{b.name}</Td>

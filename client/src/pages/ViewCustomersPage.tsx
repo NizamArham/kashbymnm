@@ -4,10 +4,11 @@ import { api, ApiRequestError } from "../lib/api";
 import { Customer, CustomerAddress, BankAccount, CustomerGender } from "../lib/types";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { PageHeader, Card, Table, Th, Td, Input, Button, EmptyState, ErrorText, SuccessText, Label, FormGroup, Dropdown, DatePicker, HelpHint, TabToggle, SortHeader } from "../components/ui";
+import { PageHeader, Card, Table, Th, Td, Input, Button, EmptyState, ErrorText, SuccessText, Label, FormGroup, Dropdown, DatePicker, HelpHint, TabToggle, SortHeader, Badge } from "../components/ui";
 import { CityPicker } from "../components/CityPicker";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { useSortableData } from "../lib/useSortableData";
+import { downloadBalanceSlip } from "../lib/balanceSlip";
 
 function whatsappLink(phone: string): string {
   const digitsOnly = phone.replace(/\D/g, "").replace(/^0/, "");
@@ -136,6 +137,7 @@ export default function ViewCustomersPage() {
   const [creditBreakdown, setCreditBreakdown] = useState<{ amount: number; reason: string; expires_at: string | null }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [slippingBalance, setSlippingBalance] = useState(false);
   const [query, setQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
   useKeyboardShortcut("/", () => searchInputRef.current?.focus());
@@ -818,7 +820,7 @@ export default function ViewCustomersPage() {
                   <Fragment key={c.id}>
                     <tr onClick={() => toggleExpand(c)} className="cursor-pointer hover:bg-gray-50">
                       <Td className="w-8">
-                        {isExpanded ? <ChevronDown size={15} className="text-gray-400" /> : <ChevronRight size={15} className="text-gray-400" />}
+                        {isExpanded ? <ChevronDown size={14} className="text-gray-400" /> : <ChevronRight size={14} className="text-gray-400" />}
                       </Td>
                       <Td>{c.customer_code}</Td>
                       <Td className="font-medium">
@@ -939,21 +941,19 @@ export default function ViewCustomersPage() {
                                             <div key={i}>
                                               <p className="text-xs text-gray-500">+ Rs. {g.amount.toLocaleString()}</p>
                                               {g.expires_at && (
-                                                <p
-                                                  className={`inline-block mt-0.5 text-[10px] px-1.5 py-0.5 rounded border ${
-                                                    urgent
-                                                      ? "text-amber-700 bg-amber-50 border-amber-200"
-                                                      : "text-gray-500 bg-gray-50 border-gray-200"
-                                                  }`}
-                                                >
-                                                  {new Date(g.expires_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
-                                                  {daysLeft !== null && <> · {daysLeft}d left</>}
-                                                </p>
+                                                <div className="mt-0.5">
+                                                  <Badge
+                                                    label={`${new Date(g.expires_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}${
+                                                      daysLeft !== null ? ` · ${daysLeft}d left` : ""
+                                                    }`}
+                                                    tone={urgent ? "danger" : "neutral"}
+                                                  />
+                                                </div>
                                               )}
                                               {!g.expires_at && g.reason && (
-                                                <p className="inline-block mt-0.5 text-[10px] px-1.5 py-0.5 rounded border text-gray-500 bg-gray-50 border-gray-200">
-                                                  {g.reason}
-                                                </p>
+                                                <div className="mt-0.5">
+                                                  <Badge label={g.reason} tone="neutral" />
+                                                </div>
                                               )}
                                             </div>
                                           );
@@ -981,6 +981,25 @@ export default function ViewCustomersPage() {
                                       <Receipt size={12} />
                                       View payment history
                                     </button>
+                                    <button
+                                      disabled={slippingBalance}
+                                      onClick={async () => {
+                                        setSlippingBalance(true);
+                                        setError(null);
+                                        try {
+                                          await downloadBalanceSlip(expandedDetail.id);
+                                        } catch (err) {
+                                          setError(err instanceof Error ? err.message : "Couldn't create the balance slip");
+                                        } finally {
+                                          setSlippingBalance(false);
+                                        }
+                                      }}
+                                      className="inline-flex items-center gap-1 text-xs text-black underline hover:no-underline mt-1 ml-3 disabled:opacity-50"
+                                      title="Quick slip: what they owe right now, with our bank details"
+                                    >
+                                      <Wallet size={12} />
+                                      {slippingBalance ? "Preparing..." : "Balance slip"}
+                                    </button>
                                   </div>
                                 </div>
 
@@ -993,7 +1012,7 @@ export default function ViewCustomersPage() {
                                         rel="noopener noreferrer"
                                         className="inline-flex items-center gap-1.5 text-green-600 hover:text-green-700 font-medium text-sm"
                                       >
-                                        <MessageCircle size={15} />
+                                        <MessageCircle size={14} />
                                         Message on WhatsApp
                                       </a>
                                     ) : (
@@ -1012,7 +1031,7 @@ export default function ViewCustomersPage() {
                                           }}
                                           className="inline-flex items-center gap-1 text-gray-500 hover:text-black"
                                         >
-                                          <UserCheck size={13} />
+                                          <UserCheck size={12} />
                                           Reactivate
                                         </button>
                                       ) : (
@@ -1024,7 +1043,7 @@ export default function ViewCustomersPage() {
                                           }}
                                           className="inline-flex items-center gap-1 text-gray-500 hover:text-black"
                                         >
-                                          <UserX size={13} />
+                                          <UserX size={12} />
                                           Suspend
                                         </button>
                                       )}
@@ -1032,7 +1051,7 @@ export default function ViewCustomersPage() {
                                         onClick={() => openDelete(expandedDetail)}
                                         className="inline-flex items-center gap-1 text-gray-500 hover:text-red-600"
                                       >
-                                        <Trash2 size={13} />
+                                        <Trash2 size={12} />
                                         Delete
                                       </button>
                                     </div>
@@ -1455,12 +1474,12 @@ export default function ViewCustomersPage() {
                         {paymentMethod === "other" && (
                           <div
                             className={`rounded-lg border px-3.5 py-3 ${
-                              payingCustomer.store_credit_balance > 0 ? "bg-blue-50 border-blue-200" : "bg-gray-50 border-gray-200"
+                              "bg-gray-50 border-gray-200"
                             }`}
                           >
                             <label
                               className={`flex items-center gap-2 text-sm ${
-                                payingCustomer.store_credit_balance > 0 ? "text-blue-900 cursor-pointer" : "text-gray-400 cursor-not-allowed"
+                                payingCustomer.store_credit_balance > 0 ? "text-gray-800 cursor-pointer" : "text-gray-400 cursor-not-allowed"
                               }`}
                             >
                               <input
@@ -1479,7 +1498,7 @@ export default function ViewCustomersPage() {
                               />
                               Deduct from store credit
                             </label>
-                            <p className={`text-xs mt-1 ${payingCustomer.store_credit_balance > 0 ? "text-blue-700" : "text-gray-400"}`}>
+                            <p className={`text-xs mt-1 ${payingCustomer.store_credit_balance > 0 ? "text-gray-600" : "text-gray-400"}`}>
                               {payingCustomer.store_credit_balance > 0
                                 ? `Rs. ${payingCustomer.store_credit_balance.toLocaleString()} store credit available — no money is taken; the credit is used up against what they owe.`
                                 : "This customer has no store credit available."}
@@ -1712,7 +1731,7 @@ export default function ViewCustomersPage() {
                     onClick={() => setReceiptAfterPayment(null)}
                     className="bg-black text-white rounded-xl py-2.5 px-4 text-sm font-medium hover:bg-gray-800 transition inline-flex items-center justify-center gap-1.5"
                   >
-                    <MessageCircle size={15} />
+                    <MessageCircle size={14} />
                     Open in WhatsApp
                   </a>
                 )}

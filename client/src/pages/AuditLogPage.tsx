@@ -151,7 +151,7 @@ export default function AuditLogPage() {
                     <Td className="font-medium">{e.staff_name}</Td>
                     <Td>
                       <span className="inline-flex items-center gap-1.5">
-                        <Icon size={13} className={meta.tone === "danger" ? "text-red-500" : meta.tone === "warning" ? "text-amber-500" : "text-gray-400"} />
+                        <Icon size={12} className={meta.tone === "danger" ? "text-red-500" : meta.tone === "warning" ? "text-amber-500" : "text-gray-400"} />
                         <Badge label={meta.label} tone={meta.tone} />
                       </span>
                     </Td>

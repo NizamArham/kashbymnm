@@ -1,8 +1,9 @@
 node_modules/
 dist/
-data/*.db
-data/*.db-shm
-data/*.db-wal
+# The live database, its backups and snapshots hold real business data —
+# never commit any of it. (The old rule said data/*.db, which only matches a
+# top-level data/ folder, not server/data/.)
+server/data/*
 .env
 *.log
 .DS_Store

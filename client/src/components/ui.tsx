@@ -4,6 +4,26 @@ import { useNavigate } from "react-router-dom";
 import { ChevronDown, ChevronUp, Check, Plus, CalendarDays, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, Minus } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 
+// ---------------------------------------------------------------------
+// UI standards for the whole app — use these instead of one-off values.
+//
+// Icons: lucide-react only, default stroke, one size scale —
+//    12  inside chips, badges and text-xs links
+//    14  the default: buttons, table actions, anything beside text-sm
+//    16  leading icons in inputs, nav items, standalone icon buttons
+//    18  dialog close (X) and card/section headers
+//    20, 24  stat tiles          32+  empty-state artwork
+//  A close button is always <X size={18} /> in text-gray-400 — never a
+//  typed "✕".
+// Buttons: <Button> (rounded-xl; sm = px-3 py-1.5 text-xs, md = px-4
+//    py-2.5 text-sm), icon + label gap-1.5. Table-row actions: <RowActions>.
+// Status / type labels: <Badge> only.
+// Shape: dialogs rounded-2xl; inputs, buttons and cards rounded-xl;
+//    notice boxes rounded-lg. Dialog titles text-base font-semibold.
+// Colour: black, grey and white. Red marks an error or a destructive
+//    action, amber a warning notice; nothing else.
+// ---------------------------------------------------------------------
+
 // A reference to another record (an invoice, a product) shown inline
 // in a list or a sentence — a dotted underline (not a solid one, and
 // no color change) so it reads as "this is a reference" rather than a
@@ -68,7 +88,7 @@ export function StatCard({ label, value, deltaPct }: { label: string; value: str
             isUp ? "text-green-600" : isDown ? "text-red-500" : "text-gray-400"
           }`}
         >
-          {isUp ? <ArrowUp size={11} className="flex-shrink-0" /> : isDown ? <ArrowDown size={11} className="flex-shrink-0" /> : <Minus size={11} className="flex-shrink-0" />}
+          {isUp ? <ArrowUp size={12} className="flex-shrink-0" /> : isDown ? <ArrowDown size={12} className="flex-shrink-0" /> : <Minus size={12} className="flex-shrink-0" />}
           <span className="truncate">{Math.abs(deltaPct!).toFixed(1)}% vs prev.</span>
         </div>
       )}
@@ -157,6 +177,7 @@ export function Dropdown({
   searchable = false,
   onCreateNew,
   createNewLabel = "+ Add new",
+  size = "md",
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -166,7 +187,12 @@ export function Dropdown({
   searchable?: boolean;
   onCreateNew?: () => void;
   createNewLabel?: string;
+  // "sm" is for dropdowns sitting inside a table row (inline edit): the
+  // same text size and a row-friendly height, so editing a row doesn't
+  // make it taller than its neighbours.
+  size?: "sm" | "md";
 }) {
+  const compact = size === "sm";
   const [open, setOpen] = useState(false);
   const [openUpward, setOpenUpward] = useState(false);
   const [query, setQuery] = useState("");
@@ -249,13 +275,13 @@ export function Dropdown({
               if (!open) openPanel();
             }}
             placeholder={placeholder}
-            className={`w-full px-3.5 py-2.5 pr-8 bg-white border rounded-xl text-sm text-gray-900 placeholder:text-gray-400 transition-all duration-200
+            className={`w-full ${compact ? "h-7 px-2 pr-6 text-xs rounded-lg" : "px-3.5 py-2.5 pr-8 text-sm rounded-xl"} bg-white border text-gray-900 placeholder:text-gray-400 transition-all duration-200
               ${disabled ? "opacity-50 cursor-not-allowed bg-gray-50" : "hover:border-gray-300"}
               ${open ? "border-gray-400 ring-2 ring-gray-100" : "border-gray-200"}`}
           />
           <ChevronDown
-            size={15}
-            className={`pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 transition-transform ${
+            size={compact ? 12 : 15}
+            className={`pointer-events-none absolute ${compact ? "right-2" : "right-3.5"} top-1/2 -translate-y-1/2 text-gray-400 transition-transform ${
               open ? "rotate-180" : ""
             }`}
           />
@@ -265,18 +291,18 @@ export function Dropdown({
           type="button"
           disabled={disabled}
           onClick={toggleOpen}
-          className={`w-full flex items-center justify-between px-3.5 py-2.5 bg-white border rounded-xl text-sm text-left transition-all duration-200
+          className={`w-full flex items-center justify-between gap-1.5 ${compact ? "h-7 px-2 text-xs rounded-lg" : "px-3.5 py-2.5 text-sm rounded-xl"} bg-white border text-left transition-all duration-200
             ${disabled ? "opacity-50 cursor-not-allowed bg-gray-50" : "hover:border-gray-300"}
             ${open ? "border-gray-400 ring-2 ring-gray-100" : "border-gray-200"}`}
         >
-          <span className={selected ? "text-gray-900" : "text-gray-400"}>{selected ? selected.label : placeholder}</span>
-          <ChevronDown size={15} className={`text-gray-400 transition-transform ${open ? "rotate-180" : ""}`} />
+          <span className={`${selected ? "text-gray-900" : "text-gray-400"} ${compact ? "min-w-0 truncate" : ""}`}>{selected ? selected.label : placeholder}</span>
+          <ChevronDown size={compact ? 12 : 15} className={`flex-shrink-0 text-gray-400 transition-transform ${open ? "rotate-180" : ""}`} />
         </button>
       )}
 
       {open && !disabled && (
         <div
-          className={`absolute z-20 w-full bg-white border border-gray-200 rounded-2xl shadow-xl overflow-hidden ${
+          className={`absolute z-20 w-full ${compact ? "min-w-[9rem] rounded-xl" : "rounded-2xl"} bg-white border border-gray-200 shadow-xl overflow-hidden ${
             openUpward ? "bottom-full mb-1.5" : "mt-1.5"
           }`}
         >
@@ -314,7 +340,7 @@ export function Dropdown({
                       setOpen(false);
                       setQuery("");
                     }}
-                    className={`w-full flex items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-sm text-left transition-colors ${
+                    className={`w-full flex items-center justify-between gap-2 rounded-lg ${compact ? "px-2.5 py-1.5 text-xs" : "px-3 py-2.5 text-sm"} text-left transition-colors ${
                       isSelected ? "bg-gray-50 font-medium text-gray-900" : "text-gray-700 hover:bg-gray-50"
                     }`}
                   >
@@ -575,6 +601,44 @@ export function Td({
   );
 }
 
+export interface RowAction {
+  label: string;
+  icon: ReactNode;
+  onClick: () => void;
+  // Plain until hovered, then tinted: "good" green, "bad" red.
+  tone?: "default" | "good" | "bad";
+  disabled?: boolean;
+}
+
+// A table row's inline actions as one tidy segmented button group — equal
+// 28px-high buttons divided by hairlines, neutral until hovered. Icon-only
+// (the label is the tooltip and the screen-reader name) so a row of four
+// actions stays compact.
+export function RowActions({ actions }: { actions: RowAction[] }) {
+  const hover = {
+    default: "hover:bg-gray-100 hover:text-gray-900",
+    good: "hover:bg-green-50 hover:text-green-700",
+    bad: "hover:bg-red-50 hover:text-red-600",
+  };
+  return (
+    <div className="inline-flex items-center divide-x divide-gray-200 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+      {actions.map((action) => (
+        <button
+          key={action.label}
+          type="button"
+          onClick={action.onClick}
+          disabled={action.disabled}
+          title={action.label}
+          aria-label={action.label}
+          className={`inline-flex h-7 w-8 items-center justify-center text-gray-500 transition-colors focus:outline-none focus-visible:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-40 ${hover[action.tone ?? "default"]}`}
+        >
+          {action.icon}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // Mobile replacement for a table row — used below `lg` where a wide table
 // with 5+ columns stops being readable. One RowCard per record; put the
 // most important 1-2 fields up top and secondary numbers in the stat strip.
@@ -614,14 +678,21 @@ export function RowCardStat({ label, value }: { label: string; value: ReactNode 
   );
 }
 
-export function Badge({ label, tone }: { label: string; tone: "success" | "warning" | "danger" | "neutral" }) {
-  const tones = {
-    success: "bg-green-50 text-green-600",
-    warning: "bg-yellow-50 text-yellow-600",
-    danger: "bg-red-50 text-red-500",
-    neutral: "bg-gray-100 text-gray-500",
-  };
-  return <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-medium capitalize ${tones[tone]}`}>{label}</span>;
+// The one status / type label used everywhere in the app — the same quiet
+// look on every page: black text on a light grey pill, no border, nothing
+// that pulls the eye. What a label means is carried by its words (Paid,
+// Unpaid, Bounced...), not by colour or weight. `tone` is still accepted so
+// callers can say what kind of state it is, but it no longer changes the
+// look — if a state ever needs to stand out again, this is the one place
+// to do it.
+export type BadgeTone = "success" | "warning" | "danger" | "neutral" | "outline";
+
+export function Badge({ label }: { label: string; tone?: BadgeTone }) {
+  return (
+    <span className="inline-block whitespace-nowrap rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-900 first-letter:uppercase">
+      {label}
+    </span>
+  );
 }
 
 export function paymentStatusTone(status: string): "success" | "warning" | "danger" {
@@ -942,7 +1013,7 @@ export function DateRangePicker({
         onClick={() => setOpen((o) => !o)}
         className="flex items-center gap-2 px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-sm hover:border-gray-300 transition-all"
       >
-        <CalendarDays size={15} className="text-gray-400" />
+        <CalendarDays size={14} className="text-gray-400" />
         <span className={startDate ? "text-gray-900" : "text-gray-400"}>{displayLabel}</span>
       </button>
 
@@ -968,14 +1039,14 @@ export function DateRangePicker({
               onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() - 1, 1))}
               className="p-1 hover:bg-gray-100 rounded-lg transition"
             >
-              <ChevronLeft size={15} />
+              <ChevronLeft size={14} />
             </button>
             <span className="text-sm font-medium text-gray-900">{monthLabel}</span>
             <button
               onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 1))}
               className="p-1 hover:bg-gray-100 rounded-lg transition"
             >
-              <ChevronRight size={15} />
+              <ChevronRight size={14} />
             </button>
           </div>
 
@@ -1132,7 +1203,7 @@ export function DatePicker({
         onClick={handleToggle}
         className="w-full flex items-center gap-2 px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-sm hover:border-gray-300 transition-all"
       >
-        <CalendarDays size={15} className="text-gray-400 flex-shrink-0" />
+        <CalendarDays size={14} className="text-gray-400 flex-shrink-0" />
         <span className={value ? "text-gray-900" : "text-gray-400"}>{value ? formatDisplay(value) : placeholder}</span>
       </button>
 
@@ -1150,7 +1221,7 @@ export function DatePicker({
                 onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() - 1, 1))}
                 className="p-1 hover:bg-gray-100 rounded-lg transition"
               >
-                <ChevronLeft size={15} />
+                <ChevronLeft size={14} />
               </button>
               <span className="text-sm font-medium text-gray-900">{monthLabel}</span>
               <button
@@ -1158,7 +1229,7 @@ export function DatePicker({
                 onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 1))}
                 className="p-1 hover:bg-gray-100 rounded-lg transition"
               >
-                <ChevronRight size={15} />
+                <ChevronRight size={14} />
               </button>
             </div>
 

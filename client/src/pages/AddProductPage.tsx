@@ -822,7 +822,7 @@ export default function AddProductPage() {
                       onClick={() => fillAllQuantities("1")}
                       className="text-xs text-gray-500 hover:text-gray-800 flex items-center gap-1 border border-gray-200 rounded-lg px-2.5 py-1.5"
                     >
-                      <Wand2 size={13} />
+                      <Wand2 size={12} />
                       Set all to 1
                     </button>
                   </div>

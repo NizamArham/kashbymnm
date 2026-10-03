@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { X, RotateCcw, Landmark } from "lucide-react";
 import { ChequeInfo } from "../lib/types";
+import { Badge, BadgeTone } from "./ui";
 
 const ONES = [
   "", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",
@@ -97,10 +98,10 @@ const STATUS_LABELS: Record<string, string> = {
   pending: "Pending",
 };
 
-function statusTone(status: string): string {
-  if (status === "cleared") return "bg-green-50 text-green-700 border-green-200";
-  if (status === "bounced") return "bg-red-50 text-red-700 border-red-200";
-  return "bg-amber-50 text-amber-700 border-amber-200";
+function statusTone(status: string): BadgeTone {
+  if (status === "cleared") return "success";
+  if (status === "bounced") return "danger";
+  return "warning";
 }
 
 // The one plain crossing mark — two straight parallel diagonal lines,
@@ -150,17 +151,13 @@ export default function ChequePreviewModal({
             was pure duplication. One slim status-and-controls row is all
             the chrome this needs. */}
         <div className="px-5 py-3.5 flex items-center justify-between">
-          <span
-            className={`inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded-full border ${statusTone(cheque.status)}`}
-          >
-            {STATUS_LABELS[cheque.status] ?? cheque.status}
-          </span>
+          <Badge label={STATUS_LABELS[cheque.status] ?? cheque.status} tone={statusTone(cheque.status)} />
           <div className="flex items-center gap-4">
             <button
               onClick={() => setFlipped((f) => !f)}
               className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-800"
             >
-              <RotateCcw size={13} />
+              <RotateCcw size={12} />
               {flipped ? "View front" : "View back"}
             </button>
             <button onClick={onClose} className="text-gray-400 hover:text-gray-600">

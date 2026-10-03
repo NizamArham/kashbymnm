@@ -462,7 +462,7 @@ export default function DashboardPage() {
               return (
                 <div key={ev.id} className="flex items-start gap-3">
                   <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${TONE_CLASSES[ev.tone]}`}>
-                    <Icon size={15} />
+                    <Icon size={14} />
                   </div>
                   <div className="min-w-0 pt-1">
                     <p className="text-sm text-gray-800">{ev.title}</p>

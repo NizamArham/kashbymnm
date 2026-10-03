@@ -5,6 +5,7 @@ import { nextCustomerCode, nextTransactionCode } from "../lib/codes";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth, requireRole } from "../lib/auth";
 import { logAudit } from "../lib/auditLog";
+import { storeCreditSources } from "../lib/storeCreditSources";
 
 export const customersRouter = Router();
 
@@ -508,7 +509,7 @@ customersRouter.get(
       .all(req.params.id) as any[];
     const payments = db
       .prepare(
-        `SELECT id, entry_date, amount, payment_method, notes FROM cash_book
+        `SELECT id, entry_date, amount, payment_method, notes, transaction_code FROM cash_book
          WHERE category = 'customer_payment' AND reference_id = ? ORDER BY entry_date`
       )
       .all(req.params.id) as any[];
@@ -521,7 +522,7 @@ customersRouter.get(
     // debt here, even though it's already settled everywhere else.
     const salePayments = db
       .prepare(
-        `SELECT id, entry_date, amount, payment_method, notes, reference_id FROM cash_book
+        `SELECT id, entry_date, amount, payment_method, notes, reference_id, transaction_code FROM cash_book
          WHERE category = 'sale' AND type = 'income'
            AND reference_id IN (SELECT id FROM sales WHERE customer_id = ? AND is_voided = 0 AND status = 'completed')
          ORDER BY entry_date`
@@ -535,7 +536,7 @@ customersRouter.get(
       .all(req.params.id) as any[];
     const credits = db
       .prepare(
-        `SELECT id, created_at, amount, reason, reference_id, notes FROM store_credit_transactions WHERE customer_id = ? ORDER BY created_at`
+        `SELECT id, created_at, amount, reason, reference_id, notes, expires_at FROM store_credit_transactions WHERE customer_id = ? ORDER BY created_at`
       )
       .all(req.params.id) as any[];
     // A prepaid online order's payment also covered its delivery fee,
@@ -576,9 +577,50 @@ customersRouter.get(
       // below nets owed against credit, so this is what lets it also be
       // shown split into the two parts.
       credit_delta?: number;
+      credit_reason?: string;
+      // Short main text for the row (the label says it in a full sentence).
+      title?: string;
+      // Cash-book transaction ID of a payment (e.g. TXN-0056).
+      transaction_code?: string | null;
+      // Extra lines shown under a sale: how store credit paid for it.
+      details?: string[];
       sale_id?: number;
       sale_invoice?: string;
     };
+    const methodLabel = (m: string | null) => {
+      const t = (m ?? "").replace(/_/g, " ").trim();
+      return t ? t.charAt(0).toUpperCase() + t.slice(1) : "";
+    };
+    // What a return's store credit was for: the item, its invoice, why.
+    const returnInfo = db.prepare(
+      `SELECT s.invoice, r.reason, p.product_title, i.size, i.color
+       FROM returns r
+       JOIN sale_items si ON si.id = r.sale_item_id
+       JOIN sales s ON s.id = si.sale_id
+       LEFT JOIN inventory i ON i.id = si.inventory_id
+       LEFT JOIN products p ON p.id = i.product_id
+       WHERE r.id = ?`
+    );
+    const shortDate = (iso: string) => {
+      const d = new Date(iso.replace(" ", "T"));
+      return Number.isNaN(d.getTime()) ? iso.slice(0, 10) : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+    };
+    const returnCredit = (c: { amount: number; reason: string; reference_id: number | null; expires_at: string | null }) => {
+      if (c.amount <= 0 || c.reason !== "return_exchange" || c.reference_id == null) return null;
+      const r = returnInfo.get(c.reference_id) as { invoice: string; reason: string | null; product_title: string | null; size: string | null; color: string | null } | undefined;
+      if (!r) return null;
+      const variant = [r.size, r.color].filter(Boolean).join(", ");
+      const item = `${r.product_title ?? "Returned item"}${variant ? ` (${variant})` : ""}`;
+      return {
+        label: `Return — ${item} from invoice ${r.invoice}`,
+        title: item,
+        details: [
+          `Returned from invoice ${r.invoice}${r.reason ? ` · ${r.reason}` : ""}`,
+          ...(c.expires_at ? [`Store credit valid until ${shortDate(c.expires_at)}`] : []),
+        ],
+      };
+    };
+
     const entries: LedgerEntry[] = [
       ...sales.map((s) => ({
         date: s.date,
@@ -592,14 +634,15 @@ customersRouter.get(
       ...payments.map((p) => ({
         date: p.entry_date,
         type: "payment" as const,
-        label: `Payment${p.payment_method ? ` (${p.payment_method})` : ""}`,
+        label: `Payment${p.payment_method ? ` (${methodLabel(p.payment_method)})` : ""}`,
         amount: p.amount,
         effect: -p.amount,
+        transaction_code: p.transaction_code,
       })),
       ...salePayments.map((p) => {
         const deliveryPart = Math.min(feeLeft.get(p.reference_id) ?? 0, p.amount);
         if (deliveryPart > 0) feeLeft.set(p.reference_id, (feeLeft.get(p.reference_id) ?? 0) - deliveryPart);
-        const baseLabel = p.notes || `Payment${p.payment_method ? ` (${p.payment_method})` : ""}`;
+        const baseLabel = p.notes || `Payment${p.payment_method ? ` (${methodLabel(p.payment_method)})` : ""}`;
         explain(p.reference_id, p.amount - deliveryPart);
         return {
           date: p.entry_date,
@@ -607,6 +650,7 @@ customersRouter.get(
           label: deliveryPart > 0 ? `${baseLabel} (incl. Rs. ${deliveryPart.toLocaleString()} delivery fee)` : baseLabel,
           amount: p.amount,
           effect: -(p.amount - deliveryPart),
+          transaction_code: p.transaction_code,
           sale_id: p.reference_id,
         };
       }),
@@ -630,15 +674,20 @@ customersRouter.get(
         // (voided) would just be an unexplained line — its sale and
         // payments are hidden, and its credit movements cancel out.
         .filter((c) => !isSaleLinkedCredit(c) || ledgerSaleIds.has(c.reference_id))
-        .map((c) => ({
+        .map((c) => {
+          const ret = returnCredit(c);
+          return {
           date: c.created_at,
           type: "credit" as const,
-          label: c.amount > 0 ? c.notes || "Store credit granted" : `Credit applied${c.notes ? ` — ${c.notes}` : ""}`,
+          label: ret?.label ?? (c.amount > 0 ? c.notes || "Store credit granted" : `Store credit removed${c.notes ? ` — ${c.notes}` : ""}`),
+          ...(ret ? { title: ret.title, details: ret.details } : {}),
           amount: Math.abs(c.amount),
           effect: isSaleLinkedCredit(c) ? 0 : -c.amount,
           credit_delta: c.amount,
+          credit_reason: c.reason,
           ...(isSaleLinkedCredit(c) ? { sale_id: c.reference_id } : {}),
-        })),
+          };
+        }),
     ];
 
     // Payments that were applied straight onto a sale's amount_paid with
@@ -719,7 +768,79 @@ customersRouter.get(
       return { ...entry, running_balance: runningBalance, owed_balance: owedBalance, credit_balance: creditBalance };
     });
 
-    res.json({ customer, entries: withBalance, final_balance: runningBalance });
+    // Store credit spent on (or kept from) an invoice never changes the
+    // balance, so it isn't a row of its own — it becomes a line under that
+    // invoice saying how it was paid, and which return the credit came from.
+    const detailsBySale = new Map<number, string[]>();
+    const addDetail = (saleId: number, text: string) => detailsBySale.set(saleId, [...(detailsBySale.get(saleId) ?? []), text]);
+    const money = (n: number) => `Rs. ${n.toLocaleString()}`;
+    const spentSales = new Set<number>();
+    // An overpayment kept as credit and a later correction of it are one
+    // story: only what's left after netting them is worth a line.
+    const keptBySale = new Map<number, number>();
+    for (const e of withBalance) {
+      if (e.type !== "credit" || e.effect !== 0 || e.sale_id == null) continue;
+      const delta = e.credit_delta ?? 0;
+      if (e.credit_reason === "redemption" && delta < 0) {
+        if (spentSales.has(e.sale_id)) continue;
+        spentSales.add(e.sale_id);
+        const sources = storeCreditSources(e.sale_id, Number(req.params.id));
+        if (sources.length > 0) for (const src of sources) addDetail(e.sale_id, `${money(src.amount)} paid from store credit — ${src.label}`);
+        else addDetail(e.sale_id, `${money(-delta)} paid from store credit`);
+      } else {
+        keptBySale.set(e.sale_id, Math.round(((keptBySale.get(e.sale_id) ?? 0) + delta) * 100) / 100);
+      }
+    }
+    for (const [saleId, kept] of keptBySale) {
+      if (kept > 0) addDetail(saleId, `${money(kept)} overpayment kept as store credit`);
+      else if (kept < 0) addDetail(saleId, `${money(-kept)} store credit taken back`);
+    }
+    // kind is what the page shows in its Type column; title is the row's
+    // short main text (the sale's invoice, the payment method, the item).
+    const visible = withBalance
+      .filter((e) => !(e.type === "credit" && e.effect === 0 && e.sale_id != null))
+      .map((e) => {
+        const kind = e.type === "credit" ? (e.credit_reason === "return_exchange" ? "return" : "credit") : e.type;
+        const title = e.title ?? (e.type === "sale" ? e.sale_invoice : e.label.replace(/^Payment \((.+)\)$/, "$1"));
+        const details = e.type === "sale" && e.sale_id != null && detailsBySale.has(e.sale_id) ? detailsBySale.get(e.sale_id) : e.details;
+        return { ...e, kind, title, ...(details ? { details } : {}) };
+      });
+
+    res.json({ customer, entries: visible, final_balance: runningBalance });
+  })
+);
+
+// GET /api/customers/:id/amount-due — what a customer needs to pay right
+// now: every invoice still owing money, the store credit they can use
+// against it, and the net amount to pay. Same sources as the customer's
+// own balance_due / store_credit_balance, so a payment request can never
+// disagree with the ledger's Balance.
+customersRouter.get(
+  "/:id/amount-due",
+  asyncHandler(async (req, res) => {
+    const customer = db
+      .prepare(`SELECT customers.id, customers.name, customers.customer_code, customers.phone, ${CALC_SUBQUERY} FROM customers WHERE customers.id = ?`)
+      .get(req.params.id) as any;
+    if (!customer) throw new ApiError(404, "Customer not found");
+
+    const invoices = db
+      .prepare(
+        `SELECT id, invoice, date, total, amount_paid, ROUND(total - amount_paid, 2) AS balance
+         FROM sales
+         WHERE customer_id = ? AND is_voided = 0 AND status = 'completed' AND total - amount_paid > 0.009
+         ORDER BY date, id`
+      )
+      .all(req.params.id);
+
+    const owed = customer.balance_due as number;
+    const credit = customer.store_credit_balance as number;
+    res.json({
+      customer: { id: customer.id, name: customer.name, customer_code: customer.customer_code, phone: customer.phone },
+      invoices,
+      owed,
+      store_credit: credit,
+      amount_to_pay: Math.max(0, Math.round((owed - credit) * 100) / 100),
+    });
   })
 );
 

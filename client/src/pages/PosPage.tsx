@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, KeyboardEvent } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, KeyboardEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Trash2,
@@ -24,6 +24,7 @@ import {
   Printer,
   Receipt,
   MessageCircle,
+  ChevronUp,
 } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { InventoryUnit, Customer, SaleType, CustomerAddress, Coupon, CustomerGender, Sale } from "../lib/types";
@@ -179,6 +180,61 @@ export default function PosPage() {
   const [amountPaid, setAmountPaid] = useState("");
 
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  // "Sale details" (customer, discount, coupon, delivery, payment) fold away so the
+  // cart can have the room. They open upward from the bar and close back down into
+  // it. Remembered between sales, and they open by themselves when the sale needs
+  // something from them (an online order, or a checkout that's missing a field).
+  const [detailsOpen, setDetailsOpen] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("mm_pos_details_open") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const [detailsSettled, setDetailsSettled] = useState(true); // false while the open/close animation runs
+  useEffect(() => {
+    setDetailsSettled(false);
+    const t = setTimeout(() => setDetailsSettled(true), 220);
+    return () => clearTimeout(t);
+  }, [detailsOpen]);
+  useEffect(() => {
+    if (checkoutError) setDetailsOpen(true);
+  }, [checkoutError]);
+  useEffect(() => {
+    if (saleType === "online") setDetailsOpen(true);
+  }, [saleType]);
+  // How tall the open details may be: whatever is left once the header, the strip and
+  // the totals bar have their share, keeping about two cart rows on screen. null means
+  // they fit as they are — then nothing scrolls inside them and dropdowns open freely.
+  const panelRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const detailsContentRef = useRef<HTMLDivElement>(null);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const pinnedRef = useRef<HTMLDivElement>(null);
+  const [detailsMaxHeight, setDetailsMaxHeight] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const measure = () => {
+      const panel = panelRef.current;
+      const content = detailsContentRef.current;
+      if (!panel || !content) return;
+      const fixed = (headerRef.current?.offsetHeight ?? 0) + (toggleRef.current?.offsetHeight ?? 0) + (pinnedRef.current?.offsetHeight ?? 0);
+      const room = panel.clientHeight - fixed - 120;
+      setDetailsMaxHeight(content.scrollHeight > room ? Math.max(room, 120) : null);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    [panelRef.current, headerRef.current, detailsContentRef.current, pinnedRef.current].forEach((el) => el && observer.observe(el));
+    return () => observer.disconnect();
+  }, []);
+  function toggleDetails() {
+    const next = !detailsOpen;
+    setDetailsOpen(next);
+    try {
+      localStorage.setItem("mm_pos_details_open", next ? "1" : "0");
+    } catch {
+      // remembering the choice is optional
+    }
+  }
   const [checkoutSuccess, setCheckoutSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -210,6 +266,20 @@ export default function PosPage() {
       : appliedCoupon.discount_value
     : 0;
   const combinedDiscount = manualDiscountAmount + couponDiscountAmount;
+  const paymentLabels: Record<string, string> = { cash: "Cash", card: "Card", bank_transfer: "Bank" };
+  const detailsSummary = [
+    selectedCustomer ? selectedCustomer.name : saleType === "online" ? "No customer yet" : "Walk-in",
+    combinedDiscount > 0 ? `Discount Rs. ${combinedDiscount.toLocaleString()}` : null,
+    saleType === "online"
+      ? deliveryPartner
+        ? partnerLabel(deliveryPartner)
+        : null
+      : isCreditSale
+        ? "Credit"
+        : (paymentLabels[paymentMethod] ?? paymentMethod),
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   const total = Math.max(0, subtotal - combinedDiscount);
   const availableStoreCredit = selectedCustomer?.store_credit_balance ?? 0;
@@ -1048,21 +1118,21 @@ export default function PosPage() {
     return [
       {
         key: "a4",
-        icon: <FileText size={17} className="text-gray-700" />,
+        icon: <FileText size={16} className="text-gray-700" />,
         title: "A4 Quotation (PDF)",
         subtitle: "Full-page printable quote",
         onClick: () => downloadA4Pdf(sale),
       },
       {
         key: "thermal",
-        icon: <Receipt size={17} className="text-gray-700" />,
+        icon: <Receipt size={16} className="text-gray-700" />,
         title: "80mm Receipt (PDF)",
         subtitle: "For thermal till printers",
         onClick: () => downloadThermalPdf(sale),
       },
       {
         key: "whatsapp",
-        icon: <MessageCircle size={17} className="text-green-600" />,
+        icon: <MessageCircle size={16} className="text-green-600" />,
         iconBgClass: "bg-green-50",
         title: "Send via WhatsApp",
         subtitle: "Text summary to customer's phone",
@@ -1079,10 +1149,10 @@ export default function PosPage() {
   }
 
   return (
-    <div className="flex flex-col lg:h-screen p-3 lg:p-4 gap-3 lg:gap-4 lg:overflow-hidden">
-      <div className="flex-1 flex flex-col lg:flex-row gap-3 lg:gap-4 lg:min-h-0">
-        <div className="flex-1 flex flex-col bg-white rounded-2xl shadow-sm border border-gray-200 lg:overflow-hidden lg:min-h-0">
-          <div className="p-4 border-b border-gray-200 bg-white flex-shrink-0">
+    <div className="flex-1 min-h-0 flex flex-col p-3 lg:p-4 gap-3 lg:gap-4 overflow-hidden">
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-3 lg:gap-4">
+        <div ref={panelRef} className="flex-1 min-h-0 flex flex-col bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+          <div ref={headerRef} className="p-4 border-b border-gray-200 bg-white flex-shrink-0">
             <div className="flex flex-col gap-3 lg:grid lg:grid-cols-3 lg:items-center">
               <div className="flex items-center justify-between gap-3 min-w-0">
                 <div className="flex items-center gap-3 min-w-0">
@@ -1133,7 +1203,7 @@ export default function PosPage() {
                     showBrowser ? "bg-black text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
                   }`}
                 >
-                  <Package size={15} />
+                  <Package size={14} />
                   {showBrowser ? "Hide products" : "Browse products"}
                 </button>
               </div>
@@ -1162,7 +1232,7 @@ export default function PosPage() {
 
             <div className="mt-3 relative" ref={productBoxRef}>
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={17} />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
                 <input
                   ref={productInputRef}
                   type="text"
@@ -1204,6 +1274,7 @@ export default function PosPage() {
             {productSearchError && <ErrorText>{productSearchError}</ErrorText>}
           </div>
 
+          <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
           {cart.length === 0 ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center min-h-0 py-10 lg:py-0">
               <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mb-3">
@@ -1213,7 +1284,7 @@ export default function PosPage() {
               <p className="text-sm text-gray-500 mt-1">Search for products or browse the catalog</p>
             </div>
           ) : (
-            <div className="lg:flex-1 lg:overflow-y-auto p-4 lg:min-h-0">
+            <div className="p-4">
               <div className="space-y-2">
                 <div className="hidden lg:grid grid-cols-12 gap-3 px-4 py-2 bg-gray-50 rounded-lg text-xs font-medium text-gray-600">
                   <div className="col-span-5">Product</div>
@@ -1239,7 +1310,7 @@ export default function PosPage() {
                         className="w-5 h-5 flex items-center justify-center rounded-full border border-gray-300 text-gray-500 hover:border-gray-900 hover:text-gray-900 transition flex-shrink-0"
                         aria-label="Decrease quantity"
                       >
-                        <Minus size={11} />
+                        <Minus size={12} />
                       </button>
                       <span className="w-4 text-center text-xs font-semibold text-gray-700">{qty}</span>
                       <button
@@ -1249,7 +1320,7 @@ export default function PosPage() {
                         className="w-5 h-5 flex items-center justify-center rounded-full border border-gray-300 text-gray-500 hover:border-gray-900 hover:text-gray-900 transition flex-shrink-0 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:border-gray-300 disabled:hover:text-gray-500"
                         aria-label="Increase quantity"
                       >
-                        <Plus size={11} />
+                        <Plus size={12} />
                       </button>
                     </div>
                   );
@@ -1307,7 +1378,7 @@ export default function PosPage() {
                               {isDiscounted && <p className="text-xs text-gray-400 line-through">Rs. {originalPrice.toLocaleString()}</p>}
                             </div>
                             <button onClick={() => startEditPrice(line)} className="text-gray-400 hover:text-gray-600 ml-1 flex-shrink-0">
-                              <Edit2 size={13} />
+                              <Edit2 size={12} />
                             </button>
                           </div>
                         )}
@@ -1318,7 +1389,7 @@ export default function PosPage() {
                       </div>
                       <div className="col-span-1 text-right hidden lg:block">
                         <button onClick={() => removeFromCart(lineKey)} className="text-gray-400 hover:text-red-500 transition">
-                          <Trash2 size={15} />
+                          <Trash2 size={14} />
                         </button>
                       </div>
                     </div>
@@ -1327,8 +1398,24 @@ export default function PosPage() {
               </div>
             </div>
           )}
+          </div>
 
-          <div className="border-t border-gray-200 bg-white p-4 flex-shrink-0">
+          {/* Sale details — sits right above the bar, so opening it grows the panel
+              upward (the cart gives up the room) and closing it drops back down. On a
+              short window it scrolls inside itself rather than push the buttons away. */}
+          <div
+            className="flex-shrink-0 grid transition-[grid-template-rows] duration-200 ease-out"
+            style={{ gridTemplateRows: detailsOpen ? "1fr" : "0fr" }}
+            aria-hidden={!detailsOpen}
+          >
+            <div
+              id="pos-sale-details"
+              style={detailsMaxHeight !== null ? { maxHeight: detailsMaxHeight } : undefined}
+              className={`min-h-0 ${
+                detailsOpen && detailsSettled ? (detailsMaxHeight !== null ? "overflow-y-auto" : "overflow-visible") : "overflow-hidden"
+              } ${!detailsOpen && detailsSettled ? "invisible" : ""}`}
+            >
+          <div ref={detailsContentRef} className="border-t border-gray-200 bg-white p-4">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 lg:gap-6 items-start">
               <div className="space-y-3">
                 <FormGroup>
@@ -1397,7 +1484,7 @@ export default function PosPage() {
                 <div>
                   <div className="flex items-center justify-between mb-1.5 h-5">
                     <div className="flex items-center gap-2">
-                      <User size={15} className="text-gray-600" />
+                      <User size={14} className="text-gray-600" />
                       <span className="text-sm font-medium text-gray-700">
                         Customer
                         {saleType === "online" && (
@@ -1410,7 +1497,7 @@ export default function PosPage() {
                     </div>
                     {selectedCustomer && (
                       <button onClick={removeCustomer} className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1">
-                        <X size={11} /> Remove
+                        <X size={12} /> Remove
                       </button>
                     )}
                   </div>
@@ -1418,7 +1505,7 @@ export default function PosPage() {
                   {!selectedCustomer ? (
                     <div className="relative" ref={customerBoxRef}>
                       <div className="relative">
-                        <Phone size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                         <Input
                           className="pl-9 pr-9"
                           placeholder="Search by name or phone..."
@@ -1456,7 +1543,7 @@ export default function PosPage() {
                                 onClick={openAddCustomer}
                                 className="w-full flex items-center gap-1.5 px-3.5 py-2 text-left text-sm text-gray-900 font-medium hover:bg-gray-50 transition-colors border-t border-gray-100"
                               >
-                                <UserPlus size={13} />
+                                <UserPlus size={12} />
                                 Add "{customerQuery}" as new customer
                               </button>
                             </>
@@ -1465,9 +1552,9 @@ export default function PosPage() {
                               <p className="text-xs text-gray-400 mb-2">No matching customers.</p>
                               <button
                                 onClick={openAddCustomer}
-                                className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-black text-white rounded-lg text-sm hover:bg-gray-800 transition"
+                                className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-black text-white rounded-xl text-sm hover:bg-gray-800 transition"
                               >
-                                <UserPlus size={13} />
+                                <UserPlus size={12} />
                                 Add new customer
                               </button>
                             </div>
@@ -1479,25 +1566,25 @@ export default function PosPage() {
                     <div className="w-full border border-gray-300 rounded-lg bg-gray-50 px-3 py-1.5 flex items-center justify-between">
                       <div className="flex items-center gap-2.5 min-w-0 flex-1">
                         <div className="w-7 h-7 bg-black rounded-full flex items-center justify-center flex-shrink-0">
-                          <User size={13} className="text-white" />
+                          <User size={12} className="text-white" />
                         </div>
                         <p className="font-medium text-gray-900 text-sm truncate">{selectedCustomer.name}</p>
                       </div>
                       <div className="flex items-center gap-1 flex-shrink-0 ml-2">
-                        <Star size={13} className="text-amber-400" />
+                        <Star size={12} className="text-amber-400" />
                         <span className="text-sm font-semibold text-amber-700">{selectedCustomer.loyalty_points}</span>
                       </div>
                     </div>
                   )}
 
                   {availableStoreCredit > 0 && (
-                    <div className="mt-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
-                      <label className="flex items-center gap-2 text-sm text-blue-900 cursor-pointer">
+                    <div className="mt-2 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+                      <label className="flex items-center gap-2 text-sm text-gray-800 cursor-pointer">
                         <input type="checkbox" checked={useStoreCredit} onChange={(e) => setUseStoreCredit(e.target.checked)} className="rounded" />
                         Use store credit — Rs. {availableStoreCredit.toLocaleString()} available
                       </label>
                       {useStoreCredit && (
-                        <p className="text-xs text-blue-700 mt-1">Rs. {storeCreditApplied.toLocaleString()} will be applied to this sale.</p>
+                        <p className="text-xs text-gray-500 mt-1">Rs. {storeCreditApplied.toLocaleString()} will be applied to this sale.</p>
                       )}
                     </div>
                   )}
@@ -1564,35 +1651,6 @@ export default function PosPage() {
               </div>
 
               <div className="space-y-3">
-                <div>
-                  <Label>
-                    Order summary
-                    <HelpHint text="Discounts, coupons, and store credit are applied here first — the amount shown at the bottom is what's actually left to collect." />
-                  </Label>
-                  <div className="space-y-1.5 mt-1">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Subtotal</span>
-                      <span className="font-medium">Rs. {subtotal.toLocaleString()}</span>
-                    </div>
-                    {combinedDiscount > 0 && (
-                      <div className="flex justify-between text-sm text-green-600">
-                        <span>Discounts & Coupons</span>
-                        <span>- Rs. {combinedDiscount.toLocaleString()}</span>
-                      </div>
-                    )}
-                    {storeCreditApplied > 0 && (
-                      <div className="flex justify-between text-sm text-blue-600">
-                        <span>Store credit applied</span>
-                        <span>- Rs. {storeCreditApplied.toLocaleString()}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between text-lg font-bold pt-1.5 border-t border-gray-200">
-                      <span>{storeCreditApplied > 0 ? "Amount due" : "Total"}</span>
-                      <span>Rs. {(storeCreditApplied > 0 ? remainingAfterCredit : total).toLocaleString()}</span>
-                    </div>
-                  </div>
-                </div>
-
                 {saleType === "online" ? (
                   <>
                     {!isOnDemand && (
@@ -1851,6 +1909,60 @@ export default function PosPage() {
                   </>
                 )}
 
+              </div>
+            </div>
+          </div>
+            </div>
+          </div>
+
+          <button
+            ref={toggleRef}
+            type="button"
+            onClick={toggleDetails}
+            aria-expanded={detailsOpen}
+            aria-controls="pos-sale-details"
+            title={detailsOpen ? "Hide sale details" : "Show sale details — customer, discount, payment"}
+            className="flex-shrink-0 w-full flex items-center justify-between gap-3 px-4 py-2 border-t border-gray-200 bg-gray-50 hover:bg-gray-100 transition-colors text-left"
+          >
+            <span className="flex items-center gap-2 min-w-0">
+              <span className="text-xs font-medium text-gray-900 flex-shrink-0">Sale details</span>
+              <span className="truncate text-xs text-gray-500">{detailsSummary}</span>
+            </span>
+            <ChevronUp size={16} className={`flex-shrink-0 text-gray-500 transition-transform duration-200 ${detailsOpen ? "rotate-180" : ""}`} />
+          </button>
+
+          {/* Pinned to the bottom of the panel: what's owed, and the buttons —
+              always on screen however long the cart or the form gets. */}
+          <div ref={pinnedRef} className="border-t border-gray-200 bg-white px-4 py-3 flex-shrink-0 grid grid-cols-1 lg:grid-cols-2 gap-3 lg:gap-6 items-end">
+                <div>
+                  <Label>
+                    Order summary
+                    <HelpHint text="Discounts, coupons, and store credit are applied here first — the amount shown at the bottom is what's actually left to collect." />
+                  </Label>
+                  <div className="space-y-1.5 mt-1">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">Subtotal</span>
+                      <span className="font-medium">Rs. {subtotal.toLocaleString()}</span>
+                    </div>
+                    {combinedDiscount > 0 && (
+                      <div className="flex justify-between text-sm text-green-600">
+                        <span>Discounts & Coupons</span>
+                        <span>- Rs. {combinedDiscount.toLocaleString()}</span>
+                      </div>
+                    )}
+                    {storeCreditApplied > 0 && (
+                      <div className="flex justify-between text-sm text-gray-600">
+                        <span>Store credit applied</span>
+                        <span>- Rs. {storeCreditApplied.toLocaleString()}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-lg font-bold pt-1.5 border-t border-gray-200">
+                      <span>{storeCreditApplied > 0 ? "Amount due" : "Total"}</span>
+                      <span>Rs. {(storeCreditApplied > 0 ? remainingAfterCredit : total).toLocaleString()}</span>
+                    </div>
+                  </div>
+                </div>
+            <div className="space-y-2">
                 {checkoutError && <ErrorText>{checkoutError}</ErrorText>}
                 {checkoutSuccess && <SuccessText>{checkoutSuccess}</SuccessText>}
 
@@ -1875,7 +1987,6 @@ export default function PosPage() {
                     {addressCheckLoading ? "Checking address..." : "Checkout"}
                   </button>
                 </div>
-              </div>
             </div>
           </div>
         </div>
@@ -1890,7 +2001,7 @@ export default function PosPage() {
               <div className="flex items-center justify-between">
                 <h3 className="font-semibold text-gray-900 text-sm">Product catalog</h3>
                 <button onClick={toggleBrowser} className="text-gray-400 hover:text-gray-600">
-                  <X size={17} />
+                  <X size={16} />
                 </button>
               </div>
               <div className="flex gap-1.5 mt-2.5 overflow-x-auto pb-1">
@@ -2071,17 +2182,17 @@ export default function PosPage() {
                     </div>
                     <div className="space-y-3 text-sm">
                       <div className="flex items-center gap-2">
-                        <Phone size={15} className="text-gray-400" />
+                        <Phone size={14} className="text-gray-400" />
                         <span className="text-gray-700">{newCustomerPhone.trim() || "No primary phone"}</span>
                       </div>
                       {newCustomerPhone2.trim() && (
                         <div className="flex items-center gap-2">
-                          <Phone size={15} className="text-gray-400" />
+                          <Phone size={14} className="text-gray-400" />
                           <span className="text-gray-700">{newCustomerPhone2.trim()}</span>
                         </div>
                       )}
                       <div className="flex items-start gap-2">
-                        <MapPin size={15} className="text-gray-400 mt-0.5" />
+                        <MapPin size={14} className="text-gray-400 mt-0.5" />
                         <span className="text-gray-700">
                           {[newCustomerAddr1.trim(), newCustomerAddr2.trim(), newCustomerCity.trim()].filter(Boolean).join(", ") ||
                             "No address added"}
@@ -2151,7 +2262,7 @@ export default function PosPage() {
                   ) : (
                     <>
                       <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                        <AlertTriangle size={13} className="text-amber-600 flex-shrink-0 mt-0.5" />
+                        <AlertTriangle size={12} className="text-amber-600 flex-shrink-0 mt-0.5" />
                         <p className="text-xs text-amber-800">
                           {selectedCustomer?.name} has no saved address. Add one now before this order can be shipped.
                         </p>
@@ -2273,7 +2384,7 @@ export default function PosPage() {
                 </div>
                 {storeCreditApplied > 0 && (
                   <>
-                    <div className="flex justify-between text-sm text-blue-600">
+                    <div className="flex justify-between text-sm text-gray-600">
                       <span>Store credit applied</span>
                       <span>- Rs. {storeCreditApplied.toLocaleString()}</span>
                     </div>

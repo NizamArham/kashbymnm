@@ -1,15 +1,21 @@
 import { useEffect, useState, FormEvent, Fragment } from "react";
-import { Landmark, Pencil, X, ArrowLeftRight, Plus, TrendingUp, TrendingDown, Wallet, Building2, ArrowUpRight, ArrowDownLeft, ChevronDown, ChevronRight, Download } from "lucide-react";
+import { Landmark, Pencil, X, Check, Loader2, ArrowLeftRight, Plus, Minus, Wallet, Building2, ArrowUpRight, ArrowDownLeft, ChevronDown, ChevronRight, Download } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { CashBookEntry } from "../lib/types";
 import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
-import { PageHeader, Card, Input, Select, Label, FormGroup, ErrorText, SuccessText, Button, Table, Th, Td, EmptyState, Dropdown, DateRangePicker, HelpHint, RefLink } from "../components/ui";
+import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, EmptyState, Dropdown, DateRangePicker, HelpHint, RefLink } from "../components/ui";
 
 const PAYMENT_METHOD_OPTIONS = [
   { value: "cash", label: "Cash" },
   { value: "card", label: "Card" },
-  { value: "bank_transfer", label: "Bank transfer" },
   { value: "cheque", label: "Cheque" },
+  { value: "bank_transfer", label: "Bank Transfer" },
+  { value: "other", label: "Other" },
+];
+
+const TYPE_OPTIONS = [
+  { value: "expense", label: "Debit" },
+  { value: "income", label: "Credit" },
 ];
 
 const EDIT_WINDOW_HOURS = 24;
@@ -40,8 +46,7 @@ function methodLabel(raw: string | null | undefined): string {
     card: "Card",
     bank_transfer: "Bank transfer",
     cheque: "Cheque",
-    // Legacy values from earlier iterations — kept so any rows already
-    // written still render as "Cheque" instead of a raw underscored string.
+    other: "Other",
     chq_deposit: "Cheque",
     chq_debited: "Cheque",
     cheque_deposit: "Cheque",
@@ -52,22 +57,41 @@ function methodLabel(raw: string | null | undefined): string {
   return map[raw] ?? raw.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-// Same idea as methodLabel, for the type column: display Credit/Debit,
-// but the underlying value is still income/expense.
 function typeLabel(t: string): string {
   if (t === "income") return "Credit";
   if (t === "expense") return "Debit";
   return t;
 }
 
-// Formats a plain digit string like "100000" as "100,000" for display.
-// The underlying state always holds the raw digits — this runs only on
-// the way INTO the input, so the value sent to the API stays numeric.
 function formatAmountInput(raw: string): string {
   if (!raw) return "";
   const n = parseInt(raw, 10);
   if (isNaN(n)) return "";
   return n.toLocaleString("en-US");
+}
+
+// An inline-edit control that sits exactly where the text it replaces was.
+// The original text stays in the cell (invisible) so the column keeps its
+// width and the row keeps its height; the control floats over it, as wide
+// as that column (a few pixels into the cell padding so it isn't cramped).
+// It never stretches the table, and neighbouring controls never overlap.
+function InPlace({ original, children }: { original: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="relative">
+      <div className="invisible" aria-hidden="true">
+        {original}
+      </div>
+      <div className="absolute top-1/2 -translate-y-1/2 -inset-x-1.5">{children}</div>
+    </div>
+  );
+}
+
+// Digits with at most one decimal point — a plain text box (no number-
+// spinner arrows) for typing an amount.
+function cleanDecimal(raw: string): string {
+  const digits = raw.replace(/[^\d.]/g, "");
+  const [whole, ...rest] = digits.split(".");
+  return rest.length > 0 ? `${whole}.${rest.join("")}` : whole;
 }
 
 export default function CashBookPage() {
@@ -106,6 +130,7 @@ export default function CashBookPage() {
   const [transferSubmitting, setTransferSubmitting] = useState(false);
 
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [editType, setEditType] = useState<"income" | "expense">("expense");
   const [editAmount, setEditAmount] = useState("");
   const [editMethod, setEditMethod] = useState("");
   const [editNotes, setEditNotes] = useState("");
@@ -166,11 +191,6 @@ export default function CashBookPage() {
 
   const REPORT_ROW_CAP = 500;
 
-  // Downloads the full filtered range as a PDF — not just the current
-  // page of 7 — so it needs its own fetch at report scale rather than
-  // reusing the paginated `entries` state. The server caps a single
-  // page at 500 rows; if the filtered range holds more than that, the
-  // report says so instead of silently only covering the latest 500.
   async function downloadPdf() {
     setDownloadError(null);
     setDownloading(true);
@@ -293,6 +313,7 @@ export default function CashBookPage() {
     if (e) e.stopPropagation();
     setExpandedNotesId(null);
     setEditingId(entry.id);
+    setEditType(entry.type === "income" ? "income" : "expense");
     setEditAmount(String(entry.amount));
     setEditMethod(entry.payment_method ?? "");
     setEditNotes(entry.notes ?? "");
@@ -308,6 +329,7 @@ export default function CashBookPage() {
     setEditSubmitting(true);
     try {
       await api.put(`/cash-book/${id}`, {
+        type: editType,
         amount: parseFloat(editAmount),
         payment_method: editMethod || undefined,
         notes: editNotes.trim() || undefined,
@@ -340,7 +362,7 @@ export default function CashBookPage() {
         subtitle="Sales, returns, purchases, supplier payments, cheques, and courier settlements are logged here automatically."
         action={
           <Button onClick={() => setShowTransfer(true)} className="inline-flex items-center gap-1.5">
-            <ArrowLeftRight size={15} />
+            <ArrowLeftRight size={14} />
             Move cash / bank
           </Button>
         }
@@ -358,7 +380,7 @@ export default function CashBookPage() {
         </div>
         <div className="bg-white border border-gray-200 rounded-2xl px-4 py-3.5">
           <div className="flex items-center gap-2 mb-1">
-            <Wallet size={14} className="text-amber-600" />
+            <Wallet size={14} className="text-gray-400" />
             <p className="text-xs text-gray-500">Cash in hand</p>
           </div>
           <p className="text-lg font-semibold text-gray-900 tabular-nums">
@@ -367,7 +389,7 @@ export default function CashBookPage() {
         </div>
         <div className="bg-white border border-gray-200 rounded-2xl px-4 py-3.5">
           <div className="flex items-center gap-2 mb-1">
-            <Building2 size={14} className="text-blue-600" />
+            <Building2 size={14} className="text-gray-400" />
             <p className="text-xs text-gray-500">Bank [HNB]</p>
           </div>
           <p className="text-lg font-semibold text-gray-900 tabular-nums">
@@ -396,7 +418,7 @@ export default function CashBookPage() {
       <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-4 items-start">
         <Card className="lg:sticky lg:top-6">
           <div className="flex items-center gap-2 mb-4">
-            <Plus size={15} className="text-gray-400" />
+            <Plus size={14} className="text-gray-400" />
             <h2 className="text-sm font-semibold text-gray-900">Add manual entry</h2>
             <HelpHint text="For anything with no other source — rent, utilities, misc income." />
           </div>
@@ -414,7 +436,7 @@ export default function CashBookPage() {
                       : "border-gray-200 text-gray-600 hover:border-gray-300"
                   }`}
                 >
-                  <TrendingUp size={14} />
+                  <Minus size={14} />
                   Debit
                 </button>
                 <button
@@ -426,7 +448,7 @@ export default function CashBookPage() {
                       : "border-gray-200 text-gray-600 hover:border-gray-300"
                   }`}
                 >
-                  <TrendingDown size={14} />
+                  <Plus size={14} />
                   Credit
                 </button>
               </div>
@@ -539,11 +561,11 @@ export default function CashBookPage() {
                     <tr className="bg-gray-50 border-b border-gray-100">
                       <th className="w-[24px] px-2 py-2.5"></th>
                       <th className="text-left px-3 py-2.5 text-xs font-medium text-gray-400">Date</th>
-                      <th className="text-left px-3 py-2.5 text-xs font-medium text-gray-400">Type</th>
-                      <th className="text-left px-3 py-2.5 text-xs font-medium text-gray-400">Method</th>
+                      <th className="text-left px-3 py-2.5 text-xs font-medium text-gray-400 min-w-[84px]">Type</th>
+                      <th className="text-left px-3 py-2.5 text-xs font-medium text-gray-400 min-w-[128px]">Method</th>
                       <th className="text-right px-3 py-2.5 text-xs font-medium text-gray-400">Amount</th>
                       <th className="text-right px-3 py-2.5 text-xs font-medium text-gray-400">Balance</th>
-                      <th className="w-[36px] px-2 py-2.5"></th>
+                      <th className="w-[90px] px-2 py-2.5"></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -555,43 +577,95 @@ export default function CashBookPage() {
 
                       if (isEditing) {
                         return (
-                          <tr key={entry.id} className="bg-gray-50">
-                            <td className="px-2 py-2"></td>
-                            <td className="px-3 py-2 text-gray-500 text-xs whitespace-nowrap">
+                          <tr
+                            key={entry.id}
+                            className="bg-gray-50"
+                            onKeyDown={(e) => {
+                              if (e.key === "Escape") setEditingId(null);
+                              else if (e.key === "Enter" && (e.target as HTMLElement).tagName === "INPUT" && !editSubmitting) saveEdit(entry.id);
+                            }}
+                          >
+                            <td className="px-2 py-2.5"></td>
+                            <td className="px-3 py-2.5 text-gray-500 text-xs whitespace-nowrap">
                               {entry.entry_date.slice(0, 16).replace("T", " ")}
+                              {entry.transaction_code && (
+                                <span className="block text-[10px] text-gray-300 font-mono">{entry.transaction_code}</span>
+                              )}
                             </td>
-                            <td className="px-3 py-2">
-                              <span className={`inline-flex items-center gap-1 text-xs font-medium ${
-                                entry.type === "income" ? "text-green-600" : "text-red-500"
-                              }`}>
-                                {entry.type === "income" ? <ArrowDownLeft size={12} /> : <ArrowUpRight size={12} />}
-                                {typeLabel(entry.type)}
-                              </span>
+                            <td className="px-3 py-2.5">
+                              <InPlace
+                                original={
+                                  <span className="inline-flex items-center gap-1 text-xs font-medium">
+                                    {entry.type === "income" ? <ArrowDownLeft size={12} /> : <ArrowUpRight size={12} />}
+                                    {typeLabel(entry.type)}
+                                  </span>
+                                }
+                              >
+                                <Dropdown
+                                  value={editType}
+                                  onChange={(v) => setEditType(v as "income" | "expense")}
+                                  options={TYPE_OPTIONS}
+                                  size="sm"
+                                />
+                              </InPlace>
                             </td>
-                            <td className="px-3 py-2">
-                              <Dropdown value={editMethod} onChange={setEditMethod} placeholder="—" options={PAYMENT_METHOD_OPTIONS} />
+                            <td className="px-3 py-2.5 text-xs">
+                              <InPlace original={methodLabel(entry.payment_method)}>
+                                <Dropdown
+                                  value={editMethod}
+                                  onChange={setEditMethod}
+                                  placeholder="—"
+                                  options={PAYMENT_METHOD_OPTIONS}
+                                  size="sm"
+                                />
+                              </InPlace>
                             </td>
-                            <td className="px-3 py-2">
-                              <Input
-                                type="number"
-                                min="0"
-                                value={editAmount}
-                                onChange={(e) => setEditAmount(e.target.value)}
-                                className="w-full text-right tabular-nums"
-                              />
+                            <td className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap">
+                              <InPlace
+                                original={
+                                  <span className="font-medium">
+                                    {entry.type === "income" ? "+" : "−"} Rs. {entry.amount.toLocaleString()}
+                                  </span>
+                                }
+                              >
+                                <Input
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={editAmount}
+                                  onChange={(e) => setEditAmount(cleanDecimal(e.target.value))}
+                                  className="text-right tabular-nums font-medium !h-7 !py-0 !px-2 !text-sm !rounded-lg"
+                                />
+                              </InPlace>
                             </td>
-                            <td className="px-3 py-2 text-right text-gray-500 tabular-nums whitespace-nowrap">
+                            <td className="px-3 py-2.5 text-right text-gray-500 tabular-nums whitespace-nowrap">
                               Rs. {entry.running_balance.toLocaleString()}
                             </td>
-                            <td className="px-2 py-2">
-                              <div className="flex items-center gap-1">
-                                <Button size="sm" variant="primary" disabled={editSubmitting} onClick={() => saveEdit(entry.id)}>
-                                  Save
-                                </Button>
-                                <button onClick={() => setEditingId(null)} className="text-gray-400 hover:text-gray-600">
-                                  <X size={13} />
+                            <td className="px-2 py-2.5">
+                              {/* Two matching 28px buttons, the same height and corner
+                                  radius as the dropdowns and amount box beside them. */}
+                              <div className="-my-1 flex items-center justify-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => saveEdit(entry.id)}
+                                  disabled={editSubmitting}
+                                  title="Save changes (Enter)"
+                                  aria-label="Save changes"
+                                  className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-gray-900 text-white shadow-sm transition hover:bg-black focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  {editSubmitting ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingId(null)}
+                                  disabled={editSubmitting}
+                                  title="Cancel (Esc)"
+                                  aria-label="Cancel editing"
+                                  className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition hover:border-gray-300 hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-300 focus-visible:ring-offset-1 disabled:opacity-60"
+                                >
+                                  <X size={14} />
                                 </button>
                               </div>
+                              {editError && <p className="text-[10px] text-red-500 mt-0.5">{editError}</p>}
                             </td>
                           </tr>
                         );
@@ -607,7 +681,7 @@ export default function CashBookPage() {
                           >
                             <td className="px-2 py-2.5 text-gray-400">
                               {hasNotes ? (
-                                isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />
+                                isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />
                               ) : null}
                             </td>
                             <td className="px-3 py-2.5 text-gray-500 text-xs whitespace-nowrap">
@@ -658,10 +732,6 @@ export default function CashBookPage() {
                                     {!hasNotes ? (
                                       <span className="text-gray-400 italic">No notes on this entry</span>
                                     ) : (entry.category === "sale" || entry.category === "sale_void") && entry.reference_id ? (
-                                      // The invoice number isn't a separate field here, just part of
-                                      // this sentence — linking the whole note (rather than trying to
-                                      // pick the invoice substring out of free text) still gets to the
-                                      // sale in one click.
                                       <RefLink to={`/sales/${entry.reference_id}`}>{entry.notes}</RefLink>
                                     ) : (
                                       entry.notes
