@@ -14,6 +14,7 @@ import {
   Label,
   FormGroup,
   ErrorText,
+  Modal,
   EmptyState,
   HelpHint,
   RowCard,
@@ -35,20 +36,6 @@ const KIND_OPTIONS: { value: Kind; label: string; hint: string }[] = [
     hint: "A ride/dispatch app. The fare is typed in per order, the invoice number is used as the tracking barcode, and there's no COD settlement.",
   },
 ];
-
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
-  return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div
-        className="bg-white rounded-2xl max-w-xl w-full max-h-[90vh] overflow-y-auto shadow-2xl p-7"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="text-base font-semibold text-gray-900 mb-5">{title}</h2>
-        {children}
-      </div>
-    </div>
-  );
-}
 
 function PartnerFormModal({
   partner,
@@ -104,7 +91,19 @@ function PartnerFormModal({
   }
 
   return (
-    <Modal title={editing ? `Edit ${partner!.name}` : "Add delivery partner"} onClose={onClose}>
+    <Modal
+      size="lg"
+      onClose={onClose}
+      title={editing ? `Edit ${partner!.name}` : "Add delivery partner"}
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" onClick={handleSave} disabled={saving}>
+            {saving ? "Saving..." : editing ? "Save changes" : "Add partner"}
+          </Button>
+        </>
+      }
+    >
       <div className="grid grid-cols-3 gap-4">
         <div className="col-span-2">
           <FormGroup>
@@ -189,18 +188,6 @@ function PartnerFormModal({
 
       {error && <ErrorText>{error}</ErrorText>}
 
-      <div className="flex gap-2 mt-2">
-        <button onClick={onClose} className="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-medium hover:bg-gray-50 transition">
-          Cancel
-        </button>
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="flex-1 bg-black text-white rounded-xl py-2.5 text-sm font-medium hover:bg-gray-800 transition disabled:opacity-50"
-        >
-          {saving ? "Saving..." : editing ? "Save changes" : "Add partner"}
-        </button>
-      </div>
     </Modal>
   );
 }

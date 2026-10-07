@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, CheckCircle2, Download } from "lucide-react";
+import { ArrowLeft, Check, CheckCircle2, Download } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
-import { CourierReconciliationOrder, CourierSettlement } from "../lib/types";
+import { CourierReconciliationData, CourierReconciliationOrder } from "../lib/types";
+import CourierChargeModal from "../components/CourierChargeModal";
 import { useDeliveryPartners, partnerLabel as labelFor } from "../lib/delivery";
 import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
 import { Card, Button, DateRangePicker, ErrorText, HelpHint, PageHeader, Table, Td, Th, RefLink } from "../components/ui";
 
-type Summary = { courier_partner: string; cod_collected: number; courier_charges: number; expected_net: number; delivered_orders: number };
-type ReconciliationData = { summary: Summary[]; settlements: CourierSettlement[]; orders: CourierReconciliationOrder[] };
 const money = (value: number) => `Rs. ${value.toLocaleString()}`;
 
 function todayIso(): string {
@@ -24,7 +23,8 @@ function addDaysIso(iso: string, days: number): string {
 export default function CourierOrderHistoryPage() {
   const { partners } = useDeliveryPartners();
   const navigate = useNavigate();
-  const [data, setData] = useState<ReconciliationData>({ summary: [], settlements: [], orders: [] });
+  const [data, setData] = useState<CourierReconciliationData>({ summary: [], settlements: [], adjustments: [], orders: [] });
+  const [editingOrder, setEditingOrder] = useState<CourierReconciliationOrder | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
   const downloadMenuRef = useRef<HTMLDivElement>(null);
@@ -46,7 +46,7 @@ export default function CourierOrderHistoryPage() {
 
   async function load() {
     try {
-      setData(await api.get<ReconciliationData>("/courier-reconciliation"));
+      setData(await api.get<CourierReconciliationData>("/courier-reconciliation"));
     } catch (err) {
       setError(err instanceof ApiRequestError ? err.message : "Failed to load reconciliation");
     }
@@ -55,16 +55,9 @@ export default function CourierOrderHistoryPage() {
     load();
   }, []);
 
-  const balances = useMemo(
-    () =>
-      data.summary.map((summary) => {
-        const settled = data.settlements
-          .filter((item) => item.courier_partner === summary.courier_partner)
-          .reduce((total, item) => total + item.amount_received, 0);
-        return { ...summary, balance: summary.expected_net - settled };
-      }),
-    [data]
-  );
+  // The server works out every courier's balance (expected net, less what they've
+  // paid, plus any corrections) so this report and the Couriers page always agree.
+  const balances = data.summary;
 
   const filteredOrders = useMemo(
     () =>
@@ -130,29 +123,13 @@ export default function CourierOrderHistoryPage() {
         ? {
             label: balance.balance >= 0 ? "Balance due" : "Credit",
             amount: money(Math.abs(balance.balance)),
-            note: `expected net owed: ${money(balance.expected_net)}`,
+            note: `expected net owed: ${money(balance.expected_net)}${
+              balance.adjustments_total !== 0 ? `, incl. corrections ${balance.adjustments_total > 0 ? "+" : "-"}${money(Math.abs(balance.adjustments_total))}` : ""
+            }`,
           }
         : undefined,
       filename: buildReportFilename(`${partnerLabel} Settlement`, `${orderDateStart || "all"}-to-${orderDateEnd || "now"}`),
     });
-  }
-
-  async function saveCharge(order: CourierReconciliationOrder) {
-    const value = window.prompt("Courier charge (Rs.)", String(order.courier_charge));
-    if (value === null) return;
-    const charge = Number(value);
-    if (!Number.isFinite(charge) || charge < 0) return;
-    await api.post(`/courier-reconciliation/orders/${order.id}`, { courier_charge: charge });
-    load();
-  }
-
-  async function saveReturnCharge(order: CourierReconciliationOrder) {
-    const value = window.prompt("Return-trip charge (Rs.)", String(order.return_charge));
-    if (value === null) return;
-    const returnCharge = Number(value);
-    if (!Number.isFinite(returnCharge) || returnCharge < 0) return;
-    await api.post(`/courier-reconciliation/orders/${order.id}`, { courier_charge: order.courier_charge, return_charge: returnCharge });
-    load();
   }
 
   return (
@@ -260,17 +237,27 @@ export default function CourierOrderHistoryPage() {
                     )}
                   </Td>
                   <Td>
-                    <button onClick={() => saveCharge(order)} className="text-gray-700 hover:text-black underline decoration-dotted">
+                    <button
+                      onClick={() => setEditingOrder(order)}
+                      className="text-gray-900 hover:text-black underline decoration-dotted tabular-nums"
+                      title="Enter what the courier really charged"
+                    >
                       {money(order.courier_charge)}
                     </button>
                     {order.return_charge > 0 && (
-                      <button
-                        onClick={() => saveReturnCharge(order)}
-                        className="block text-xs text-amber-600 hover:text-amber-800 underline decoration-dotted mt-0.5"
-                      >
+                      <button onClick={() => setEditingOrder(order)} className="block text-xs text-gray-500 hover:text-gray-900 underline decoration-dotted mt-0.5">
                         +{money(order.return_charge)} return
                       </button>
                     )}
+                    <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-gray-400">
+                      {order.charge_confirmed ? (
+                        <span className="inline-flex items-center gap-0.5 text-gray-500">
+                          <Check size={12} />
+                          confirmed
+                        </span>
+                      ) : null}
+                      {(order.actual_weight_kg ?? order.package_weight_kg) ? <span>{order.actual_weight_kg ?? order.package_weight_kg} kg</span> : null}
+                    </div>
                   </Td>
                   <Td className="font-semibold">
                     {money((order.delivery_status === "delivered" ? order.cod_amount : 0) - order.courier_charge - order.return_charge)}
@@ -281,6 +268,8 @@ export default function CourierOrderHistoryPage() {
           </Table>
         )}
       </Card>
+
+      {editingOrder && <CourierChargeModal order={editingOrder} onClose={() => setEditingOrder(null)} onSaved={load} />}
     </div>
   );
 }

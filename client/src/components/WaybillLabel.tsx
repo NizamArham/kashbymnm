@@ -8,6 +8,9 @@ export interface WaybillLabelData {
   addressLines: string[]; // already split into up to 3 lines
   city: string;
   cityPostalCode?: string;
+  // Set for orders that need no address (Uber / PickMe) — the address and city
+  // lines print empty instead of the blank template's placeholders.
+  addressNotNeeded?: boolean;
   phones: string[]; // up to 2, already filtered for blanks
   orderRef: string;
   pcs: number;
@@ -34,9 +37,9 @@ export const WaybillLabel = forwardRef<
   HTMLDivElement,
   { data: WaybillLabelData; barcodeRef: React.RefObject<SVGSVGElement>; onShopCodeClick?: () => void }
 >(function WaybillLabel({ data, barcodeRef, onShopCodeClick }, ref) {
-  const addressText = data.addressLines.filter(Boolean).join("\n") || "Address line 1";
+  const addressText = data.addressLines.filter(Boolean).join("\n") || (data.addressNotNeeded ? "" : "Address line 1");
   const addressTextWithComma = addressText ? `${addressText},` : addressText;
-  const cityLine = data.city ? (data.cityPostalCode ? `${data.city} [${data.cityPostalCode}].` : `${data.city}.`) : "City";
+  const cityLine = data.city ? (data.cityPostalCode ? `${data.city} [${data.cityPostalCode}].` : `${data.city}.`) : data.addressNotNeeded ? "" : "City";
   const phonesText = data.phones.filter(Boolean).join(" / ") || "Telephone Number";
 
   return (

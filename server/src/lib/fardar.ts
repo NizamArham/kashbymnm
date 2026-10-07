@@ -48,6 +48,22 @@ export class FardarRejection extends ApiError {
   }
 }
 
+// The city picker saves a post office together with its postal code, and
+// sometimes a district code too — "Bentota 80500", "Adampan(MB) 41160". Fardar
+// matches on the place's NAME alone, so "Bentota 80500" is "a city we don't
+// know". These two pick the parts apart; the code goes into the address line
+// instead (Fardar's API has no postal-code field).
+export function fardarCityName(saved: string): string {
+  return saved
+    .replace(/\s+\d{4,6}\s*$/, "") // the trailing postal code
+    .replace(/\s*\(.*?\)\s*$/, "") // a district code such as (KG) or (MB)
+    .trim();
+}
+
+export function postalCodeOf(saved: string): string | null {
+  return /\s(\d{4,6})\s*$/.exec(saved)?.[1] ?? null;
+}
+
 function requireConfig(): { url: string; clientId: string; apiKey: string } {
   const clientId = process.env.FARDAR_CLIENT_ID;
   const apiKey = process.env.FARDAR_API_KEY;

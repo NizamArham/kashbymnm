@@ -2,8 +2,17 @@ import { useState } from "react";
 import { AlertTriangle, Check } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Delivery } from "../lib/types";
-import { DELIVERY_PAID_BY_OPTIONS, DeliveryPaidBy, COURIER_API, partnerLabel, useDeliveryPartners } from "../lib/delivery";
-import { FormGroup, Label, Input, ErrorText } from "./ui";
+import {
+  COURIER_API,
+  EMPTY_ON_DEMAND_FARE,
+  OnDemandFare,
+  onDemandFareError,
+  onDemandPayload,
+  partnerLabel,
+  useDeliveryPartners,
+} from "../lib/delivery";
+import { Button, ErrorText, Modal } from "./ui";
+import { OnDemandFareInput, OnDemandPaidByPicker } from "./OnDemandFareFields";
 
 // Switch which delivery partner an order ships with, any time before the
 // courier actually has it. Shared by the Deliveries list (inline) and the
@@ -19,8 +28,7 @@ export default function ChangePartnerModal({
 }) {
   const { activePartners } = useDeliveryPartners();
   const [selected, setSelected] = useState<string | null>(null);
-  const [fare, setFare] = useState("");
-  const [paidBy, setPaidBy] = useState<DeliveryPaidBy>("customer");
+  const [fare, setFare] = useState<OnDemandFare>(EMPTY_ON_DEMAND_FARE);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -44,8 +52,9 @@ export default function ChangePartnerModal({
       setError("Pick the new delivery partner.");
       return;
     }
-    if (isOnDemand && !(parseFloat(fare) > 0)) {
-      setError(`Enter the delivery fare for ${target.name}.`);
+    const fareError = isOnDemand ? onDemandFareError(fare, target.name) : null;
+    if (fareError) {
+      setError(fareError);
       return;
     }
     setError(null);
@@ -53,7 +62,7 @@ export default function ChangePartnerModal({
     try {
       await api.put(`/deliveries/${delivery.id}/partner`, {
         delivery_partner: target.code,
-        ...(isOnDemand ? { delivery_fare: parseFloat(fare), delivery_paid_by: paidBy } : {}),
+        ...(isOnDemand ? onDemandPayload(fare) : {}),
       });
       await onChanged();
       onClose();
@@ -65,13 +74,21 @@ export default function ChangePartnerModal({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-base font-semibold text-gray-900">Change courier</h2>
-        <p className="text-xs text-gray-400 mt-0.5 mb-4">
-          {delivery.invoice} · currently {partnerLabel(delivery.delivery_partner)}
-        </p>
-
+    <Modal
+      size="lg"
+      stacked
+      onClose={onClose}
+      title="Change courier"
+      subtitle={`${delivery.invoice} · currently ${partnerLabel(delivery.delivery_partner)}`}
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" onClick={handleSave} disabled={saving || !target}>
+            {saving ? "Changing..." : "Change courier"}
+          </Button>
+        </>
+      }
+    >
         <div className="grid grid-cols-1 gap-1.5 mb-4">
           {activePartners.map((p) => {
             const isCurrent = p.code === delivery.delivery_partner;
@@ -89,7 +106,7 @@ export default function ChangePartnerModal({
                 <span>
                   <span className="text-sm font-medium block">{p.name}</span>
                   <span className={`text-xs ${isSelected ? "text-gray-300" : "text-gray-400"}`}>
-                    {p.kind === "on_demand" ? "On-demand — fare typed in" : "Courier"}
+                    {p.kind === "on_demand" ? "On-demand — fare typed in, or added later" : "Courier"}
                     {isCurrent ? " · current" : ""}
                   </span>
                 </span>
@@ -108,29 +125,9 @@ export default function ChangePartnerModal({
 
         {isOnDemand && (
           <>
-            <FormGroup>
-              <Label>Delivery fare (Rs.)</Label>
-              <Input type="number" min="0" value={fare} onChange={(e) => setFare(e.target.value)} placeholder="0" />
-            </FormGroup>
-            <FormGroup>
-              <Label>Who pays for the delivery?</Label>
-              <div className="grid grid-cols-1 gap-1.5">
-                {DELIVERY_PAID_BY_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => setPaidBy(opt.value)}
-                    className={`text-left rounded-lg border px-3 py-2 transition ${
-                      paidBy === opt.value ? "border-black bg-black text-white" : "border-gray-300 hover:border-gray-400"
-                    }`}
-                  >
-                    <span className="text-xs font-medium block">{opt.label}</span>
-                    <span className={`text-[11px] ${paidBy === opt.value ? "text-gray-300" : "text-gray-500"}`}>{opt.hint}</span>
-                  </button>
-                ))}
-              </div>
-              <p className="text-xs text-gray-400 mt-1.5">This re-prices the delivery: the customer's charge and COD are recalculated from the fare.</p>
-            </FormGroup>
+            <OnDemandFareInput value={fare} onChange={(patch) => setFare({ ...fare, ...patch })} partnerName={target.name} />
+            <OnDemandPaidByPicker value={fare} onChange={(patch) => setFare({ ...fare, ...patch })} />
+            <p className="text-xs text-gray-400 -mt-2 mb-3">This re-prices the delivery: the customer's charge and COD are recalculated from the fare.</p>
           </>
         )}
 
@@ -143,20 +140,6 @@ export default function ChangePartnerModal({
           ))}
 
         {error && <ErrorText>{error}</ErrorText>}
-
-        <div className="flex gap-2 mt-2">
-          <button onClick={onClose} className="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-medium hover:bg-gray-50 transition">
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving || !target}
-            className="flex-1 bg-black text-white rounded-xl py-2.5 text-sm font-medium hover:bg-gray-800 transition disabled:opacity-50"
-          >
-            {saving ? "Changing..." : "Change courier"}
-          </button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

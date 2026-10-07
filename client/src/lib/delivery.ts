@@ -21,7 +21,7 @@ export interface DeliveryPartnerInfo {
   sort_order: number;
 }
 
-export type DeliveryPaidBy = "customer" | "shop" | "shop_upfront";
+export type DeliveryPaidBy = "customer" | "shop" | "rider_direct";
 
 // Couriers this system can book a shipment with directly through their
 // API (keyed by partner code) — the waybill window offers a "Create
@@ -46,10 +46,58 @@ export function waybillItemsDescription(items: { product_title?: string; quantit
 }
 
 export const DELIVERY_PAID_BY_OPTIONS: { value: DeliveryPaidBy; label: string; hint: string }[] = [
-  { value: "customer", label: "Customer pays", hint: "The fare is charged to the customer." },
+  { value: "customer", label: "Customer pays us", hint: "The fare is added to the customer's bill (collected on delivery)." },
   { value: "shop", label: "Free — we pay", hint: "Free delivery: we cover the fare, nothing is charged to the customer." },
-  { value: "shop_upfront", label: "We pay now, add to bill", hint: "We pay the rider upfront on their behalf, and the fare is added to their bill." },
+  { value: "rider_direct", label: "Customer pays the rider", hint: "They settle with the rider themselves — no fare for us to enter or charge." },
 ];
+
+// The fare / who-pays choice for an on-demand order (Uber, PickMe Flash…),
+// shared by POS, "change courier" and "add fare". The fare can be left for
+// later (billed or credited first, Flash booked afterwards): the order then
+// waits, on hold, until it's entered.
+export interface OnDemandFare {
+  fare: string;
+  paidBy: DeliveryPaidBy;
+  fareLater: boolean;
+}
+
+export const EMPTY_ON_DEMAND_FARE: OnDemandFare = { fare: "", paidBy: "customer", fareLater: false };
+
+// Whether the fare is still to be typed in right now.
+export function onDemandNeedsFare(v: OnDemandFare): boolean {
+  return v.paidBy !== "rider_direct" && !v.fareLater;
+}
+
+export function onDemandFareError(v: OnDemandFare, partnerName: string): string | null {
+  if (onDemandNeedsFare(v) && !(parseFloat(v.fare) > 0)) {
+    return `Enter the delivery fare for ${partnerName} — or tick "Not known yet" to add it later.`;
+  }
+  return null;
+}
+
+// What the server is sent. A fare that isn't known (later) or isn't ours to
+// record (customer pays the rider) is simply left out.
+export function onDemandPayload(v: OnDemandFare): { delivery_paid_by: DeliveryPaidBy; delivery_fare?: number } {
+  return onDemandNeedsFare(v) ? { delivery_paid_by: v.paidBy, delivery_fare: parseFloat(v.fare) } : { delivery_paid_by: v.paidBy };
+}
+
+// Which way a saved delivery is being paid for: rider_direct lives in its
+// own flag because it can't be stored in delivery_paid_by.
+export function paidByOf(d: { delivery_paid_by?: string | null; rider_direct?: number | null }): DeliveryPaidBy | null {
+  if (d.rider_direct) return "rider_direct";
+  return (d.delivery_paid_by as DeliveryPaidBy | null | undefined) ?? null;
+}
+
+// An on-demand order whose ride isn't booked yet — no fare entered, and no
+// "customer pays the rider" to make one unnecessary. It can't be packed.
+export function isAwaitingFare(
+  d: { delivery_partner: string | null; delivery_status?: string; actual_fare?: number | null; rider_direct?: number | null },
+  partners: DeliveryPartnerInfo[]
+): boolean {
+  if (!d.delivery_partner || d.rider_direct || d.actual_fare != null) return false;
+  if (d.delivery_status === "delivered" || d.delivery_status === "returned" || d.delivery_status === "cancelled") return false;
+  return partners.find((p) => p.code === d.delivery_partner)?.kind === "on_demand";
+}
 
 // One shared copy of the partner list for the whole app — fetched once,
 // then every screen that needs a name, waybill code, tariff or tracking

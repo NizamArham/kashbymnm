@@ -1,5 +1,17 @@
 import { db } from "../db/connection";
 
+// `rider_direct` marks an on-demand order where the customer settles the
+// ride with the rider themselves, so there is no fare for us to record or
+// charge. It is its own flag (not another delivery_paid_by value) because
+// that column's CHECK list can't be widened on a live table without
+// rebuilding it. Added here, once, for databases created before it existed.
+{
+  const cols = db.prepare(`PRAGMA table_info(deliveries)`).all() as { name: string }[];
+  if (cols.length > 0 && !cols.some((c) => c.name === "rider_direct")) {
+    db.exec(`ALTER TABLE deliveries ADD COLUMN rider_direct INTEGER NOT NULL DEFAULT 0`);
+  }
+}
+
 export interface DeliveryPartnerRow {
   code: string;
   name: string;
@@ -49,26 +61,34 @@ export function calculateDeliveryFee(
 // an order to a different partner, so both price it identically.
 // Ordinary courier: fee from its weight tariff, waived if free.
 // On-demand (Uber, PickMe...): the typed-in fare is charged to the
-// customer unless the shop is bearing it ('shop' = free delivery);
-// 'shop_upfront' charges it too, since we've already paid the rider and
-// it goes on their bill.
+// customer unless the shop is bearing it ('shop' = free delivery).
+// 'rider_direct' = the customer pays the rider themselves: nothing for
+// us to charge or record.
+// The fare may be left out when the ride isn't booked yet (billing or
+// credit first, Flash later). Until it's entered the order is "awaiting
+// fare" — nothing is charged for delivery and it can't be packed.
+export type OnDemandPaidBy = "customer" | "shop" | "rider_direct";
+
 export function planDelivery(
   data: {
     package_weight_kg?: number;
     is_free_delivery: boolean;
     delivery_fare?: number;
-    delivery_paid_by?: "customer" | "shop" | "shop_upfront";
+    delivery_paid_by?: OnDemandPaidBy;
   },
   partner: DeliveryPartnerRow | undefined
 ) {
   const isOnDemand = partner?.kind === "on_demand";
-  const paidBy = isOnDemand ? data.delivery_paid_by ?? "customer" : null;
-  const actualFare = isOnDemand ? data.delivery_fare ?? 0 : null;
+  const choice: OnDemandPaidBy = data.delivery_paid_by ?? "customer";
+  const riderDirect = isOnDemand && choice === "rider_direct";
+  const knownFare = data.delivery_fare && data.delivery_fare > 0 ? data.delivery_fare : null;
+  const paidBy = isOnDemand ? (riderDirect ? "customer" : choice) : null;
+  const actualFare = isOnDemand && !riderDirect ? knownFare : null;
   const isFree = isOnDemand ? paidBy === "shop" : data.is_free_delivery;
   const fee = isOnDemand
     ? paidBy === "shop"
       ? 0
       : actualFare ?? 0
     : calculateDeliveryFee(data.package_weight_kg, data.is_free_delivery, partner);
-  return { isOnDemand, paidBy, actualFare, isFree, fee };
+  return { isOnDemand, paidBy, riderDirect, actualFare, awaitingFare: isOnDemand && !riderDirect && actualFare === null, isFree, fee };
 }
