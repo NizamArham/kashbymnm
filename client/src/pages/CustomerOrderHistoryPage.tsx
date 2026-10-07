@@ -246,7 +246,7 @@ export default function CustomerOrderHistoryPage() {
                               <table className="w-full text-sm">
                                 <thead>
                                   <tr className="bg-gray-50">
-                                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Product</th>
+                                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide min-w-[16rem]">Product</th>
                                     <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Size / Color</th>
                                     <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">SKU</th>
                                     <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Qty</th>
@@ -258,7 +258,7 @@ export default function CustomerOrderHistoryPage() {
                                 <tbody className="divide-y divide-gray-100">
                                   {groupSaleItemsForDisplay(items).map((item, i) => (
                                     <tr key={item.ids.join(",")} className={i % 2 === 1 ? "bg-gray-50/50" : ""}>
-                                      <td className="px-4 py-2 font-medium text-gray-900">{item.product_title ?? "—"}</td>
+                                      <td className="px-4 py-2 font-medium text-gray-900 min-w-[16rem]">{item.product_title ?? "—"}</td>
                                       <td className="px-4 py-2 text-gray-600">
                                         {[item.size, item.color].filter(Boolean).join(" / ") || "—"}
                                       </td>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Receipt, Download, Copy, Check, Wallet } from "lucide-react";
+import { ArrowLeft, Receipt, Download, Copy, Check, Wallet, Truck } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Customer } from "../lib/types";
 import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
@@ -13,7 +13,10 @@ interface LedgerEntry {
   type: "sale" | "payment" | "cheque" | "credit";
   // What the Type column shows. A store credit granted for a return is
   // its own kind so returns stand out from other credit.
-  kind: "sale" | "payment" | "cheque" | "credit" | "return";
+  // "courier": a COD order the courier delivered and collected — paid, with the
+  // courier until they pay it over.
+  // "on_delivery": a COD order still on its way — paid at the door, not owed on account.
+  kind: "sale" | "payment" | "cheque" | "credit" | "return" | "courier" | "on_delivery" | "exchange";
   // The row's short main text; label is the same thing as a sentence.
   title: string;
   label: string;
@@ -39,7 +42,19 @@ const PILL: Record<LedgerEntry["kind"], { text: string; tone: BadgeTone }> = {
   cheque: { text: "Cheque", tone: "success" },
   return: { text: "Return", tone: "outline" },
   credit: { text: "Credit", tone: "outline" },
+  courier: { text: "With courier", tone: "success" },
+  on_delivery: { text: "On delivery", tone: "outline" },
+  exchange: { text: "Exchange", tone: "outline" },
 };
+
+// An order whose cash is not owed on account: paid to the courier at the door and
+// not yet paid over to the shop (with_courier), or still to be paid at the door (on_delivery).
+interface WithCourier {
+  sale_id: number;
+  invoice: string;
+  partner: string;
+  amount: number;
+}
 
 // One signed figure per row: + adds to what they owe (a sale), − takes
 // away from it (a payment, or credit for a return).
@@ -112,6 +127,8 @@ export default function CustomerPaymentHistoryPage() {
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [allEntries, setAllEntries] = useState<LedgerEntry[]>([]);
   const [finalBalance, setFinalBalance] = useState(0);
+  const [withCourier, setWithCourier] = useState<WithCourier[]>([]);
+  const [onDelivery, setOnDelivery] = useState<WithCourier[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [slipping, setSlipping] = useState(false);
@@ -126,13 +143,15 @@ export default function CustomerPaymentHistoryPage() {
       setLoading(true);
       setError(null);
       try {
-        const result = await api.get<{ customer: Customer; entries: LedgerEntry[]; final_balance: number }>(
+        const result = await api.get<{ customer: Customer; entries: LedgerEntry[]; final_balance: number; with_courier: WithCourier[]; on_delivery: WithCourier[] }>(
           `/customers/${id}/payment-history`
         );
         if (cancelled) return;
         setCustomer(result.customer);
         setAllEntries(result.entries);
         setFinalBalance(result.final_balance);
+        setWithCourier(result.with_courier ?? []);
+        setOnDelivery(result.on_delivery ?? []);
       } catch (err) {
         if (!cancelled) setError(err instanceof ApiRequestError ? err.message : "Failed to load payment history");
       } finally {
@@ -157,6 +176,24 @@ export default function CustomerPaymentHistoryPage() {
   const owed = customer?.balance_due ?? Math.max(finalBalance, 0);
   const credit = customer?.store_credit_balance ?? Math.max(-finalBalance, 0);
   const headline = balanceText(finalBalance);
+
+  // Cash a courier collected from this customer at the door and hasn't paid
+  // over yet — the customer owes nothing for it. Said as good news, per courier.
+  const courierTotal = withCourier.reduce((sum, w) => sum + w.amount, 0);
+  const onDeliveryTotal = onDelivery.reduce((sum, w) => sum + w.amount, 0);
+  const listOrders = (items: WithCourier[]) => {
+    const byPartner = new Map<string, WithCourier[]>();
+    for (const w of items) byPartner.set(w.partner, [...(byPartner.get(w.partner) ?? []), w]);
+    return Array.from(byPartner, ([partner, list]) => `${partner} (${list.map((w) => w.invoice).join(", ")})`).join(" and ");
+  };
+  const courierSentence =
+    withCourier.length === 0
+      ? ""
+      : `${money(courierTotal)} of order value is paid — collected by ${listOrders(withCourier)} on delivery. We're just waiting for the courier to send it over.`;
+  const onDeliverySentence =
+    onDelivery.length === 0
+      ? ""
+      : `${money(onDeliveryTotal)} of order value will be paid on delivery — ${listOrders(onDelivery)} ${onDelivery.length === 1 ? "is" : "are"} on the way.`;
 
   // "How much is my balance?" — one click for a slip with what they owe
   // right now and our bank details.
@@ -221,7 +258,10 @@ export default function CustomerPaymentHistoryPage() {
       totalSummary: {
         label: "Closing balance",
         amount: finalBalance > 0 ? money(finalBalance) : finalBalance < 0 ? `${money(-finalBalance)} credit` : "Settled",
-        note: `Owed on invoices ${money(owed)}  |  Store credit available ${money(credit)}`,
+        note:
+          `Owed on invoices ${money(owed)}  |  Store credit available ${money(credit)}` +
+          (courierTotal > 0 ? `  |  Paid to courier, awaiting payout ${money(courierTotal)}` : "") +
+          (onDeliveryTotal > 0 ? `  |  To pay on delivery (COD) ${money(onDeliveryTotal)}` : ""),
       },
       filename: buildReportFilename("Customer Statement", `${customer.customer_code}-${toISODate(new Date())}`),
     });
@@ -288,6 +328,18 @@ export default function CustomerPaymentHistoryPage() {
               <p className="text-lg font-medium text-gray-900 mt-1 tabular-nums">{money(credit)}</p>
             </div>
           </div>
+          {courierTotal > 0 && (
+            <p className="flex items-start gap-1.5 text-xs text-gray-600 mt-3 pt-3 border-t border-gray-100">
+              <Check size={13} className="mt-px flex-shrink-0 text-emerald-600" />
+              <span>{courierSentence}</span>
+            </p>
+          )}
+          {onDeliveryTotal > 0 && (
+            <p className="flex items-start gap-1.5 text-xs text-gray-600 mt-3 pt-3 border-t border-gray-100">
+              <Truck size={13} className="mt-px flex-shrink-0 text-gray-500" />
+              <span>{onDeliverySentence}</span>
+            </p>
+          )}
           {credit > 0 && owed > 0 && (
             <p className="text-xs text-gray-400 mt-3 pt-3 border-t border-gray-100">
               Balance = {money(owed)} owed − {money(credit)} store credit. The credit comes off automatically at the next payment or invoice.

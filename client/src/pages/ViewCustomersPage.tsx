@@ -2,17 +2,21 @@ import { useEffect, useState, useMemo, Fragment, useRef } from "react";
 import { Users, Search, MessageCircle, Pencil, Plus, Star, X, ChevronDown, ChevronRight, Wallet, UserX, UserCheck, Trash2, AlertTriangle, ArrowLeft, Building2, FileText, MoreHorizontal, ShoppingBag, Receipt } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Customer, CustomerAddress, BankAccount, CustomerGender } from "../lib/types";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { PageHeader, Card, Table, Th, Td, Input, Button, EmptyState, ErrorText, SuccessText, Label, FormGroup, Dropdown, DatePicker, HelpHint, TabToggle, SortHeader, Badge } from "../components/ui";
+import { PageHeader, Card, Table, Th, Td, Input, Button, EmptyState, ErrorText, SuccessText, Label, FormGroup, Dropdown, DatePicker, HelpHint, TabToggle, SortHeader, Badge, Modal } from "../components/ui";
 import { CityPicker } from "../components/CityPicker";
+import LoyaltyAdjustModal from "../components/LoyaltyAdjustModal";
+import StoreCreditRefundModal from "../components/StoreCreditRefundModal";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { useSortableData } from "../lib/useSortableData";
 import { downloadBalanceSlip } from "../lib/balanceSlip";
+import { whatsappMessageLink, loyaltyPointsMessage } from "../lib/whatsapp";
+import { normalizePhone, phoneError, whatsappNumber } from "../lib/phone";
+import PhoneInput from "../components/PhoneInput";
 
 function whatsappLink(phone: string): string {
-  const digitsOnly = phone.replace(/\D/g, "").replace(/^0/, "");
-  return `https://wa.me/94${digitsOnly}`;
+  return `https://wa.me/${whatsappNumber(phone)}`;
 }
 
 function paymentReceiptMessage(name: string, amount: number, remainingBalance: number, fromStoreCredit = false): string {
@@ -25,11 +29,6 @@ function paymentReceiptMessage(name: string, amount: number, remainingBalance: n
     return `Hi ${name}, we've received your payment of Rs. ${amount.toLocaleString()} — your account with M&M Clothing is now fully settled. Thank you so much for your trust, and see you again soon.`;
   }
   return `Hi ${name}, thank you for your payment of Rs. ${amount.toLocaleString()}. Your M&M Clothing balance now stands at Rs. ${remainingBalance.toLocaleString()}. Whenever it's convenient, feel free to settle the rest — no rush at all. We really appreciate you.`;
-}
-
-function whatsappMessageLink(phone: string, message: string): string {
-  const digitsOnly = phone.replace(/\D/g, "").replace(/^0/, "");
-  return `https://wa.me/94${digitsOnly}?text=${encodeURIComponent(message)}`;
 }
 
 type ExpandedTab = "overview" | "contact" | "addresses" | "bank";
@@ -128,12 +127,18 @@ function PaymentPreviewPane({
 
 export default function ViewCustomersPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  // A customer opened from a link elsewhere is shown as the first row, whatever
+  // the sort order, so it's right there on arrival (cleared when the search or
+  // the sort is changed).
+  const [pinnedId, setPinnedId] = useState<number | null>(null);
   const [expandedDetail, setExpandedDetail] = useState<Customer | null>(null);
   const [expandedTab, setExpandedTab] = useState<ExpandedTab>("overview");
+  const [refundCreditFor, setRefundCreditFor] = useState<Customer | null>(null);
   const [creditBreakdown, setCreditBreakdown] = useState<{ amount: number; reason: string; expires_at: string | null }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -208,6 +213,8 @@ export default function ViewCustomersPage() {
   const [suspendSubmitting, setSuspendSubmitting] = useState(false);
 
   const [redeemTarget, setRedeemTarget] = useState<Customer | null>(null);
+  // The customer whose points are being reduced / who is being stopped from earning (admin only).
+  const [loyaltyTarget, setLoyaltyTarget] = useState<Customer | null>(null);
   const [redeemPoints, setRedeemPoints] = useState("");
   const [redeemError, setRedeemError] = useState<string | null>(null);
   const [redeemSubmitting, setRedeemSubmitting] = useState(false);
@@ -240,6 +247,22 @@ export default function ViewCustomersPage() {
   useEffect(() => {
     load();
   }, []);
+
+  // Arriving from a customer's name elsewhere (e.g. Sale History links to
+  // /customers?open=12): once the list is in, open that customer's profile
+  // as the first row.
+  useEffect(() => {
+    const openId = Number(searchParams.get("open"));
+    if (!openId || customers.length === 0) return;
+    setSearchParams({}, { replace: true });
+    const target = customers.find((c) => c.id === openId);
+    if (!target) return;
+    setQuery("");
+    setPinnedId(openId);
+    window.scrollTo({ top: 0 });
+    toggleExpand(target).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customers, searchParams]);
 
   useEffect(() => {
     const previewAmount = paymentMethod === "cheque" ? chequeListTotal : parseFloat(paymentAmount) || 0;
@@ -569,11 +592,16 @@ export default function ViewCustomersPage() {
       setEditError("Name is required");
       return;
     }
+    const badPhone = phoneError(editForm.phone) ?? phoneError(editForm.phone2);
+    if (badPhone) {
+      setEditError(badPhone);
+      return;
+    }
     try {
       await api.put(`/customers/${id}`, {
         name: editForm.name.trim(),
-        phone: editForm.phone.trim() || undefined,
-        phone2: editForm.phone2.trim() || undefined,
+        phone: normalizePhone(editForm.phone) || undefined,
+        phone2: normalizePhone(editForm.phone2) || undefined,
         gender: editForm.gender,
       });
       setEditSuccess("Saved.");
@@ -770,6 +798,16 @@ export default function ViewCustomersPage() {
     "priority"
   );
 
+  const shownCustomers = useMemo(() => {
+    if (pinnedId === null) return sortedCustomers;
+    return [...sortedCustomers.filter((c) => c.id === pinnedId), ...sortedCustomers.filter((c) => c.id !== pinnedId)];
+  }, [sortedCustomers, pinnedId]);
+
+  // Searching or re-sorting is the person choosing their own order again.
+  useEffect(() => {
+    setPinnedId(null);
+  }, [query, sortKey, sortDir]);
+
   return (
     <div>
       <PageHeader
@@ -788,7 +826,7 @@ export default function ViewCustomersPage() {
           <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
             <Search size={16} className="text-gray-400" />
           </div>
-          <Input ref={searchInputRef} className="pl-10" placeholder="Search customers... (/)" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <Input ref={searchInputRef} className="pl-10" placeholder="Search customers..." value={query} onChange={(e) => setQuery(e.target.value)} />
         </div>
       </Card>
 
@@ -813,12 +851,12 @@ export default function ViewCustomersPage() {
               </tr>
             </thead>
             <tbody>
-              {sortedCustomers.map((c) => {
+              {shownCustomers.map((c) => {
                 const isExpanded = expandedId === c.id;
                 const netBalance = c.store_credit_balance - c.balance_due;
                 return (
                   <Fragment key={c.id}>
-                    <tr onClick={() => toggleExpand(c)} className="cursor-pointer hover:bg-gray-50">
+                    <tr data-customer-row={c.id} onClick={() => toggleExpand(c)} className="cursor-pointer hover:bg-gray-50">
                       <Td className="w-8">
                         {isExpanded ? <ChevronDown size={14} className="text-gray-400" /> : <ChevronRight size={14} className="text-gray-400" />}
                       </Td>
@@ -907,6 +945,32 @@ export default function ViewCustomersPage() {
                                         Redeem
                                       </button>
                                     )}
+                                    {expandedDetail.phone && (
+                                      <a
+                                        href={whatsappMessageLink(expandedDetail.phone, loyaltyPointsMessage(expandedDetail.name, expandedDetail.loyalty_points))}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        title="Opens WhatsApp with their points balance typed in, ready to send"
+                                        className="inline-flex items-center gap-1 text-xs text-black underline hover:no-underline mt-1 ml-3"
+                                      >
+                                        <MessageCircle size={12} />
+                                        Send points
+                                      </a>
+                                    )}
+                                    {isAdmin && (
+                                      <button
+                                        onClick={() => setLoyaltyTarget(expandedDetail)}
+                                        className="inline-flex items-center gap-1 text-xs text-black underline hover:no-underline mt-1 ml-3"
+                                      >
+                                        <Pencil size={12} />
+                                        Adjust
+                                      </button>
+                                    )}
+                                    {expandedDetail.loyalty_blocked === 1 && (
+                                      <p className="text-xs text-gray-500 mt-1">
+                                        Doesn't earn points{expandedDetail.loyalty_block_reason ? ` — ${expandedDetail.loyalty_block_reason}` : ""}
+                                      </p>
+                                    )}
                                   </div>
                                   <div>
                                     <p className="text-xs text-gray-400">Balance due</p>
@@ -960,6 +1024,15 @@ export default function ViewCustomersPage() {
                                         })}
                                         <p className="text-[10px] text-gray-400">Applied automatically at checkout</p>
                                       </div>
+                                    )}
+                                    {isAdmin && expandedDetail.store_credit_balance > 0 && (
+                                      <button
+                                        onClick={() => setRefundCreditFor(expandedDetail)}
+                                        className="mt-1.5 text-xs text-black underline hover:no-underline"
+                                        title="Pay some of this store credit back as cash or a bank transfer"
+                                      >
+                                        Refund store credit
+                                      </button>
                                     )}
                                   </div>
                                   <div>
@@ -1084,11 +1157,11 @@ export default function ViewCustomersPage() {
                                       </FormGroup>
                                       <FormGroup>
                                         <Label>Phone</Label>
-                                        <Input value={editForm.phone} onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))} />
+                                        <PhoneInput value={editForm.phone} onChange={(v) => setEditForm((f) => ({ ...f, phone: v }))} />
                                       </FormGroup>
                                       <FormGroup>
                                         <Label>Phone 2</Label>
-                                        <Input value={editForm.phone2} onChange={(e) => setEditForm((f) => ({ ...f, phone2: e.target.value }))} />
+                                        <PhoneInput value={editForm.phone2} onChange={(v) => setEditForm((f) => ({ ...f, phone2: v }))} />
                                       </FormGroup>
                                       <FormGroup>
                                         <Label>Gender</Label>
@@ -1400,38 +1473,44 @@ export default function ViewCustomersPage() {
 
       {/* ================= RECORD PAYMENT WIZARD ================= */}
       {payingCustomer && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-[880px] h-[640px] shadow-2xl flex flex-col overflow-hidden">
-            <div className="px-6 py-3.5 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
-              <div className="flex items-center gap-3 min-w-0">
-                {paymentStep === 2 && (
-                  <button
-                    onClick={() => setPaymentStep(1)}
-                    className="text-gray-400 hover:text-gray-700 flex-shrink-0"
-                    title="Back to method"
-                  >
-                    <ArrowLeft size={18} />
-                  </button>
-                )}
-                <h2 className="text-base font-semibold text-gray-900 flex-shrink-0">
-                  {paymentStep === 1 ? "Record payment" : "Payment details"}
-                </h2>
-                <p className="text-xs text-gray-400 truncate">
-                  {payingCustomer.name} · owes{" "}
-                  <span className="text-gray-600 font-medium">
-                    Rs. {payingCustomer.balance_due.toLocaleString()}
-                  </span>
-                </p>
-              </div>
-              <button
-                onClick={() => setPayingCustomer(null)}
-                className="text-gray-400 hover:text-gray-600 flex-shrink-0 ml-3"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="flex-1 min-h-0 overflow-hidden">
+        <Modal
+          size="2xl"
+          height="h-[min(640px,calc(100dvh-2rem))]"
+          flush
+          onClose={() => setPayingCustomer(null)}
+          title={
+            <span className="inline-flex items-center gap-3">
+              {paymentStep === 2 && (
+                <button
+                  type="button"
+                  onClick={() => setPaymentStep(1)}
+                  className="text-gray-400 hover:text-gray-700 flex-shrink-0"
+                  title="Back to method"
+                >
+                  <ArrowLeft size={18} />
+                </button>
+              )}
+              {paymentStep === 1 ? "Record payment" : "Payment details"}
+            </span>
+          }
+          subtitle={
+            <>
+              {payingCustomer.name} · owes{" "}
+              <span className="text-gray-600 font-medium">Rs. {payingCustomer.balance_due.toLocaleString()}</span>
+            </>
+          }
+          footer={
+            <>
+              <Button onClick={() => setPayingCustomer(null)}>Cancel</Button>
+              {paymentStep === 2 && (
+                <Button variant="primary" onClick={handleRecordPayment} disabled={paymentSubmitting}>
+                  {paymentSubmitting ? "Recording..." : paymentMethod === "other" && deductFromCredit ? "Deduct from store credit" : "Confirm payment"}
+                </Button>
+              )}
+            </>
+          }
+        >
+<div className="h-full overflow-hidden">
               {paymentStep === 1 ? (
                 <div className="h-full flex flex-col items-center justify-center px-6">
                   <p className="text-sm text-gray-700 mb-5">How was this payment made?</p>
@@ -1557,7 +1636,6 @@ export default function ViewCustomersPage() {
                             value={chequeDate || null}
                             onChange={setChequeDate}
                             placeholder="Cheque date"
-                            min={todayIso()}
                           />
                           <Input
                             type="number"
@@ -1690,70 +1768,74 @@ export default function ViewCustomersPage() {
                 </div>
               )}
             </div>
-
-            <div className="px-6 py-3 border-t border-gray-100 flex justify-end gap-2 flex-shrink-0 bg-white">
-              <Button onClick={() => setPayingCustomer(null)}>Cancel</Button>
-              {paymentStep === 2 && (
-                <Button
-                  variant="primary"
-                  onClick={handleRecordPayment}
-                  disabled={paymentSubmitting}
-                >
-                  {paymentSubmitting ? "Recording..." : paymentMethod === "other" && deductFromCredit ? "Deduct from store credit" : "Confirm payment"}
-                </Button>
-              )}
-            </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {receiptAfterPayment && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl">
-            <div className="p-5 border-b border-gray-100">
-              <h2 className="text-base font-semibold text-gray-900">Payment recorded</h2>
-            </div>
-            <div className="p-5">
+        <Modal
+          size="md"
+          onClose={() => setReceiptAfterPayment(null)}
+          title="Payment recorded"
+          footer={
+            <>
+              <Button onClick={() => setReceiptAfterPayment(null)}>Skip</Button>
+              {receiptAfterPayment.phone && (
+                <a
+                  href={whatsappMessageLink(receiptAfterPayment.phone, receiptAfterPayment.message)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setReceiptAfterPayment(null)}
+                  className="bg-black text-white rounded-xl px-4 py-2.5 text-sm font-medium hover:bg-gray-800 transition inline-flex items-center justify-center gap-1.5"
+                >
+                  <MessageCircle size={14} />
+                  Open in WhatsApp
+                </a>
+              )}
+            </>
+          }
+        >
               <p className="text-xs text-gray-400 mb-3">Send a receipt to {receiptAfterPayment.name}? Review it before sending.</p>
               <p className="text-sm text-gray-700 bg-gray-50 rounded-xl p-3 mb-4 whitespace-pre-wrap">{receiptAfterPayment.message}</p>
-              <div className="flex justify-end gap-2">
-                <button
-                  onClick={() => setReceiptAfterPayment(null)}
-                  className="border border-gray-200 rounded-xl py-2.5 px-4 text-sm font-medium hover:bg-gray-50 transition"
-                >
-                  Skip
-                </button>
-                {receiptAfterPayment.phone && (
-                  <a
-                    href={whatsappMessageLink(receiptAfterPayment.phone, receiptAfterPayment.message)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={() => setReceiptAfterPayment(null)}
-                    className="bg-black text-white rounded-xl py-2.5 px-4 text-sm font-medium hover:bg-gray-800 transition inline-flex items-center justify-center gap-1.5"
-                  >
-                    <MessageCircle size={14} />
-                    Open in WhatsApp
-                  </a>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
+        </Modal>
+      )}
+
+      {refundCreditFor && (
+        <StoreCreditRefundModal
+          customer={refundCreditFor}
+          onClose={() => setRefundCreditFor(null)}
+          onDone={async () => {
+            await load();
+            await refreshExpanded(refundCreditFor.id);
+          }}
+        />
+      )}
+
+      {loyaltyTarget && (
+        <LoyaltyAdjustModal
+          customer={loyaltyTarget}
+          onClose={() => setLoyaltyTarget(null)}
+          onChanged={async () => {
+            await load();
+            if (expandedId === loyaltyTarget.id) await refreshExpanded(loyaltyTarget.id);
+          }}
+        />
       )}
 
       {redeemTarget && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl">
-            <div className="p-5 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-base font-semibold text-gray-900">
-                Redeem points — {redeemTarget.name}
-                <HelpHint text="1 point = Rs. 1 of store credit. Redeemable now that this customer has reached the 500-point minimum." />
-              </h2>
-              <button onClick={() => setRedeemTarget(null)} className="text-gray-400 hover:text-gray-600">
-                <X size={18} />
-              </button>
-            </div>
-            <div className="p-5">
+        <Modal
+          size="md"
+          onClose={() => setRedeemTarget(null)}
+          title={`Redeem points — ${redeemTarget.name}`}
+          subtitle="1 point = Rs. 1 of store credit. Redeemable now that this customer has reached the 500-point minimum."
+          footer={
+            <>
+              <Button onClick={() => setRedeemTarget(null)}>Cancel</Button>
+              <Button variant="primary" onClick={handleRedeem} disabled={redeemSubmitting}>
+                {redeemSubmitting ? "Redeeming..." : "Redeem"}
+              </Button>
+            </>
+          }
+        >
               <p className="text-xs text-gray-400 mb-3">
                 {redeemTarget.loyalty_points} points available — redeeming converts them to store credit.
               </p>
@@ -1773,56 +1855,46 @@ export default function ViewCustomersPage() {
                 </p>
               )}
               {redeemError && <ErrorText>{redeemError}</ErrorText>}
-              <div className="flex justify-end gap-2 mt-2">
-                <Button onClick={() => setRedeemTarget(null)}>Cancel</Button>
-                <Button variant="primary" onClick={handleRedeem} disabled={redeemSubmitting}>
-                  {redeemSubmitting ? "Redeeming..." : "Redeem"}
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {suspendTarget && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl">
-            <div className="p-5 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-base font-semibold text-gray-900">
-                Suspend {suspendTarget.name}
-                <HelpHint text="They'll stay fully in the system — every sale, loyalty point, and credit is untouched — they just can't be selected for a new sale until reactivated." />
-              </h2>
-              <button onClick={() => setSuspendTarget(null)} className="text-gray-400 hover:text-gray-600">
-                <X size={18} />
-              </button>
-            </div>
-            <div className="p-5">
+        <Modal
+          size="md"
+          onClose={() => setSuspendTarget(null)}
+          title={`Suspend ${suspendTarget.name}`}
+          subtitle="They'll stay fully in the system — every sale, loyalty point, and credit is untouched — they just can't be selected for a new sale until reactivated."
+          footer={
+            <>
+              <Button onClick={() => setSuspendTarget(null)}>Cancel</Button>
+              <Button variant="primary" onClick={handleSuspend} disabled={suspendSubmitting}>
+                {suspendSubmitting ? "Suspending..." : "Suspend"}
+              </Button>
+            </>
+          }
+        >
               <FormGroup>
                 <Label>Reason</Label>
                 <Input value={suspendReason} onChange={(e) => setSuspendReason(e.target.value)} />
               </FormGroup>
               {suspendError && <ErrorText>{suspendError}</ErrorText>}
-              <div className="flex justify-end gap-2 mt-2">
-                <Button onClick={() => setSuspendTarget(null)}>Cancel</Button>
-                <Button variant="primary" onClick={handleSuspend} disabled={suspendSubmitting}>
-                  {suspendSubmitting ? "Suspending..." : "Suspend"}
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {reactivateTarget && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl">
-            <div className="p-5 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-base font-semibold text-gray-900">Reactivate {reactivateTarget.name}</h2>
-              <button onClick={() => setReactivateTarget(null)} className="text-gray-400 hover:text-gray-600">
-                <X size={18} />
-              </button>
-            </div>
-            <div className="p-5">
+        <Modal
+          size="md"
+          onClose={() => setReactivateTarget(null)}
+          title={`Reactivate ${reactivateTarget.name}`}
+          footer={
+            <>
+              <Button onClick={() => setReactivateTarget(null)}>Cancel</Button>
+              <Button variant="primary" onClick={handleReactivate} disabled={reactivateSubmitting}>
+                {reactivateSubmitting ? "Reactivating..." : "Reactivate"}
+              </Button>
+            </>
+          }
+        >
               <FormGroup>
                 <Label>Reason</Label>
                 <Input
@@ -1831,33 +1903,33 @@ export default function ViewCustomersPage() {
                 />
               </FormGroup>
               {reactivateError && <ErrorText>{reactivateError}</ErrorText>}
-              <div className="flex justify-end gap-2 mt-2">
-                <Button onClick={() => setReactivateTarget(null)}>Cancel</Button>
-                <Button variant="primary" onClick={handleReactivate} disabled={reactivateSubmitting}>
-                  {reactivateSubmitting ? "Reactivating..." : "Reactivate"}
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {deleteTarget && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl">
-            <div className="p-5 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-base font-semibold text-gray-900">Delete {deleteTarget.name}?</h2>
-              <button
+        <Modal
+          size="md"
+          onClose={() => {
+            setDeleteTarget(null);
+            setDeleteWarning(null);
+          }}
+          title={`Delete ${deleteTarget.name}?`}
+          footer={
+            <>
+              <Button
                 onClick={() => {
                   setDeleteTarget(null);
                   setDeleteWarning(null);
                 }}
-                className="text-gray-400 hover:text-gray-600"
               >
-                <X size={18} />
-              </button>
-            </div>
-            <div className="p-5">
+                Cancel
+              </Button>
+              <Button variant="danger" onClick={() => handleDelete(deleteWarning !== null)} disabled={deleteSubmitting}>
+                {deleteSubmitting ? "Deleting..." : deleteWarning ? "Delete permanently anyway" : "Delete"}
+              </Button>
+            </>
+          }
+        >
               {deleteWarning ? (
                 <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
                   <AlertTriangle size={14} className="text-amber-600 flex-shrink-0 mt-0.5" />
@@ -1869,22 +1941,7 @@ export default function ViewCustomersPage() {
                 </p>
               )}
               {deleteError && <ErrorText>{deleteError}</ErrorText>}
-              <div className="flex justify-end gap-2">
-                <Button
-                  onClick={() => {
-                    setDeleteTarget(null);
-                    setDeleteWarning(null);
-                  }}
-                >
-                  Cancel
-                </Button>
-                <Button variant="danger" onClick={() => handleDelete(deleteWarning !== null)} disabled={deleteSubmitting}>
-                  {deleteSubmitting ? "Deleting..." : deleteWarning ? "Delete permanently anyway" : "Delete"}
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

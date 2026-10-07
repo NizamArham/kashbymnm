@@ -4,6 +4,8 @@ import { AlertTriangle, MapPin, Phone, UserRound } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Dropdown } from "../components/ui";
 import { CityPicker } from "../components/CityPicker";
+import PhoneInput from "../components/PhoneInput";
+import { phoneError } from "../lib/phone";
 import { CustomerGender } from "../lib/types";
 
 export default function AddCustomerPage() {
@@ -50,6 +52,11 @@ export default function AddCustomerPage() {
 
     if (!name.trim()) {
       setError("Customer name is required");
+      return;
+    }
+    const badPhone = phoneError(phone) ?? phoneError(phone2);
+    if (badPhone) {
+      setError(badPhone);
       return;
     }
 
@@ -101,7 +108,7 @@ export default function AddCustomerPage() {
           </FormGroup>
           <FormGroup>
             <Label>Phone</Label>
-            <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
+            <PhoneInput value={phone} onChange={setPhone} />
             {duplicateWarning && (
               <div className="mt-2 flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                 <AlertTriangle size={14} className="text-amber-600 flex-shrink-0 mt-0.5" />
@@ -112,10 +119,10 @@ export default function AddCustomerPage() {
               </div>
             )}
           </FormGroup>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <FormGroup>
               <Label>Phone 2 (optional)</Label>
-              <Input value={phone2} onChange={(e) => setPhone2(e.target.value)} />
+              <PhoneInput value={phone2} onChange={setPhone2} />
             </FormGroup>
             <FormGroup>
               <Label>Gender</Label>
