@@ -12,9 +12,12 @@ import {
   Download,
   FileText,
   AlertTriangle,
+  Receipt,
 } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { InventoryUnit } from "../lib/types";
+import { useAuth } from "../context/AuthContext";
+import ProductSalesModal from "../components/ProductSalesModal";
 import {
   buildCategoryTree,
   buildGenderCategoryTree,
@@ -24,7 +27,7 @@ import {
 } from "../lib/categoryTree";
 import { groupByProduct, summarizeProductVariants } from "../lib/sizeSort";
 import { createProductSearchIndex, searchProductUnits } from "../lib/productSearch";
-import { Card, Input, ErrorText, EmptyState, Table, Th, Td, Badge, inventoryStatusTone } from "../components/ui";
+import { Button, Card, Input, ErrorText, EmptyState, Modal, Table, Th, Td, Badge, inventoryStatusTone } from "../components/ui";
 import { downloadTabularReport, buildReportFilename, todayLongDate } from "../lib/reportPdf";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 
@@ -251,25 +254,8 @@ function ProductDownloadModal({
   }
 
   return (
-    <div
-      className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white rounded-2xl max-w-sm w-full shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="p-5 border-b border-gray-100 flex items-center justify-between">
-          <div className="min-w-0">
-            <h3 className="text-base font-semibold text-gray-900">Download report</h3>
-            <p className="text-xs text-gray-400 truncate">{title}</p>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 flex-shrink-0">
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="p-5 space-y-2.5">
+    <Modal size="sm" onClose={onClose} title="Download report" subtitle={title} footer={<Button onClick={onClose}>Close</Button>}>
+      <div className="space-y-2.5">
           <button
             onClick={handleDownloadA4}
             className="w-full flex items-center gap-3 px-4 py-3 border border-gray-200 rounded-xl hover:border-black hover:shadow-sm transition text-left"
@@ -289,9 +275,8 @@ function ProductDownloadModal({
               <p className="text-xs text-amber-800">{error}</p>
             </div>
           )}
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -371,6 +356,10 @@ export default function InventoryCategoriesPage() {
   // ---- Per-row menu + download modal ----
   const [openMenuId, setOpenMenuId] = useState<number | null>(null);
   const [downloadTarget, setDownloadTarget] = useState<{ title: string; rows: any[] } | null>(null);
+  // Admin only: the product whose sold-invoices list is open.
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
+  const [salesFor, setSalesFor] = useState<{ id: number; title: string } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const searchBoxRef = useRef<HTMLDivElement>(null);
@@ -704,7 +693,7 @@ export default function InventoryCategoriesPage() {
               <Input
                 ref={inputRef}
                 className="pl-8 pr-7 py-2 text-sm"
-                placeholder="Search product, brand, SKU, barcode… (/)"
+                placeholder="Search product, brand, SKU, barcode…"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onFocus={() => setSearchFocused(true)}
@@ -1040,6 +1029,18 @@ export default function InventoryCategoriesPage() {
                                   <Download size={14} />
                                   Download report
                                 </button>
+                                {isAdmin && (
+                                  <button
+                                    onClick={() => {
+                                      setOpenMenuId(null);
+                                      setSalesFor({ id: group.product_id, title: group.product_title });
+                                    }}
+                                    className="w-full flex items-center gap-2 px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition"
+                                  >
+                                    <Receipt size={14} />
+                                    Sold invoices
+                                  </button>
+                                )}
                               </div>
                             )}
                           </div>
@@ -1150,6 +1151,8 @@ export default function InventoryCategoriesPage() {
           Copied!
         </div>
       )}
+
+      {salesFor && <ProductSalesModal productId={salesFor.id} productTitle={salesFor.title} onClose={() => setSalesFor(null)} />}
 
       {/* ---------- Product download modal ---------- */}
       {downloadTarget && (

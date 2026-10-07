@@ -35,6 +35,9 @@ interface CategoryRow {
   margin_pct: number;
 }
 interface Totals {
+  gross_revenue: number;
+  returns_amount: number;
+  returns_count: number;
   revenue: number;
   cost: number;
   profit: number;
@@ -329,6 +332,14 @@ export default function AnalyticsPage() {
               />
             </div>
           </div>
+
+          {data.totals.returns_count > 0 && (
+            <p className="-mt-2 mb-5 px-1 text-xs text-gray-500">
+              Sales Rs. {data.totals.gross_revenue.toLocaleString()} − Rs. {data.totals.returns_amount.toLocaleString()} returned or
+              exchanged for credit ({data.totals.returns_count} item{data.totals.returns_count === 1 ? "" : "s"}, counted on the day
+              each was processed) = Rs. {data.totals.revenue.toLocaleString()} revenue.
+            </p>
+          )}
 
           <Card className="mb-5">
             <h3 className="text-sm font-semibold text-gray-900 mb-3">Revenue & Profit over time</h3>

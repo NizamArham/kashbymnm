@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db } from "../db/connection";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth, requireRole } from "../lib/auth";
+import { returnsInRange } from "../lib/returnedRevenue";
 
 export const analyticsRouter = Router();
 
@@ -48,6 +49,13 @@ function daysBetweenInclusive(start: string, end: string): number {
 }
 
 interface Totals {
+  // Sales rung up in the range, before any returns.
+  gross_revenue: number;
+  // What was handed back in the range: store credit given for returned items
+  // plus cash/bank refunds, and how many items that was.
+  returns_amount: number;
+  returns_count: number;
+  // gross_revenue minus returns_amount — what the range really brought in.
   revenue: number;
   cost: number;
   profit: number;
@@ -65,8 +73,11 @@ function computeTotals(start: string, end: string): Totals {
     .prepare(`SELECT total FROM sales WHERE is_voided = 0 AND status = 'completed' AND date(date) BETWEEN date(?) AND date(?)`)
     .all(start, end) as { total: number }[];
 
-  const revenue = salesInRange.reduce((sum, s) => sum + s.total, 0);
+  const gross_revenue = salesInRange.reduce((sum, s) => sum + s.total, 0);
   const orders = salesInRange.length;
+  const returned = returnsInRange(start, end);
+  const returns_amount = returned.reduce((sum, r) => sum + r.amount, 0);
+  const revenue = gross_revenue - returns_amount;
 
   const itemAgg = db
     .prepare(
@@ -78,14 +89,18 @@ function computeTotals(start: string, end: string): Totals {
     )
     .get(start, end) as { units: number; cost: number };
 
-  const profit = revenue - itemAgg.cost;
+  const cost = itemAgg.cost - returned.reduce((sum, r) => sum + r.cost, 0);
+  const profit = revenue - cost;
   return {
+    gross_revenue,
+    returns_amount,
+    returns_count: returned.length,
     revenue,
-    cost: itemAgg.cost,
+    cost,
     profit,
     margin_pct: revenue > 0 ? (profit / revenue) * 100 : 0,
     orders,
-    units: itemAgg.units,
+    units: itemAgg.units - returned.length,
     avg_order_value: orders > 0 ? revenue / orders : 0,
   };
 }
@@ -152,7 +167,30 @@ analyticsRouter.get(
         });
       }
     }
+    const returned = returnsInRange(start, end);
+    for (const r of returned) {
+      if (r.product_id == null) continue;
+      // An item sold on an earlier day and returned in this range has no sales
+      // row here yet — it gets its own, so the table still adds up to the totals.
+      let existing = byProduct.get(r.product_id);
+      if (!existing) {
+        existing = {
+          product_id: r.product_id,
+          product_title: r.product_title ?? "—",
+          brand: r.brand,
+          category: r.category,
+          units: 0,
+          revenue: 0,
+          cost: 0,
+        };
+        byProduct.set(r.product_id, existing);
+      }
+      existing.units -= 1;
+      existing.revenue -= r.amount;
+      existing.cost -= r.cost;
+    }
     const by_product = Array.from(byProduct.values())
+      .filter((p) => p.units !== 0 || p.revenue !== 0 || p.cost !== 0)
       .map((p) => ({
         ...p,
         profit: p.revenue - p.cost,
@@ -174,7 +212,19 @@ analyticsRouter.get(
         byCategory.set(cat, { category: cat, units: it.quantity, revenue: it.line_total, cost: itemCost });
       }
     }
+    for (const r of returned) {
+      const cat = topCategory(r.category);
+      let existing = byCategory.get(cat);
+      if (!existing) {
+        existing = { category: cat, units: 0, revenue: 0, cost: 0 };
+        byCategory.set(cat, existing);
+      }
+      existing.units -= 1;
+      existing.revenue -= r.amount;
+      existing.cost -= r.cost;
+    }
     const by_category = Array.from(byCategory.values())
+      .filter((c) => c.units !== 0 || c.revenue !== 0 || c.cost !== 0)
       .map((c) => ({
         ...c,
         profit: c.revenue - c.cost,
@@ -196,6 +246,12 @@ analyticsRouter.get(
       const day = saleDateById.get(it.sale_id);
       if (!day) continue;
       costByDay.set(day, (costByDay.get(day) ?? 0) + it.quantity * (it.cost_price ?? 0));
+    }
+    // Returns come off the day they were processed, in revenue and (when the
+    // unit went back on the shelf) in cost.
+    for (const r of returned) {
+      revenueByDay.set(r.day, (revenueByDay.get(r.day) ?? 0) - r.amount);
+      costByDay.set(r.day, (costByDay.get(r.day) ?? 0) - r.cost);
     }
     const allDays = Array.from(new Set([...revenueByDay.keys(), ...costByDay.keys()])).sort();
     const trend = allDays.map((day) => {

@@ -33,7 +33,9 @@ export interface PosDraftSale {
   packageWeight: string;
   isFreeDelivery: boolean;
   deliveryFare?: string;
-  deliveryPaidBy?: "customer" | "shop" | "shop_upfront";
+  deliveryPaidBy?: "customer" | "shop" | "rider_direct";
+  deliveryFareLater?: boolean;
+  isWholesale?: boolean;
   advancePaid: string;
   advancePaymentMethod: "cash" | "card" | "bank_transfer";
   discountType: "percent" | "fixed";

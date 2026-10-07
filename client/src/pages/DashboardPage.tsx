@@ -124,6 +124,9 @@ export default function DashboardPage() {
   const [owingCustomers, setOwingCustomers] = useState<Customer[]>([]);
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [returns, setReturns] = useState<ReturnRequest[]>([]);
+  // What was handed back each day this year (store credit for returned items,
+  // cash/bank refunds), so sales figures can be shown net of it.
+  const [returnedByDay, setReturnedByDay] = useState<{ day: string; amount: number; count: number }[]>([]);
   const [chartPeriod, setChartPeriod] = useState<"year" | "month">("year");
   const [loading, setLoading] = useState(true);
 
@@ -136,7 +139,8 @@ export default function DashboardPage() {
     let cancelled = false;
     async function load() {
       try {
-        const [sales, inventory, summary, suppliers, customers, deliveriesRes, returnsRes] = await Promise.all([
+        const thisYearStart = `${todayInSriLanka().slice(0, 4)}-01-01`;
+        const [sales, inventory, summary, suppliers, customers, deliveriesRes, returnsRes, returnedRes] = await Promise.all([
           api.get<Sale[]>("/sales"),
           api.get<InventoryUnit[]>("/inventory?status=available"),
           api.get<{ cash_total: number; bank_total: number }>("/cash-book/summary"),
@@ -144,6 +148,9 @@ export default function DashboardPage() {
           api.get<Customer[]>("/customers"),
           api.get<Delivery[]>("/deliveries").catch(() => []),
           api.get<ReturnRequest[]>("/returns/requests").catch(() => []),
+          api
+            .get<{ days: { day: string; amount: number; count: number }[] }>(`/returns/revenue-impact?start=${thisYearStart}&end=${todayInSriLanka()}`)
+            .catch(() => ({ days: [] })),
         ]);
         if (cancelled) return;
 
@@ -152,6 +159,7 @@ export default function DashboardPage() {
         setBankTotal(summary.bank_total);
         setDeliveries(deliveriesRes);
         setReturns(returnsRes);
+        setReturnedByDay(returnedRes.days);
 
         // Low stock count: how many distinct (product, color, size) variants
         // have 5 or fewer available units. Matches the threshold used on the
@@ -200,7 +208,10 @@ export default function DashboardPage() {
 
   const todayIso = todayInSriLanka();
   const todaySales = activeSales.filter((s) => s.date.startsWith(todayIso));
-  const todayTotal = todaySales.reduce((sum, s) => sum + s.total, 0);
+  // Net of what was returned or exchanged today — an item sold on an earlier
+  // day and swapped today takes its value off today's figure.
+  const todayReturned = returnedByDay.find((d) => d.day === todayIso)?.amount ?? 0;
+  const todayTotal = todaySales.reduce((sum, s) => sum + s.total, 0) - todayReturned;
 
   const supplierOwedTotal = owingSuppliers.reduce((sum, s) => sum + s.balance_owed, 0);
   const customerOwedTotal = owingCustomers.reduce((sum, c) => sum + c.balance_due, 0);
@@ -216,6 +227,10 @@ export default function DashboardPage() {
         const d = new Date(s.date);
         if (d.getFullYear() === year) months[d.getMonth()].value += s.total;
       }
+      for (const r of returnedByDay) {
+        const [y, m] = r.day.split("-").map(Number);
+        if (y === year) months[m - 1].value -= r.amount;
+      }
       return months;
     }
     const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
@@ -224,8 +239,12 @@ export default function DashboardPage() {
       const d = new Date(s.date);
       if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()) days[d.getDate() - 1].value += s.total;
     }
+    for (const r of returnedByDay) {
+      const [y, m, day] = r.day.split("-").map(Number);
+      if (y === now.getFullYear() && m - 1 === now.getMonth()) days[day - 1].value -= r.amount;
+    }
     return days;
-  }, [activeSales, chartPeriod]);
+  }, [activeSales, returnedByDay, chartPeriod]);
 
   const revenueTotal = revenueSeries.reduce((sum, p) => sum + p.value, 0);
 
@@ -257,6 +276,7 @@ export default function DashboardPage() {
             {todaySales.length === 0
               ? "No sales yet today"
               : `${todaySales.length} sale${todaySales.length === 1 ? "" : "s"} today`}
+            {todayReturned > 0 && ` · Rs. ${todayReturned.toLocaleString()} returned or exchanged`}
           </p>
         </Card>
 

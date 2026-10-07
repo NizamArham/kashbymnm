@@ -16,6 +16,7 @@ function niceCeiling(value: number): number {
 }
 
 function formatCompact(n: number): string {
+  if (n < 0) return `-${formatCompact(-n)}`;
   if (n >= 1_000_000) return `${+(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${+(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}k`;
   return String(Math.round(n));
@@ -37,24 +38,31 @@ export function RevenueChart({ data, height = 220 }: { data: RevenuePoint[]; hei
   const plotHeight = height - padTop - padBottom;
 
   const maxValue = useMemo(() => niceCeiling(Math.max(...data.map((d) => d.value), 1) * 1.15), [data]);
+  // A day can net below zero (more handed back in returns than sold) — the axis
+  // then gets room under its zero line.
+  const minValue = useMemo(() => {
+    const lowest = Math.min(...data.map((d) => d.value), 0);
+    return lowest < 0 ? -niceCeiling(-lowest * 1.15) : 0;
+  }, [data]);
   const gridLines = 4;
+  const yOf = (value: number) => padTop + plotHeight * ((maxValue - value) / (maxValue - minValue));
+  const zeroY = yOf(0);
 
   const points = useMemo(() => {
     if (data.length === 0) return [];
     const stepX = data.length > 1 ? plotWidth / (data.length - 1) : 0;
     return data.map((d, i) => ({
       x: padLeft + stepX * i,
-      y: padTop + plotHeight * (1 - d.value / maxValue),
+      y: yOf(d.value),
       ...d,
     }));
-  }, [data, maxValue, plotWidth, plotHeight]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, maxValue, minValue, plotWidth, plotHeight]);
 
   const linePath = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
   const areaPath =
     points.length > 0
-      ? `${linePath} L ${points[points.length - 1].x.toFixed(1)} ${(padTop + plotHeight).toFixed(1)} L ${points[0].x.toFixed(1)} ${(
-          padTop + plotHeight
-        ).toFixed(1)} Z`
+      ? `${linePath} L ${points[points.length - 1].x.toFixed(1)} ${zeroY.toFixed(1)} L ${points[0].x.toFixed(1)} ${zeroY.toFixed(1)} Z`
       : "";
 
   const hovered = hoverIndex !== null ? points[hoverIndex] : null;
@@ -85,12 +93,11 @@ export function RevenueChart({ data, height = 220 }: { data: RevenuePoint[]; hei
         </defs>
 
         {/* Recessive gridlines + y-axis labels */}
-        {Array.from({ length: gridLines + 1 }, (_, i) => {
-          const value = (maxValue / gridLines) * i;
-          const y = padTop + plotHeight * (1 - i / gridLines);
+        {[...(minValue < 0 ? [minValue] : []), ...Array.from({ length: gridLines + 1 }, (_, i) => (maxValue / gridLines) * i)].map((value, i) => {
+          const y = yOf(value);
           return (
             <g key={i}>
-              <line x1={padLeft} y1={y} x2={width - padRight} y2={y} stroke="#F1F1F1" strokeWidth={1} />
+              <line x1={padLeft} y1={y} x2={width - padRight} y2={y} stroke={value === 0 && minValue < 0 ? "#D1D5DB" : "#F1F1F1"} strokeWidth={1} />
               <text x={padLeft - 8} y={y + 3} textAnchor="end" fontSize="10" fill="#9CA3AF">
                 {formatCompact(value)}
               </text>
@@ -172,18 +179,26 @@ export function RevenueProfitChart({ data, height = 260 }: { data: RevenueProfit
     () => niceCeiling(Math.max(...data.map((d) => Math.max(d.revenue, d.profit)), 1) * 1.15),
     [data]
   );
+  // A day can net below zero when what was returned or exchanged that day is
+  // more than what was sold — the axis then gets room underneath its zero line.
+  const minValue = useMemo(() => {
+    const lowest = Math.min(...data.map((d) => Math.min(d.revenue, d.profit)), 0);
+    return lowest < 0 ? -niceCeiling(-lowest * 1.15) : 0;
+  }, [data]);
   const gridLines = 4;
+  const yOf = (value: number) => padTop + plotHeight * ((maxValue - value) / (maxValue - minValue));
 
   const points = useMemo(() => {
     if (data.length === 0) return [];
     const stepX = data.length > 1 ? plotWidth / (data.length - 1) : 0;
     return data.map((d, i) => ({
       x: padLeft + stepX * i,
-      yRevenue: padTop + plotHeight * (1 - d.revenue / maxValue),
-      yProfit: padTop + plotHeight * (1 - d.profit / maxValue),
+      yRevenue: yOf(d.revenue),
+      yProfit: yOf(d.profit),
       ...d,
     }));
-  }, [data, maxValue, plotWidth, plotHeight]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, maxValue, minValue, plotWidth, plotHeight]);
 
   const revenuePath = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.yRevenue.toFixed(1)}`).join(" ");
   const profitPath = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.yProfit.toFixed(1)}`).join(" ");
@@ -219,12 +234,11 @@ export function RevenueProfitChart({ data, height = 260 }: { data: RevenueProfit
           onMouseMove={handleMove}
           onMouseLeave={() => setHoverIndex(null)}
         >
-          {Array.from({ length: gridLines + 1 }, (_, i) => {
-            const value = (maxValue / gridLines) * i;
-            const y = padTop + plotHeight * (1 - i / gridLines);
+          {[...(minValue < 0 ? [minValue] : []), ...Array.from({ length: gridLines + 1 }, (_, i) => (maxValue / gridLines) * i)].map((value, i) => {
+            const y = yOf(value);
             return (
               <g key={i}>
-                <line x1={padLeft} y1={y} x2={width - padRight} y2={y} stroke="#F1F1F1" strokeWidth={1} />
+                <line x1={padLeft} y1={y} x2={width - padRight} y2={y} stroke={value === 0 && minValue < 0 ? "#D1D5DB" : "#F1F1F1"} strokeWidth={1} />
                 <text x={padLeft - 8} y={y + 3} textAnchor="end" fontSize="10" fill="#9CA3AF">
                   {formatCompact(value)}
                 </text>

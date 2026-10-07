@@ -112,6 +112,46 @@ productsRouter.get(
   })
 );
 
+// GET /api/products/:id/sales — admin-only. Every piece of this product that
+// has been sold, newest first: the invoice and date it went out on, which
+// size/colour, who bought it and what that piece sold for. A voided sale or a
+// returned piece stays in the list (flagged) so the history is complete, but
+// only live ones are counted in the totals.
+productsRouter.get(
+  "/:id/sales",
+  requireRole("admin"),
+  asyncHandler(async (req, res) => {
+    const product = db.prepare(`SELECT id, product_title FROM products WHERE id = ?`).get(req.params.id) as
+      | { id: number; product_title: string }
+      | undefined;
+    if (!product) throw new ApiError(404, "Product not found");
+
+    const rows = db
+      .prepare(
+        `SELECT sale_items.id AS sale_item_id, sales.id AS sale_id, sales.invoice, sales.date, sales.sale_type,
+                sales.is_voided, inventory.sku, inventory.size, inventory.color,
+                sale_items.quantity, sale_items.unit_price, sale_items.line_total,
+                customers.name AS customer_name,
+                (SELECT COUNT(*) FROM returns WHERE returns.sale_item_id = sale_items.id) AS is_returned
+         FROM sale_items
+         JOIN inventory ON inventory.id = sale_items.inventory_id
+         JOIN sales ON sales.id = sale_items.sale_id
+         LEFT JOIN customers ON customers.id = sales.customer_id
+         WHERE inventory.product_id = ? AND sales.status <> 'quotation'
+         ORDER BY sales.date DESC, sale_items.id DESC`
+      )
+      .all(product.id) as { quantity: number; line_total: number; is_voided: number; is_returned: number }[];
+
+    const live = rows.filter((r) => !r.is_voided && !r.is_returned);
+    res.json({
+      product,
+      rows,
+      pieces: live.reduce((sum, r) => sum + r.quantity, 0),
+      amount: live.reduce((sum, r) => sum + r.line_total, 0),
+    });
+  })
+);
+
 // GET /api/products/:id
 productsRouter.get(
   "/:id",
@@ -166,28 +206,53 @@ productsRouter.put(
   "/:id",
   asyncHandler(async (req, res) => {
     const data = productInput.partial().parse(req.body);
+    // Every piece of stock remembers the price IT was stocked at (two batches
+    // can differ), so changing the product's price alone leaves units already
+    // in stock untouched. apply_to_stock also sets the new price on the units
+    // still available — never on ones already sold.
+    const { apply_to_stock } = z.object({ apply_to_stock: z.boolean().optional() }).parse(req.body);
     const existing = db.prepare(`SELECT * FROM products WHERE id = ?`).get(req.params.id) as any;
     if (!existing) throw new ApiError(404, "Product not found");
 
     const merged = { ...existing, ...data };
-    db.prepare(
-      `UPDATE products SET product_title = ?, brand = ?, category = ?, cost_price = ?,
-       selling_price = ?, supplier_id = ?, image_path = ?, is_public = ?, allow_returns = ? WHERE id = ?`
-    ).run(
-      merged.product_title,
-      merged.brand,
-      merged.category,
-      merged.cost_price,
-      merged.selling_price,
-      merged.supplier_id,
-      merged.image_path,
-      merged.is_public === false || merged.is_public === 0 ? 0 : 1,
-      merged.allow_returns === false || merged.allow_returns === 0 ? 0 : 1,
-      req.params.id
-    );
+    let unitsUpdated = 0;
+    db.transaction(() => {
+      db.prepare(
+        `UPDATE products SET product_title = ?, brand = ?, category = ?, cost_price = ?,
+         selling_price = ?, supplier_id = ?, image_path = ?, is_public = ?, allow_returns = ? WHERE id = ?`
+      ).run(
+        merged.product_title,
+        merged.brand,
+        merged.category,
+        merged.cost_price,
+        merged.selling_price,
+        merged.supplier_id,
+        merged.image_path,
+        merged.is_public === false || merged.is_public === 0 ? 0 : 1,
+        merged.allow_returns === false || merged.allow_returns === 0 ? 0 : 1,
+        req.params.id
+      );
+      if (apply_to_stock && data.selling_price !== undefined) {
+        unitsUpdated = db
+          .prepare(`UPDATE inventory SET selling_price = ? WHERE product_id = ? AND status = 'available' AND COALESCE(selling_price, -1) <> ?`)
+          .run(data.selling_price, req.params.id, data.selling_price).changes;
+      }
+    })();
 
-    const updated = db.prepare(`SELECT * FROM products WHERE id = ?`).get(req.params.id);
-    res.json(updated);
+    if (data.selling_price !== undefined && (data.selling_price !== existing.selling_price || unitsUpdated > 0)) {
+      logAudit(
+        req.user!,
+        "product_price_change",
+        "product",
+        existing.id,
+        `${merged.product_title}: selling price Rs. ${existing.selling_price.toLocaleString()} → Rs. ${data.selling_price.toLocaleString()}${
+          apply_to_stock ? `, also set on ${unitsUpdated} unit${unitsUpdated === 1 ? "" : "s"} in stock` : " (units in stock keep their own prices)"
+        }`
+      );
+    }
+
+    const updated = db.prepare(`SELECT * FROM products WHERE id = ?`).get(req.params.id) as any;
+    res.json({ ...updated, units_updated: unitsUpdated });
   })
 );
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, KeyboardEvent } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, KeyboardEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Trash2,
@@ -29,13 +29,16 @@ import {
 import { api, ApiRequestError } from "../lib/api";
 import { InventoryUnit, Customer, SaleType, CustomerAddress, Coupon, CustomerGender, Sale } from "../lib/types";
 import { createProductSearchIndex, searchProductUnits } from "../lib/productSearch";
-import { Input, Label, FormGroup, ErrorText, SuccessText, Button, Dropdown, HelpHint, RefLink } from "../components/ui";
+import { Input, Label, FormGroup, ErrorText, SuccessText, Button, Dropdown, HelpHint, RefLink, Modal } from "../components/ui";
 import { CityPicker } from "../components/CityPicker";
+import { OnDemandFareInput, OnDemandPaidByPicker } from "../components/OnDemandFareFields";
 import { useAuth } from "../context/AuthContext";
 import {
   DeliveryPartner,
   DeliveryPaidBy,
-  DELIVERY_PAID_BY_OPTIONS,
+  OnDemandFare,
+  onDemandFareError,
+  onDemandPayload,
   useDeliveryPartners,
   partnerLabel,
   calculateDeliveryFee,
@@ -43,6 +46,9 @@ import {
 } from "../lib/delivery";
 import { saveDraftSale, loadDraftSale, clearDraftSale, PosDraftSale } from "../lib/posDraft";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
+import { whatsappMessageLink, loyaltyPointsMessage } from "../lib/whatsapp";
+import { normalizePhone, phoneError } from "../lib/phone";
+import PhoneInput from "../components/PhoneInput";
 import { downloadA4Pdf, downloadThermalPdf, sendWhatsAppBill } from "../lib/receipts";
 import ReceiptOptionsModal, { ModalOption } from "../components/ReceiptOptionsModal";
 
@@ -57,6 +63,32 @@ interface CartLine {
 
 function cartLineKey(u: InventoryUnit): string {
   return `${u.product_id}::${u.color ?? ""}::${u.size ?? ""}`;
+}
+
+// One tick box with a short label and its explanation in a hint, so the
+// options under the customer all read the same.
+function PosTick({
+  checked,
+  onChange,
+  label,
+  hint,
+  disabled = false,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label: string;
+  hint: string;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="flex items-center">
+      <label className={`flex items-center gap-2 text-sm ${disabled ? "text-gray-400" : "text-gray-700 cursor-pointer"}`}>
+        <input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} className="rounded" />
+        {label}
+      </label>
+      <HelpHint text={hint} />
+    </div>
+  );
 }
 
 export default function PosPage() {
@@ -97,6 +129,12 @@ export default function PosPage() {
   // checkout says who bears it.
   const [deliveryFare, setDeliveryFare] = useState("");
   const [deliveryPaidBy, setDeliveryPaidBy] = useState<DeliveryPaidBy>("customer");
+  // Billed or credited first, Flash booked later: leave the fare out and the
+  // order waits (on hold) until it's entered from the Deliveries page.
+  const [deliveryFareLater, setDeliveryFareLater] = useState(false);
+  // A wholesale order earns no loyalty points. A customer marked as never
+  // earning points is treated the same way (and the tick is locked on).
+  const [isWholesale, setIsWholesale] = useState(false);
   const [advancePaid, setAdvancePaid] = useState("");
   // How the upfront amount (if any) was actually collected — needed to
   // correctly track cash-on-hand vs bank balance, same as an in-store sale.
@@ -289,16 +327,43 @@ export default function PosPage() {
   const changeDue = paymentMethod === "cash" && paidAmount > remainingAfterCredit ? paidAmount - remainingAfterCredit : 0;
   const cashPresets = [500, 1000, 2000, 5000, 10000, 20000];
 
+  const loyaltyBlocked = selectedCustomer?.loyalty_blocked === 1;
+  const noLoyalty = loyaltyBlocked || isWholesale;
+  // Same look as the Free delivery / Credit ticks: a short label, with the
+  // explanation in a hint. Locked on for a customer who never earns points.
+  const wholesaleTick = (
+    <PosTick
+      checked={noLoyalty}
+      disabled={loyaltyBlocked || !selectedCustomer}
+      onChange={setIsWholesale}
+      label="Wholesale"
+      hint={selectedCustomer ? "A wholesale order — no loyalty points for this sale." : "Select a customer first — walk-ins don't earn points anyway."}
+    />
+  );
+  const wholesaleNote =
+    loyaltyBlocked && selectedCustomer ? (
+      <p className="text-xs text-gray-400 -mt-2">
+        {selectedCustomer.name} doesn't earn points{selectedCustomer.loyalty_block_reason ? ` — ${selectedCustomer.loyalty_block_reason}` : ""}.
+      </p>
+    ) : null;
   const { partners, activePartners } = useDeliveryPartners();
   const selectedPartner = partners.find((p) => p.code === deliveryPartner);
   const isOnDemand = selectedPartner?.kind === "on_demand";
   const fareAmount = parseFloat(deliveryFare) || 0;
-  // 'Free — we pay' waives it for the customer (we bear the fare); the
-  // other two both charge it to them — 'we pay now' because we've
-  // already paid the rider on their behalf, so it goes on their bill.
+  const onDemandFare: OnDemandFare = { fare: deliveryFare, paidBy: deliveryPaidBy, fareLater: deliveryFareLater };
+  const fareChange = (patch: Partial<OnDemandFare>) => {
+    if (patch.fare !== undefined) setDeliveryFare(patch.fare);
+    if (patch.paidBy !== undefined) setDeliveryPaidBy(patch.paidBy);
+    if (patch.fareLater !== undefined) setDeliveryFareLater(patch.fareLater);
+  };
+  // 'Free — we pay' waives it for the customer (we bear the fare);
+  // 'customer pays us' charges it to them. 'Customer pays the rider' has
+  // no fare for us to charge, and a fare still to come is charged once
+  // it's known.
   const deliveryIsFree = isOnDemand ? deliveryPaidBy === "shop" : isFreeDelivery;
+  const fareAwaited = isOnDemand && deliveryPaidBy !== "rider_direct" && deliveryFareLater;
   const deliveryFee = isOnDemand
-    ? deliveryIsFree
+    ? deliveryIsFree || deliveryPaidBy === "rider_direct" || fareAwaited
       ? 0
       : fareAmount
     : calculateDeliveryFee(parseFloat(packageWeight) || 0, isFreeDelivery, selectedPartner);
@@ -311,8 +376,36 @@ export default function PosPage() {
 
   const cartIds = new Set(cart.flatMap((l) => l.units.map((u) => u.id)));
   const browserUnits = (allAvailableUnits ?? []).filter((u) => !cartIds.has(u.id));
-  const browserCategories = Array.from(new Set(browserUnits.map((u) => (u.category ?? "").split(" / ")[0]).filter(Boolean))).sort();
-  const browserFiltered = browserCategory === "all" ? browserUnits : browserUnits.filter((u) => (u.category ?? "").startsWith(browserCategory));
+  // The Product catalog follows the search box: whatever is typed there narrows the
+  // catalog too (same typo-tolerant matching as the dropdown), on top of the category chips.
+  const cartIdsKey = Array.from(cartIds).join(",");
+  const browserIndex = useMemo(() => createProductSearchIndex(browserUnits), [allAvailableUnits, cartIdsKey]);
+  const browserQuery = productQuery.trim();
+  const browserSearched = useMemo(() => (browserQuery ? searchProductUnits(browserIndex, browserQuery) : browserUnits), [browserIndex, browserQuery]);
+  // Category chips show only categories that still have a match — plus the one that's selected, so it can always be un-picked.
+  const browserCategories = Array.from(
+    new Set([...(browserCategory !== "all" ? [browserCategory] : []), ...browserSearched.map((u) => (u.category ?? "").split(" / ")[0]).filter(Boolean)])
+  ).sort();
+  const browserFiltered = browserCategory === "all" ? browserSearched : browserSearched.filter((u) => (u.category ?? "").startsWith(browserCategory));
+  const browserEmptyText = browserQuery
+    ? `No available items match “${browserQuery}”${browserCategory !== "all" ? " in this category" : ""}`
+    : "No available items in this category";
+  function clearProductSearch() {
+    setProductQuery("");
+    setProductResults([]);
+    setProductSearchOpen(false);
+    setProductSearchError(null);
+  }
+  const browserFilterNote = browserQuery ? (
+    <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-600">
+      <span className="truncate">
+        Filtered by “{browserQuery}” · {browserFiltered.length} item{browserFiltered.length === 1 ? "" : "s"}
+      </span>
+      <button type="button" onClick={clearProductSearch} aria-label="Clear the search" title="Clear the search" className="flex-shrink-0 text-gray-400 hover:text-gray-700">
+        <X size={12} />
+      </button>
+    </div>
+  ) : null;
 
   // "/" jumps straight into the product search — the most repeated action
   // on this page — from anywhere else on it, same convention as GitHub/Slack.
@@ -333,8 +426,10 @@ export default function PosPage() {
       return;
     }
     const originalPrice = line.units[0].selling_price ?? 0;
-    if (newPrice > originalPrice) {
-      setPriceEditError(`Cannot exceed the original price (Rs. ${originalPrice.toLocaleString()})`);
+    // Staff can only sell at or below the listed price; an admin may also
+    // price above it (a special order, a corrected tag...).
+    if (newPrice > originalPrice && !isAdmin) {
+      setPriceEditError(`Only an admin can go above the original price (Rs. ${originalPrice.toLocaleString()})`);
       return;
     }
     setCart((c) => c.map((l) => (cartLineKey(l.units[0]) === lineKey ? { ...l, unit_price: newPrice } : l)));
@@ -387,7 +482,10 @@ export default function PosPage() {
     setPackageWeight(draft.packageWeight);
     setIsFreeDelivery(draft.isFreeDelivery);
     setDeliveryFare(draft.deliveryFare ?? "");
-    setDeliveryPaidBy(draft.deliveryPaidBy ?? "customer");
+    // (an older saved draft may carry a choice that no longer exists)
+    setDeliveryPaidBy(draft.deliveryPaidBy === "shop" || draft.deliveryPaidBy === "rider_direct" ? draft.deliveryPaidBy : "customer");
+    setDeliveryFareLater(draft.deliveryFareLater ?? false);
+    setIsWholesale(draft.isWholesale ?? false);
     setAdvancePaid(draft.advancePaid);
     setAdvancePaymentMethod(draft.advancePaymentMethod);
     setDiscountType(draft.discountType);
@@ -430,6 +528,8 @@ export default function PosPage() {
       isFreeDelivery,
       deliveryFare,
       deliveryPaidBy,
+      deliveryFareLater,
+      isWholesale,
       advancePaid,
       advancePaymentMethod,
       discountType,
@@ -454,6 +554,8 @@ export default function PosPage() {
     isFreeDelivery,
     deliveryFare,
     deliveryPaidBy,
+    deliveryFareLater,
+    isWholesale,
     advancePaid,
     advancePaymentMethod,
     discountType,
@@ -614,7 +716,7 @@ export default function PosPage() {
     setProductSearchError("No exact match — pick one from the list below, or refine your search");
   }
 
-  function addToCart(unit: InventoryUnit) {
+  function addToCart(unit: InventoryUnit, keepSearch = false) {
     const key = cartLineKey(unit);
     const existingLine = cart.find((l) => cartLineKey(l.units[0]) === key);
 
@@ -624,9 +726,13 @@ export default function PosPage() {
       setCart((c) => [...c, { units: [unit], unit_price: unit.selling_price ?? 0 }]);
     }
 
-    setProductQuery("");
-    setProductResults([]);
-    setProductSearchOpen(false);
+    if (keepSearch) {
+      setProductResults((r) => r.filter((x) => x.id !== unit.id));
+    } else {
+      setProductQuery("");
+      setProductResults([]);
+      setProductSearchOpen(false);
+    }
     setAllAvailableUnits((prev) => (prev ? prev.filter((u) => u.id !== unit.id) : prev));
   }
 
@@ -734,6 +840,7 @@ export default function PosPage() {
   function removeCustomer() {
     setSelectedCustomer(null);
     setIsCreditSale(false);
+    setIsWholesale(false);
     setUseStoreCredit(false);
   }
 
@@ -742,7 +849,7 @@ export default function PosPage() {
     const trimmedQuery = customerQuery.trim();
     const looksLikePhone = trimmedQuery !== "" && !isNaN(Number(trimmedQuery));
     setNewCustomerName(looksLikePhone ? "" : trimmedQuery);
-    setNewCustomerPhone(looksLikePhone ? trimmedQuery : "");
+    setNewCustomerPhone(looksLikePhone ? normalizePhone(trimmedQuery) : "");
     setNewCustomerPhone2("");
     setNewCustomerGender("unspecified");
     setNewCustomerAddr1("");
@@ -762,12 +869,17 @@ export default function PosPage() {
       setAddCustomerError("At least one phone number is required");
       return;
     }
+    const badPhone = phoneError(newCustomerPhone) ?? phoneError(newCustomerPhone2);
+    if (badPhone) {
+      setAddCustomerError(badPhone);
+      return;
+    }
     setAddCustomerSubmitting(true);
     try {
       const created = await api.post<Customer>("/customers", {
         name: newCustomerName.trim(),
-        phone: newCustomerPhone.trim(),
-        phone2: newCustomerPhone2.trim() || undefined,
+        phone: normalizePhone(newCustomerPhone),
+        phone2: normalizePhone(newCustomerPhone2) || undefined,
         gender: newCustomerGender,
       });
 
@@ -839,7 +951,13 @@ export default function PosPage() {
 
     if (saleType === "online") {
       if (!selectedCustomer) {
-        setCheckoutError("Select or add a customer before completing an online order — delivery needs their address.");
+        setCheckoutError(`Select or add a customer before completing an online order${isOnDemand ? "." : " — delivery needs their address."}`);
+        return;
+      }
+      // Uber / PickMe-style delivery goes wherever the customer tells the
+      // rider — no address or city to check, so straight to the review.
+      if (isOnDemand) {
+        setShowCheckoutModal(true);
         return;
       }
       // Fetch the freshest copy of their addresses rather than trusting
@@ -907,7 +1025,7 @@ export default function PosPage() {
       return;
     }
     if (saleType === "online" && !selectedCustomer) {
-      setCheckoutError("Select or add a customer before completing an online order — delivery needs their address.");
+      setCheckoutError(`Select or add a customer before completing an online order${isOnDemand ? "." : " — delivery needs their address."}`);
       setShowCheckoutModal(false);
       return;
     }
@@ -915,8 +1033,9 @@ export default function PosPage() {
       setCheckoutError("Select a delivery partner for this online order.");
       return;
     }
-    if (saleType === "online" && isOnDemand && fareAmount <= 0) {
-      setCheckoutError(`Enter the delivery fare for ${selectedPartner?.name ?? "this partner"}.`);
+    const fareError = saleType === "online" && isOnDemand ? onDemandFareError(onDemandFare, selectedPartner?.name ?? "this partner") : null;
+    if (fareError) {
+      setCheckoutError(fareError);
       return;
     }
     if (isCreditSale) {
@@ -996,13 +1115,14 @@ export default function PosPage() {
         keep_cash_overpayment_as_credit: keepOverpaymentAsCredit === true,
         sale_type: saleType,
         is_credit_order: isCreditSale,
+        ...(selectedCustomer && isWholesale ? { is_wholesale: true } : {}),
         quotation_id: editingQuotation?.id,
         ...(saleType === "online"
           ? {
               delivery_partner: deliveryPartner,
               package_weight_kg: parseFloat(packageWeight) || undefined,
               is_free_delivery: deliveryIsFree,
-              ...(isOnDemand ? { delivery_fare: fareAmount, delivery_paid_by: deliveryPaidBy } : {}),
+              ...(isOnDemand ? onDemandPayload(onDemandFare) : {}),
             }
           : {}),
       });
@@ -1025,6 +1145,7 @@ export default function PosPage() {
       setAllAvailableUnits(null);
       setShowCheckoutModal(false);
       setIsCreditSale(false);
+      setIsWholesale(false);
       setCreditAmountPaid("0");
       setCreditPaymentMethod("cash");
       setDeliveryPartner("");
@@ -1032,6 +1153,7 @@ export default function PosPage() {
       setIsFreeDelivery(false);
       setDeliveryFare("");
       setDeliveryPaidBy("customer");
+      setDeliveryFareLater(false);
       setAdvancePaid("");
       setAdvancePaymentMethod("cash");
     } catch (err) {
@@ -1236,7 +1358,7 @@ export default function PosPage() {
                 <input
                   ref={productInputRef}
                   type="text"
-                  placeholder="Scan or search products... (/)"
+                  placeholder="Scan or search products..."
                   value={productQuery}
                   onChange={(e) => handleProductQueryChange(e.target.value)}
                   onFocus={() => productQuery && setProductSearchOpen(true)}
@@ -1298,7 +1420,8 @@ export default function PosPage() {
                   const sample = line.units[0];
                   const lineKey = cartLineKey(sample);
                   const originalPrice = sample.selling_price ?? 0;
-                  const isDiscounted = line.unit_price !== originalPrice;
+                  // Only a reduced price shows the original struck through; a price above it (an admin's call) shows nothing extra.
+                  const isDiscounted = line.unit_price < originalPrice;
                   const isEditing = editingLineKey === lineKey;
                   const qty = line.units.length;
                   const hasStaleUnit = line.units.some((u) => staleUnitIds.has(u.id));
@@ -1490,7 +1613,13 @@ export default function PosPage() {
                         {saleType === "online" && (
                           <>
                             <span className="text-red-500"> *</span>
-                            <HelpHint text="A customer is required for online orders, so delivery can use their saved address." />
+                            <HelpHint
+                              text={
+                                isOnDemand
+                                  ? "A customer is required for online orders. No address is needed for Uber / PickMe-style delivery — the rider is told where to go."
+                                  : "A customer is required for online orders, so delivery can use their saved address."
+                              }
+                            />
                           </>
                         )}
                       </span>
@@ -1573,6 +1702,18 @@ export default function PosPage() {
                       <div className="flex items-center gap-1 flex-shrink-0 ml-2">
                         <Star size={12} className="text-amber-400" />
                         <span className="text-sm font-semibold text-amber-700">{selectedCustomer.loyalty_points}</span>
+                        {selectedCustomer.phone && (
+                          <a
+                            href={whatsappMessageLink(selectedCustomer.phone, loyaltyPointsMessage(selectedCustomer.name, selectedCustomer.loyalty_points))}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Send their loyalty points on WhatsApp"
+                            aria-label="Send their loyalty points on WhatsApp"
+                            className="ml-1.5 text-green-600 hover:text-green-700"
+                          >
+                            <MessageCircle size={14} />
+                          </a>
+                        )}
                       </div>
                     </div>
                   )}
@@ -1604,13 +1745,7 @@ export default function PosPage() {
                       </FormGroup>
 
                       {isOnDemand ? (
-                        <FormGroup>
-                          <Label>
-                            Delivery fare (Rs.)
-                            <HelpHint text={`${selectedPartner?.name} has no tariff — enter what the ride/delivery actually costs.`} />
-                          </Label>
-                          <Input type="number" min="0" value={deliveryFare} onChange={(e) => setDeliveryFare(e.target.value)} placeholder="0" />
-                        </FormGroup>
+                        <OnDemandFareInput value={onDemandFare} onChange={fareChange} partnerName={selectedPartner?.name ?? "This partner"} />
                       ) : (
                         <FormGroup>
                           <Label>Package weight (kg)</Label>
@@ -1626,26 +1761,7 @@ export default function PosPage() {
                       )}
                     </div>
 
-                    {isOnDemand && (
-                      <FormGroup>
-                        <Label>Who pays for the delivery?</Label>
-                        <div className="grid grid-cols-1 gap-1.5">
-                          {DELIVERY_PAID_BY_OPTIONS.map((opt) => (
-                            <button
-                              key={opt.value}
-                              type="button"
-                              onClick={() => setDeliveryPaidBy(opt.value)}
-                              className={`text-left rounded-lg border px-3 py-2 transition ${
-                                deliveryPaidBy === opt.value ? "border-black bg-black text-white" : "border-gray-300 hover:border-gray-400"
-                              }`}
-                            >
-                              <span className="text-xs font-medium block">{opt.label}</span>
-                              <span className={`text-[11px] ${deliveryPaidBy === opt.value ? "text-gray-300" : "text-gray-500"}`}>{opt.hint}</span>
-                            </button>
-                          ))}
-                        </div>
-                      </FormGroup>
-                    )}
+                    {isOnDemand && <OnDemandPaidByPicker value={onDemandFare} onChange={fareChange} />}
                   </div>
                 )}
               </div>
@@ -1653,27 +1769,29 @@ export default function PosPage() {
               <div className="space-y-3">
                 {saleType === "online" ? (
                   <>
-                    {!isOnDemand && (
-                      <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                        <input type="checkbox" checked={isFreeDelivery} onChange={(e) => setIsFreeDelivery(e.target.checked)} className="rounded" />
-                        Free delivery (customer still pays for the order itself)
-                      </label>
-                    )}
-
-                    {isAdmin && (
-                      <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={isCreditSale}
-                          onChange={(e) => {
-                            setIsCreditSale(e.target.checked);
-                            if (e.target.checked) setAdvancePaid("0");
-                          }}
-                          className="rounded"
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                      {!isOnDemand && (
+                        <PosTick
+                          checked={isFreeDelivery}
+                          onChange={setIsFreeDelivery}
+                          label="Free delivery"
+                          hint="The customer still pays for the order itself."
                         />
-                        Credit order (product on credit — delivery fee is still collected on delivery)
-                      </label>
-                    )}
+                      )}
+                      {isAdmin && (
+                        <PosTick
+                          checked={isCreditSale}
+                          onChange={(checked) => {
+                            setIsCreditSale(checked);
+                            if (checked) setAdvancePaid("0");
+                          }}
+                          label="Credit order"
+                          hint="The product goes on credit — the delivery fee is still collected on delivery."
+                        />
+                      )}
+                      {wholesaleTick}
+                    </div>
+                    {wholesaleNote}
 
                     {isCreditSale ? (
                       <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
@@ -1690,10 +1808,11 @@ export default function PosPage() {
                       </FormGroup>
                     )}
 
-                    {advanceAmount > 0 && !isCreditSale && (
+                    {!isCreditSale && (
                       <FormGroup>
                         <Label>How was that amount paid?</Label>
-                        <div className="grid grid-cols-3 gap-2">
+                        {/* Always shown so the form doesn't jump when an amount is typed — dimmed until there is one. */}
+                        <div className={`grid grid-cols-3 gap-2 transition-opacity ${advanceAmount > 0 ? "" : "opacity-60"}`}>
                           <button
                             type="button"
                             onClick={() => setAdvancePaymentMethod("cash")}
@@ -1736,10 +1855,20 @@ export default function PosPage() {
                       <div className="flex justify-between text-xs text-gray-600">
                         <span>
                           {isOnDemand
-                            ? `Delivery fare (${selectedPartner?.name}${deliveryPaidBy === "shop_upfront" ? " — we paid upfront" : ""})`
+                            ? `Delivery fare (${selectedPartner?.name}${
+                                deliveryPaidBy === "rider_direct" ? " — customer pays the rider" : fareAwaited ? " — to be confirmed" : ""
+                              })`
                             : `Delivery fee (${(selectedPartner?.base_fee ?? 450).toLocaleString()} first kg + ${(selectedPartner?.extra_kg_fee ?? 100).toLocaleString()}/extra kg)`}
                         </span>
-                        <span>{deliveryIsFree ? "Waived" : `Rs. ${deliveryFee.toLocaleString()}`}</span>
+                        <span>
+                          {deliveryIsFree
+                            ? "Waived"
+                            : isOnDemand && deliveryPaidBy === "rider_direct"
+                            ? "Not charged"
+                            : fareAwaited
+                            ? "On hold"
+                            : `Rs. ${deliveryFee.toLocaleString()}`}
+                        </span>
                       </div>
                       {isCreditSale ? (
                         <div className="flex justify-between text-xs text-amber-700">
@@ -1762,23 +1891,22 @@ export default function PosPage() {
                   </>
                 ) : (
                   <>
-                    {isAdmin && (
-                      <label
-                        className={`flex items-center gap-2 text-sm cursor-pointer ${selectedCustomer ? "text-gray-700" : "text-gray-400"}`}
-                      >
-                        <input
-                          type="checkbox"
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                      {isAdmin && (
+                        <PosTick
                           checked={isCreditSale}
                           disabled={!selectedCustomer}
-                          onChange={(e) => setIsCreditSale(e.target.checked)}
-                          className="rounded"
+                          onChange={setIsCreditSale}
+                          label="Credit sale"
+                          hint="Settle later — tracked as balance due."
                         />
-                        Credit sale (settle later — tracked as balance due)
-                      </label>
-                    )}
+                      )}
+                      {wholesaleTick}
+                    </div>
                     {isAdmin && !selectedCustomer && (
                       <p className="text-xs text-gray-400 -mt-2">Select a customer first — credit isn't offered to walk-ins.</p>
                     )}
+                    {wholesaleNote}
 
                     {isCreditSale ? (
                       <>
@@ -2004,6 +2132,7 @@ export default function PosPage() {
                   <X size={16} />
                 </button>
               </div>
+              {browserFilterNote}
               <div className="flex gap-1.5 mt-2.5 overflow-x-auto pb-1">
                 <button
                   onClick={() => setBrowserCategory("all")}
@@ -2028,12 +2157,12 @@ export default function PosPage() {
             </div>
             <div className="flex-1 overflow-y-auto p-2.5 space-y-1.5 min-h-0">
               {browserFiltered.length === 0 ? (
-                <div className="text-center py-8 text-gray-500 text-sm">No available items in this category</div>
+                <div className="text-center py-8 text-gray-500 text-sm">{browserEmptyText}</div>
               ) : (
                 browserFiltered.map((u) => (
                   <button
                     key={u.id}
-                    onClick={() => addToCart(u)}
+                    onClick={() => addToCart(u, true)}
                     className="w-full text-left p-2.5 border border-gray-100 rounded-xl hover:border-black hover:shadow-sm transition group"
                   >
                     <div className="flex justify-between items-start">
@@ -2067,6 +2196,7 @@ export default function PosPage() {
                 <X size={20} />
               </button>
             </div>
+            {browserFilterNote}
             <div className="flex gap-1.5 mt-2.5 overflow-x-auto pb-1">
               <button
                 onClick={() => setBrowserCategory("all")}
@@ -2091,12 +2221,12 @@ export default function PosPage() {
           </div>
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
             {browserFiltered.length === 0 ? (
-              <div className="text-center py-8 text-gray-500 text-sm">No available items in this category</div>
+              <div className="text-center py-8 text-gray-500 text-sm">{browserEmptyText}</div>
             ) : (
               browserFiltered.map((u) => (
                 <button
                   key={u.id}
-                  onClick={() => addToCart(u)}
+                  onClick={() => addToCart(u, true)}
                   className="w-full text-left p-3 border border-gray-100 rounded-xl active:bg-gray-50 transition"
                 >
                   <div className="flex justify-between items-start gap-2">
@@ -2121,30 +2251,33 @@ export default function PosPage() {
       {/* NEW CUSTOMER MODAL — full intake form: name, phone (required) +
           phone2 (optional), address line 1/2, and city. */}
       {showAddCustomer && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] flex flex-col shadow-2xl">
-            <div className="p-5 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
-              <h3 className="text-base font-semibold text-gray-900">New customer</h3>
-              <button onClick={() => setShowAddCustomer(false)} className="text-gray-400 hover:text-gray-600">
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-5">
-              <div className="grid grid-cols-1 sm:grid-cols-[1.5fr_1fr] gap-5">
+        <Modal
+          size="2xl"
+          onClose={() => setShowAddCustomer(false)}
+          title="New customer"
+          footer={
+            <>
+              <Button onClick={() => setShowAddCustomer(false)}>Cancel</Button>
+              <Button variant="primary" disabled={addCustomerSubmitting} onClick={submitNewCustomer}>
+                {addCustomerSubmitting ? "Saving..." : "Save & select"}
+              </Button>
+            </>
+          }
+        >
+<div className="grid grid-cols-1 sm:grid-cols-[1.5fr_1fr] gap-5">
                 <div className="space-y-3">
                   <FormGroup>
                     <Label>Name</Label>
                     <Input value={newCustomerName} onChange={(e) => setNewCustomerName(e.target.value)} autoFocus />
                   </FormGroup>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <FormGroup>
                       <Label>Phone</Label>
-                      <Input value={newCustomerPhone} onChange={(e) => setNewCustomerPhone(e.target.value)} placeholder="Required" />
+                      <PhoneInput value={newCustomerPhone} onChange={setNewCustomerPhone} />
                     </FormGroup>
                     <FormGroup>
                       <Label>Phone 2 (optional)</Label>
-                      <Input value={newCustomerPhone2} onChange={(e) => setNewCustomerPhone2(e.target.value)} />
+                      <PhoneInput value={newCustomerPhone2} onChange={setNewCustomerPhone2} />
                     </FormGroup>
                   </div>
                   <FormGroup>
@@ -2215,36 +2348,27 @@ export default function PosPage() {
                   </FormGroup>
                 </div>
               </div>
-            </div>
-
-            <div className="p-5 border-t border-gray-100 flex gap-3 flex-shrink-0">
-              <button
-                onClick={() => setShowAddCustomer(false)}
-                className="flex-1 px-4 py-2.5 border border-gray-300 rounded-xl hover:bg-gray-50 transition font-medium text-sm"
-              >
-                Cancel
-              </button>
-              <Button variant="primary" disabled={addCustomerSubmitting} onClick={submitNewCustomer} className="flex-1">
-                {addCustomerSubmitting ? "Saving..." : "Save & select"}
-              </Button>
-            </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {showAddressCheck &&
         (() => {
           const defaultAddr = customerAddresses?.find((a) => a.is_default) ?? customerAddresses?.[0];
           return (
-            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl">
-                <div className="p-5 border-b border-gray-100 flex items-center justify-between">
-                  <h3 className="text-base font-semibold text-gray-900">Confirm delivery address</h3>
-                  <button onClick={() => setShowAddressCheck(false)} className="text-gray-400 hover:text-gray-600">
-                    <X size={18} />
-                  </button>
-                </div>
-                <div className="p-5 space-y-3">
+            <Modal
+              size="md"
+              onClose={() => setShowAddressCheck(false)}
+              title="Confirm delivery address"
+              footer={
+                <>
+                  <Button onClick={() => setShowAddressCheck(false)}>Cancel</Button>
+                  <Button variant="primary" onClick={confirmAddressAndProceed}>
+                    {defaultAddr ? "Confirmed — continue" : "Save & continue"}
+                  </Button>
+                </>
+              }
+            >
+              <div className="space-y-3">
                   {defaultAddr ? (
                     <>
                       <p className="text-xs text-gray-500">
@@ -2282,37 +2406,26 @@ export default function PosPage() {
                     </>
                   )}
                   {addressCheckError && <ErrorText>{addressCheckError}</ErrorText>}
-                </div>
-                <div className="p-5 border-t border-gray-100 flex gap-3">
-                  <button
-                    onClick={() => setShowAddressCheck(false)}
-                    className="flex-1 px-4 py-2.5 border border-gray-300 rounded-xl hover:bg-gray-50 transition font-medium text-sm"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={confirmAddressAndProceed}
-                    className="flex-1 px-4 py-2.5 bg-black text-white rounded-xl hover:bg-gray-800 transition font-medium text-sm"
-                  >
-                    {defaultAddr ? "Confirmed — continue" : "Save & continue"}
-                  </button>
-                </div>
               </div>
-            </div>
+            </Modal>
           );
         })()}
 
       {showCheckoutModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] flex flex-col shadow-2xl">
-            <div className="p-5 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
-              <h3 className="text-base font-semibold text-gray-900">Confirm sale</h3>
-              <button onClick={() => setShowCheckoutModal(false)} className="text-gray-400 hover:text-gray-600">
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+        <Modal
+          size="lg"
+          onClose={() => setShowCheckoutModal(false)}
+          title="Confirm sale"
+          footer={
+            <>
+              <Button onClick={() => setShowCheckoutModal(false)}>Back</Button>
+              <Button variant="primary" onClick={handleCheckout} disabled={submitting}>
+                {submitting ? "Processing..." : "Confirm & complete"}
+              </Button>
+            </>
+          }
+        >
+<div className="space-y-4">
               <div>
                 <p className="text-xs text-gray-400 mb-1.5">
                   {saleType === "online" ? "Online order" : "In-store sale"} · {totalCartUnits} item{totalCartUnits !== 1 ? "s" : ""}
@@ -2343,6 +2456,12 @@ export default function PosPage() {
                   <span className="text-gray-500">Customer</span>
                   <span className="text-gray-900 font-medium">{selectedCustomer ? selectedCustomer.name : "Walk-in"}</span>
                 </div>
+                {selectedCustomer && noLoyalty && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-500">Loyalty points</span>
+                    <span className="text-gray-900 font-medium">None (wholesale)</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">Payment</span>
                   <span className="text-gray-900 font-medium capitalize">
@@ -2352,7 +2471,9 @@ export default function PosPage() {
                         : "Credit"
                       : saleType === "online"
                       ? advanceAmount > 0
-                        ? `Partial payment (${advancePaymentMethod.replace("_", " ")}) + rest on delivery`
+                        ? codAmount > 0
+                          ? `Partial payment (${advancePaymentMethod.replace("_", " ")}) + rest on delivery`
+                          : `Paid in full (${advancePaymentMethod.replace("_", " ")})`
                         : "Pay in full on delivery (COD)"
                       : paymentMethod.replace("_", " ")}
                   </span>
@@ -2404,7 +2525,15 @@ export default function PosPage() {
                   <>
                     <div className="flex justify-between text-sm text-gray-500">
                       <span>Delivery fee</span>
-                      <span>{deliveryIsFree ? "Free" : `Rs. ${deliveryFee.toLocaleString()}`}</span>
+                      <span>
+                        {deliveryIsFree
+                          ? "Free"
+                          : isOnDemand && deliveryPaidBy === "rider_direct"
+                          ? "Customer pays the rider"
+                          : fareAwaited
+                          ? "To be confirmed"
+                          : `Rs. ${deliveryFee.toLocaleString()}`}
+                      </span>
                     </div>
                     <div className="flex justify-between text-sm font-semibold">
                       <span>COD to collect</span>
@@ -2430,33 +2559,16 @@ export default function PosPage() {
 
               {checkoutError && <ErrorText>{checkoutError}</ErrorText>}
             </div>
-
-            <div className="p-5 border-t border-gray-100 flex gap-3 flex-shrink-0">
-              <button
-                onClick={() => setShowCheckoutModal(false)}
-                className="flex-1 px-4 py-2.5 border border-gray-300 rounded-xl hover:bg-gray-50 transition font-medium text-sm"
-              >
-                Back
-              </button>
-              <button
-                onClick={handleCheckout}
-                disabled={submitting}
-                className="flex-1 px-4 py-2.5 bg-black text-white rounded-xl hover:bg-gray-800 transition font-medium text-sm disabled:opacity-50"
-              >
-                {submitting ? "Processing..." : "Confirm & complete"}
-              </button>
-            </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {showOverpaymentChoice && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl">
-            <div className="p-5 border-b border-gray-100">
-              <h2 className="text-base font-semibold text-gray-900">Extra cash received</h2>
-            </div>
-            <div className="p-5">
+        <Modal
+          size="sm"
+          onClose={() => setShowOverpaymentChoice(false)}
+          title="Extra cash received"
+          footer={<Button onClick={() => setShowOverpaymentChoice(false)}>Cancel and adjust the amount instead</Button>}
+        >
               <p className="text-sm text-gray-600 mb-1">
                 {selectedCustomer?.name} paid Rs. {paidAmount.toLocaleString()}, which is Rs.{" "}
                 {(paidAmount - remainingAfterCredit).toLocaleString()} more than the amount due.
@@ -2488,31 +2600,27 @@ export default function PosPage() {
                   </div>
                 </button>
               </div>
-              <button
-                onClick={() => setShowOverpaymentChoice(false)}
-                className="w-full text-center text-xs text-gray-400 hover:text-gray-600 mt-3"
-              >
-                Cancel and adjust the amount instead
-              </button>
-            </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {showQuotationModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl">
-            <div className="p-5 border-b border-gray-100">
-              <h2 className="text-base font-semibold text-gray-900">
-                {editingQuotation ? `Update quotation ${editingQuotation.invoice}` : "Save as quotation"}
-                <HelpHint text="Saves this cart as a price-confirmation bill, with nothing charged or reserved yet. Print or send it to the customer — once they confirm, pull it up again and convert it to a real sale to collect payment." />
-              </h2>
-              <p className="text-xs text-gray-400 mt-1">
-                {totalCartUnits} item{totalCartUnits !== 1 ? "s" : ""} · Rs. {total.toLocaleString()}
-                {selectedCustomer ? ` · ${selectedCustomer.name}` : " · Walk-in"}
-              </p>
-            </div>
-            <div className="p-5">
+        <Modal
+          size="md"
+          onClose={() => setShowQuotationModal(false)}
+          title={editingQuotation ? `Update quotation ${editingQuotation.invoice}` : "Save as quotation"}
+          subtitle={`${totalCartUnits} item${totalCartUnits !== 1 ? "s" : ""} · Rs. ${total.toLocaleString()}${selectedCustomer ? ` · ${selectedCustomer.name}` : " · Walk-in"}`}
+          footer={
+            <>
+              <Button onClick={() => setShowQuotationModal(false)}>Cancel</Button>
+              <Button variant="primary" onClick={handleSaveQuotation} disabled={savingQuotation}>
+                {savingQuotation ? "Saving..." : editingQuotation ? "Update quotation" : "Save quotation"}
+              </Button>
+            </>
+          }
+        >
+          <p className="text-xs text-gray-400 mb-4">
+            Saves this cart as a price-confirmation bill, with nothing charged or reserved yet. Print or send it to the customer — once they confirm, pull it up again and convert it to a real sale to collect payment.
+          </p>
               <FormGroup>
                 <Label>Valid for (days)</Label>
                 <div className="flex gap-1.5 flex-wrap mb-1.5">
@@ -2537,25 +2645,7 @@ export default function PosPage() {
               </FormGroup>
 
               {quotationError && <ErrorText>{quotationError}</ErrorText>}
-
-              <div className="flex gap-2 mt-3">
-                <button
-                  onClick={() => setShowQuotationModal(false)}
-                  className="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-medium hover:bg-gray-50 transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSaveQuotation}
-                  disabled={savingQuotation}
-                  className="flex-1 bg-black text-white rounded-xl py-2.5 text-sm font-medium hover:bg-gray-800 transition disabled:opacity-50"
-                >
-                  {savingQuotation ? "Saving..." : editingQuotation ? "Update quotation" : "Save quotation"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {savedQuotation && (

@@ -1,5 +1,5 @@
 import { useEffect, useState, Fragment, useRef } from "react";
-import { Package, ChevronDown, ChevronRight, Plus, X, Pencil, MinusCircle, CheckCircle, Search, Trash2, Settings } from "lucide-react";
+import { Package, ChevronDown, ChevronRight, Plus, X, Pencil, MinusCircle, CheckCircle, Search, Trash2, Settings, Receipt } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Product, InventoryUnit, Supplier, RemovalReason, Purchase, Category, SubCategory } from "../lib/types";
 import { compareSizes } from "../lib/sizeSort";
@@ -29,7 +29,10 @@ import {
   NewCategoryModal,
   NewSubCategoryModal,
   HelpHint,
+  Modal,
+  ActionMenu,
 } from "../components/ui";
+import ProductSalesModal from "../components/ProductSalesModal";
 
 const LOW_STOCK_THRESHOLD = 5;
 const removalReasons: RemovalReason[] = ["Damaged", "Gifted", "Staff Use", "Stolen", "Lost", "Other"];
@@ -469,22 +472,20 @@ function ManageCategoriesModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
-      <div
-        className="bg-white rounded-2xl border border-gray-200 shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col"
-        onClick={(e) => e.stopPropagation()}
+    <>
+      <Modal
+        size="lg"
+        onClose={onClose}
+        title="Manage categories"
+        subtitle="Renaming or deleting here is blocked while a product still uses it."
+        footer={
+          <Button variant="primary" onClick={() => setShowNewCategoryModal(true)} className="inline-flex items-center gap-1.5">
+            <Plus size={14} />
+            Add category
+          </Button>
+        }
       >
-        <div className="p-5 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
-          <div>
-            <h3 className="text-sm font-semibold text-gray-900">Manage categories</h3>
-            <p className="text-xs text-gray-400 mt-0.5">Renaming or deleting here is blocked while a product still uses it.</p>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="p-5 overflow-y-auto space-y-3">
+        <div className="space-y-3">
           {categories.map((c) => (
             <CategoryRow
               key={c.id}
@@ -497,14 +498,7 @@ function ManageCategoriesModal({
             />
           ))}
         </div>
-
-        <div className="p-5 border-t border-gray-100 flex-shrink-0">
-          <Button variant="primary" size="sm" onClick={() => setShowNewCategoryModal(true)} className="inline-flex items-center gap-1.5">
-            <Plus size={14} />
-            Add category
-          </Button>
-        </div>
-      </div>
+      </Modal>
 
       {showNewCategoryModal && (
         <NewCategoryModal
@@ -527,7 +521,7 @@ function ManageCategoriesModal({
           }}
         />
       )}
-    </div>
+    </>
   );
 }
 
@@ -541,6 +535,8 @@ export default function ManageProductsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  // The product whose sold-invoices list is open (the row's three-dot menu).
+  const [salesFor, setSalesFor] = useState<{ id: number; title: string } | null>(null);
   const [expandedTab, setExpandedTab] = useState<ExpandedTab>("stock");
 
   const [editForm, setEditForm] = useState({
@@ -552,6 +548,9 @@ export default function ManageProductsPage() {
     selling_price: "",
     allow_returns: true,
   });
+  // Ticked by default: changing the price also changes the pieces already in
+  // stock (each piece keeps its own price, so otherwise they'd stay on the old one).
+  const [applyToStock, setApplyToStock] = useState(true);
   // The existing "(Gender)" tag on the product being edited — preserved
   // as-is on save since this form only lets you fix category/sub-category,
   // not gender.
@@ -674,6 +673,7 @@ export default function ManageProductsPage() {
       allow_returns: p.allow_returns !== 0,
     });
     setEditGenderSuffix(extractGenderSuffix(p.category));
+    setApplyToStock(true);
     setEditError(null);
     setEditSuccess(null);
     loadInventoryFor(p.id);
@@ -683,15 +683,18 @@ export default function ManageProductsPage() {
     setEditError(null);
     setEditSuccess(null);
     try {
-      await api.put(`/products/${id}`, {
+      const newPrice = parseFloat(editForm.selling_price);
+      const staleUnits = (inventoryByProduct[id] ?? []).filter((u) => u.status === "available" && u.selling_price !== newPrice).length;
+      const saved = await api.put<{ units_updated?: number }>(`/products/${id}`, {
         product_title: editForm.product_title,
         brand: editForm.brand || undefined,
         category: editForm.category ? composeCategory(editForm.category, editForm.subCategory, editGenderSuffix) : undefined,
         cost_price: parseFloat(editForm.cost_price),
-        selling_price: parseFloat(editForm.selling_price),
+        selling_price: newPrice,
         allow_returns: editForm.allow_returns,
+        apply_to_stock: applyToStock && staleUnits > 0,
       });
-      setEditSuccess("Saved.");
+      setEditSuccess(saved.units_updated ? `Saved. The new price is also set on ${saved.units_updated} unit${saved.units_updated === 1 ? "" : "s"} in stock.` : "Saved.");
       setIsEditingDetails(false);
       load();
     } catch (err) {
@@ -911,7 +914,7 @@ export default function ManageProductsPage() {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search products... (/)"
+              placeholder="Search products..."
               className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-gray-400"
             />
           </div>
@@ -938,6 +941,7 @@ export default function ManageProductsPage() {
                     <SortHeader<ProductSortKey> label="Category" sortKey="category" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
                     <SortHeader<ProductSortKey> label="Selling price" sortKey="price" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
                     <SortHeader<ProductSortKey> label="In stock" sortKey="qty" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+                    <Th className="w-10">{null}</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -963,11 +967,18 @@ export default function ManageProductsPage() {
                               )}
                             </div>
                           </Td>
+                          <Td className="text-right">
+                            <ActionMenu
+                              items={[
+                                { label: "Sold invoices", icon: <Receipt size={14} />, onClick: () => setSalesFor({ id: p.id, title: p.product_title }) },
+                              ]}
+                            />
+                          </Td>
                         </tr>
 
                         {isExpanded && (
                           <tr>
-                            <Td colSpan={6} className="bg-gray-50">
+                            <Td colSpan={7} className="bg-gray-50">
                               <div className="py-3 space-y-4">
                                 <div className="flex items-center gap-1 border-b border-gray-200">
                                   {(["stock", "restock", "details"] as ExpandedTab[]).map((tab) => (
@@ -1367,6 +1378,27 @@ export default function ManageProductsPage() {
                                             />
                                           </FormGroup>
                                         </div>
+                                        {(() => {
+                                          const newPrice = parseFloat(editForm.selling_price);
+                                          const stale = Number.isFinite(newPrice)
+                                            ? (inventoryByProduct[p.id] ?? []).filter((u) => u.status === "available" && u.selling_price !== newPrice).length
+                                            : 0;
+                                          if (stale === 0) return null;
+                                          return (
+                                            <div className="flex items-center mt-3">
+                                              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                                                <input
+                                                  type="checkbox"
+                                                  checked={applyToStock}
+                                                  onChange={(e) => setApplyToStock(e.target.checked)}
+                                                  className="rounded"
+                                                />
+                                                Also set Rs. {newPrice.toLocaleString()} on the {stale} unit{stale === 1 ? "" : "s"} in stock
+                                              </label>
+                                              <HelpHint text="Each piece in stock keeps the price it was stocked at, so changing the product's price alone doesn't touch it. Tick this to change the pieces still available too — pieces already sold are never changed. Untick to keep older batches at their own price." />
+                                            </div>
+                                          );
+                                        })()}
                                         <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer mt-3">
                                           <input
                                             type="checkbox"
@@ -1440,6 +1472,8 @@ export default function ManageProductsPage() {
           </Card>
         )}
       </div>
+
+      {salesFor && <ProductSalesModal productId={salesFor.id} productTitle={salesFor.title} onClose={() => setSalesFor(null)} />}
 
       {showNewSupplierModal && (
         <NewSupplierModal
