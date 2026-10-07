@@ -1,13 +1,13 @@
 import { useState, useRef, useEffect, RefObject } from "react";
-import { X, Printer, Download, MapPin, Check, Plus, Truck } from "lucide-react";
+import { Printer, Download, MapPin, Check, Plus, Truck } from "lucide-react";
 import JsBarcode from "jsbarcode";
 import { Delivery, BusinessInfo, Customer, CustomerAddress } from "../lib/types";
 import { waybillShopCode, useDeliveryPartners, partnerLabel, waybillItemsDescription, COURIER_API } from "../lib/delivery";
 import { WaybillLabel, WaybillLabelData } from "./WaybillLabel";
-import { generateWaybillLabelPdf } from "../lib/waybillLabelPdf";
+import { generateWaybillLabelPdf, generateExchangeWaybillsPdf, returnItemsOf } from "../lib/waybillLabelPdf";
 import { applyBusinessInfoToReturnAddress } from "../lib/businessInfo";
 import { api, ApiRequestError } from "../lib/api";
-import { Input, Label, FormGroup, ErrorText, Badge } from "./ui";
+import { Input, Label, FormGroup, ErrorText, Badge, Button, Modal } from "./ui";
 import ChangePartnerModal from "./ChangePartnerModal";
 import { CityPicker } from "./CityPicker";
 import { previewPdf } from "../lib/pdfPreview";
@@ -197,6 +197,7 @@ export default function PackWaybillModal({
     customerName: delivery.customer_name ?? "",
     addressLines,
     city: activeAddress.city,
+    addressNotNeeded: isOnDemand,
     phones: [delivery.customer_phone ?? ""],
     orderRef: delivery.invoice ?? "",
     pcs: parseInt(pcs, 10) || 1,
@@ -227,6 +228,13 @@ export default function PackWaybillModal({
     }
   }, [trackingNumber]);
 
+  // An exchange order prints three labels: the waybill for the parcel, a delivery note
+  // telling the delivery person to collect the return package, and the return waybill
+  // that goes inside for the customer to stick on it.
+  const exchangeReturnItems = returnItemsOf(delivery.exchange);
+  const buildPdf = () => (exchangeReturnItems ? generateExchangeWaybillsPdf(labelData, exchangeReturnItems) : generateWaybillLabelPdf(labelData));
+  const pdfName = `M&M_${exchangeReturnItems ? "Exchange_Waybills" : "Waybill"}_${trackingNumber}.pdf`;
+
   function validate(): boolean {
     if (!trackingNumber.trim()) {
       setError("Enter the tracking number you received from the courier");
@@ -248,12 +256,12 @@ export default function PackWaybillModal({
     if (!validate()) return;
     setProcessing(true);
     try {
-      const pdf = generateWaybillLabelPdf(labelData);
+      const pdf = buildPdf();
       // The order is only marked packed once the waybill is really taken —
       // downloaded or printed from the preview — so closing the preview
       // without it leaves everything as it was.
       const packedAs = trackingNumber.trim();
-      previewPdf(pdf, `M&M_Waybill_${trackingNumber}.pdf`, { onSaved: () => onPacked(packedAs) });
+      previewPdf(pdf, pdfName, { onSaved: () => onPacked(packedAs) });
     } catch {
       setError("Failed to generate the PDF — try again");
     } finally {
@@ -265,7 +273,7 @@ export default function PackWaybillModal({
     if (!validate()) return;
     setProcessing(true);
     try {
-      const pdf = generateWaybillLabelPdf(labelData);
+      const pdf = buildPdf();
       pdf.autoPrint();
       const blobUrl = pdf.output("bloburl");
       const printWindow = window.open(blobUrl as unknown as string, "_blank");
@@ -283,39 +291,61 @@ export default function PackWaybillModal({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[92vh] flex flex-col shadow-2xl overflow-hidden">
-        <div className="p-5 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
-          <div>
-            <h3 className="text-base font-semibold text-gray-900">Generate waybill</h3>
-            <p className="text-xs text-gray-400">
-              {delivery.invoice} —{" "}
-              {courierApi
-                ? `create the shipment with ${courierApi.name} below, or paste in a tracking number manually`
-                : isOnDemand
-                ? "no courier portal for this partner — the invoice number is used as the tracking barcode"
-                : "feed this into the courier portal, then paste back the tracking number"}
-            </p>
-            <p className="text-xs text-gray-500 mt-1">
-              Courier: <strong className="text-gray-900">{partnerLabel(delivery.delivery_partner)}</strong>
-              {onPartnerChanged && (
-                <button
-                  type="button"
-                  onClick={() => setChangingPartner(true)}
-                  className="ml-2 text-gray-500 hover:text-gray-900 underline decoration-dotted"
-                >
-                  change
-                </button>
-              )}
+    <>
+      <Modal
+        size="2xl"
+        onClose={onClose}
+        title="Generate waybill"
+        subtitle={`${delivery.invoice} — ${
+          courierApi
+            ? `create the shipment with ${courierApi.name} below, or paste in a tracking number manually`
+            : isOnDemand
+            ? "no courier portal for this partner — the invoice number is used as the tracking barcode"
+            : "feed this into the courier portal, then paste back the tracking number"
+        }`}
+        footer={
+          <>
+            <Button onClick={onClose}>Cancel</Button>
+            <Button onClick={handlePrint} disabled={processing} className="inline-flex items-center gap-1.5">
+              <Printer size={14} />
+              Print
+            </Button>
+            <Button variant="primary" onClick={handleSavePdf} disabled={processing} className="inline-flex items-center gap-1.5">
+              <Download size={14} />
+              {processing ? "Working..." : "Save as PDF"}
+            </Button>
+          </>
+        }
+      >
+        {exchangeReturnItems && (
+          <div className="mb-4 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm">
+            <p className="font-medium text-gray-900">Exchange order — 3 labels will print</p>
+            <ol className="mt-1 list-decimal space-y-0.5 pl-5 text-xs text-gray-600">
+              <li>The waybill — stick it on the parcel going out.</li>
+              <li>The delivery note — tells the delivery person to collect the return package.</li>
+              <li>The return waybill — the same waybill number as the parcel; the customer sticks it on the return package and hands it over at the same time.</li>
+            </ol>
+            <p className="mt-1.5 text-xs text-gray-600">Put the delivery note and the return waybill together in the same bag. The delivery note has no barcode, so it can't be scanned by mistake.</p>
+            <p className="mt-1.5 text-xs text-gray-500">
+              Collecting: {exchangeReturnItems.map((i) => `${i.title}${i.variant ? ` (${i.variant})` : ""}`).join(", ")}
             </p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-            <X size={18} />
-          </button>
-        </div>
+        )}
+        <p className="text-xs text-gray-500 mb-4">
+          Courier: <strong className="text-gray-900">{partnerLabel(delivery.delivery_partner)}</strong>
+          {onPartnerChanged && (
+            <button
+              type="button"
+              onClick={() => setChangingPartner(true)}
+              className="ml-2 text-gray-500 hover:text-gray-900 underline decoration-dotted"
+            >
+              change
+            </button>
+          )}
+        </p>
 
-        <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-6 overflow-hidden">
-          <div className="overflow-y-auto p-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
             <h4 className="text-sm font-semibold text-gray-900 mb-3">Only these need typing</h4>
 
             {courierApi && (
@@ -363,32 +393,36 @@ export default function PackWaybillModal({
                   <span className="font-semibold text-gray-900">Rs. {codAmount.toLocaleString()}</span>
                 </div>
               )}
-              {delivery.delivery_paid_by && (
+              {delivery.delivery_paid_by || delivery.rider_direct ? (
                 <div className="flex justify-between mt-1">
                   <span className="text-gray-500">Delivery fare</span>
                   <span className="font-medium text-gray-900">
-                    Rs. {(delivery.actual_fare ?? 0).toLocaleString()} ·{" "}
-                    {delivery.delivery_paid_by === "customer"
-                      ? "customer pays"
-                      : delivery.delivery_paid_by === "shop"
-                      ? "free — we pay"
-                      : "we paid upfront (on the bill)"}
+                    {delivery.rider_direct
+                      ? "Customer pays the rider directly"
+                      : `${delivery.actual_fare == null ? "To be confirmed" : `Rs. ${delivery.actual_fare.toLocaleString()}`} · ${
+                          delivery.delivery_paid_by === "shop" ? "free — we pay" : "customer pays"
+                        }`}
                   </span>
                 </div>
-              )}
+              ) : null}
             </div>
 
             <div className="mt-4 pt-4 border-t border-gray-100 text-xs text-gray-500 space-y-1">
               <p>Everything else is pulled from the order automatically:</p>
               <p>
-                <strong>{delivery.customer_name ?? "—"}</strong>, {addressLines.join(", ") || "no address"}, {activeAddress.city || "—"}
+                <strong>{delivery.customer_name ?? "—"}</strong>
+                {isOnDemand && !addressLines.length && !activeAddress.city
+                  ? ", no address needed — the rider is told where to go"
+                  : `, ${addressLines.join(", ") || "no address"}, ${activeAddress.city || "—"}`}
               </p>
               <p>{delivery.customer_phone ?? "no phone on file"}</p>
             </div>
 
             {customerAddresses && delivery.customer_id && (
               <div className="mt-3 pt-3 border-t border-gray-100">
-                <p className="text-xs font-medium text-gray-700 mb-2">Ship to a different saved address</p>
+                <p className="text-xs font-medium text-gray-700 mb-2">
+                  {isOnDemand && !activeAddressId ? "Add the address later, if the rider needs it noted" : "Ship to a different saved address"}
+                </p>
                 <div className="space-y-1.5">
                   {customerAddresses.map((a) => {
                     const isActive = a.id === activeAddressId;
@@ -461,7 +495,7 @@ export default function PackWaybillModal({
             {error && <ErrorText>{error}</ErrorText>}
           </div>
 
-          <div className="flex justify-center items-start p-5">
+          <div className="flex justify-center items-start">
             <div style={{ width: "calc(105mm * 0.72)", height: "calc(148mm * 0.72)" }}>
               <div
                 style={{
@@ -479,33 +513,11 @@ export default function PackWaybillModal({
             </div>
           </div>
         </div>
-
-        <div className="p-5 border-t border-gray-100 flex gap-3 flex-shrink-0">
-          <button onClick={onClose} className="flex-1 px-4 py-2.5 border border-gray-300 rounded-xl hover:bg-gray-50 transition font-medium text-sm">
-            Cancel
-          </button>
-          <button
-            onClick={handlePrint}
-            disabled={processing}
-            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 border border-gray-300 rounded-xl hover:bg-gray-50 transition font-medium text-sm disabled:opacity-50"
-          >
-            <Printer size={14} />
-            Print
-          </button>
-          <button
-            onClick={handleSavePdf}
-            disabled={processing}
-            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-black text-white rounded-xl hover:bg-gray-800 transition font-medium text-sm disabled:opacity-50"
-          >
-            <Download size={14} />
-            {processing ? "Working..." : "Save as PDF"}
-          </button>
-        </div>
-      </div>
+      </Modal>
 
       {changingPartner && onPartnerChanged && (
         <ChangePartnerModal delivery={delivery} onClose={() => setChangingPartner(false)} onChanged={onPartnerChanged} />
       )}
-    </div>
+    </>
   );
 }

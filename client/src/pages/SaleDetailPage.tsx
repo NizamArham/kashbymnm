@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Receipt, Printer, FileText, MessageCircle, ShoppingCart, XCircle } from "lucide-react";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
+import { ArrowLeft, Receipt, Printer, FileText, MessageCircle, ShoppingCart, XCircle, Repeat } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Sale } from "../lib/types";
 import { downloadA4Pdf, downloadThermalPdf, sendWhatsAppBill, groupSaleItemsForDisplay } from "../lib/receipts";
@@ -8,19 +8,31 @@ import { PageHeader, Card, Table, Th, Td, ErrorText, Badge, RefLink, Button } fr
 import ReceiptOptionsModal, { ModalOption } from "../components/ReceiptOptionsModal";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { hasDraftInProgress } from "../lib/posDraft";
+import { salePaymentLabel } from "../lib/salePayment";
 import DeliveryChargeSummary from "../components/DeliveryChargeSummary";
+import OnlineExchangeModal from "../components/OnlineExchangeModal";
+import ExchangeNotice, { ExchangedOutNotice } from "../components/ExchangeNotice";
+import { useAuth } from "../context/AuthContext";
 
 export default function SaleDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [sale, setSale] = useState<Sale | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showReceiptOptions, setShowReceiptOptions] = useState(false);
   const [receiptError, setReceiptError] = useState<string | null>(null);
+  const { user } = useAuth();
+  const [showExchange, setShowExchange] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const isQuotation = sale?.status === "quotation";
+  // An online order that has been delivered can be exchanged: the replacement goes out
+  // by courier and the courier brings the old item back.
+  const canExchange =
+    !!sale && !isQuotation && !sale.is_voided && sale.sale_type === "online" && sale.delivery_status === "delivered" && !!sale.customer_id;
   const [cancellingQuotation, setCancellingQuotation] = useState(false);
 
   function receiptOptionsFor(sale: Sale): ModalOption[] {
@@ -95,7 +107,15 @@ export default function SaleDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, reloadKey]);
+
+  // "Exchange by delivery" from Sale History lands here with the popup already open.
+  useEffect(() => {
+    if (searchParams.get("exchange") === "1" && canExchange) {
+      setShowExchange(true);
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, canExchange, setSearchParams]);
 
   function openReceiptOptions() {
     setReceiptError(null);
@@ -123,8 +143,8 @@ export default function SaleDetailPage() {
           <PageHeader
             title={sale.invoice}
             subtitle={`${sale.date.slice(0, 16).replace("T", " ")} · ${sale.sale_type === "online" ? "Online" : "In-Store"}${
-              isQuotation ? " · Quotation" : ""
-            }${sale.is_voided ? " · Voided" : ""}`}
+              sale.is_wholesale ? " · Wholesale" : ""
+            }${isQuotation ? " · Quotation" : ""}${sale.is_voided ? " · Voided" : ""}`}
             action={
               <div className="flex items-center gap-2">
                 {isQuotation && (
@@ -142,6 +162,12 @@ export default function SaleDetailPage() {
                   <Button variant="primary" onClick={openInPos} className="inline-flex items-center gap-1.5">
                     <ShoppingCart size={14} />
                     Edit / Convert to Sale
+                  </Button>
+                )}
+                {canExchange && (
+                  <Button onClick={() => setShowExchange(true)} className="inline-flex items-center gap-1.5" title="Exchange an item by delivery">
+                    <Repeat size={14} />
+                    Exchange
                   </Button>
                 )}
                 <Button
@@ -167,6 +193,29 @@ export default function SaleDetailPage() {
             </div>
           )}
 
+          {showExchange && sale && (
+            <OnlineExchangeModal
+              sale={sale}
+              onClose={() => setShowExchange(false)}
+              onCreated={(created) => {
+                setShowExchange(false);
+                navigate(`/sales/${created.id}`);
+              }}
+            />
+          )}
+
+          {sale.exchanged_out && sale.exchanged_out.length > 0 && <ExchangedOutNotice exchanges={sale.exchanged_out} className="mb-4" />}
+
+          {sale.exchange && (
+            <ExchangeNotice
+              exchange={sale.exchange}
+              delivered={sale.delivery_status === "delivered"}
+              canAct={user?.role === "admin"}
+              onChanged={() => setReloadKey((k) => k + 1)}
+              className="mb-4"
+            />
+          )}
+
           {showReceiptOptions && (
             <ReceiptOptionsModal
               heading={isQuotation ? "Get quotation" : "Get receipt"}
@@ -185,12 +234,16 @@ export default function SaleDetailPage() {
               </div>
               <div>
                 <p className="text-xs text-gray-400">Payment</p>
-                <p className="text-gray-900 font-medium capitalize">{isQuotation ? "Not yet paid" : sale.payment_method?.replace("_", " ") ?? "—"}</p>
+                <p className="text-gray-900 font-medium capitalize">{isQuotation ? "Not yet paid" : salePaymentLabel(sale)}</p>
               </div>
               <div>
                 <p className="text-xs text-gray-400">Bill to</p>
                 <p className="text-gray-900 font-medium">
-                  {sale.customer_name ?? sale.deleted_customer_snapshot ?? "Walk-in"}
+                  {sale.customer_id && sale.customer_name ? (
+                    <RefLink to={`/customers?open=${sale.customer_id}`}>{sale.customer_name}</RefLink>
+                  ) : (
+                    sale.customer_name ?? sale.deleted_customer_snapshot ?? "Walk-in"
+                  )}
                   {sale.customer_phone ? <span className="text-gray-400"> · {sale.customer_phone}</span> : null}
                 </p>
               </div>
@@ -199,12 +252,12 @@ export default function SaleDetailPage() {
                 <p className="text-gray-900 font-medium">Rs. {sale.total.toLocaleString()}</p>
               </div>
             </div>
-            {sale.is_voided && (
+            {sale.is_voided ? (
               <p className="text-xs text-red-500 mt-3">
                 Voided {sale.voided_at?.slice(0, 16).replace("T", " ")}
                 {sale.void_reason ? ` — ${sale.void_reason}` : ""}
               </p>
-            )}
+            ) : null}
           </Card>
 
           <Card className="p-0 overflow-hidden">
@@ -212,7 +265,7 @@ export default function SaleDetailPage() {
               <thead>
                 <tr>
                   <Th>SKU</Th>
-                  <Th>Product</Th>
+                  <Th className="min-w-[16rem]">Product</Th>
                   <Th>Size/Color</Th>
                   <Th>Qty</Th>
                   <Th>Price</Th>
@@ -223,7 +276,7 @@ export default function SaleDetailPage() {
                 {groupSaleItemsForDisplay(sale.items ?? []).map((item) => (
                   <tr key={item.ids.join(",")} className={item.is_returned ? "opacity-60" : ""}>
                     <Td className={item.is_returned ? "line-through" : ""}>{item.sku}</Td>
-                    <Td className={item.is_returned ? "line-through" : ""}>
+                    <Td className={`min-w-[16rem] ${item.is_returned ? "line-through" : ""}`}>
                       {item.product_id ? (
                         <RefLink to={`/products/${item.product_id}`}>{item.product_title}</RefLink>
                       ) : (

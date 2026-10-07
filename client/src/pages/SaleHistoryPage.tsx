@@ -1,5 +1,6 @@
 import { useEffect, useState, Fragment, useMemo, MouseEvent, useRef, ReactNode } from "react";
-import { ChevronDown, ChevronRight, Receipt, Printer, MoreVertical, Wallet, Download, FileText, MessageCircle } from "lucide-react";
+import { ChevronDown, ChevronRight, Receipt, Printer, MoreVertical, Wallet, Download, FileText, MessageCircle, Star, Repeat } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { api, ApiRequestError } from "../lib/api";
 import { Sale } from "../lib/types";
 import { downloadTabularReport, rangeLabelFor, buildReportFilename, formatLongDate, todayLongDate } from "../lib/reportPdf";
@@ -7,8 +8,10 @@ import { downloadA4Pdf, downloadThermalPdf, sendWhatsAppBill, groupSaleItemsForD
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { useSortableData } from "../lib/useSortableData";
 import { useCopyToClipboard } from "../lib/useCopyToClipboard";
-import { PageHeader, Card, Table, Th, Td, Badge, SortHeader, paymentStatusTone, EmptyState, ErrorText, DateRangePicker, Button, HelpHint, RowCard, RowCardStats, RowCardStat } from "../components/ui";
+import { isAwaitingCod, salePaymentLabel } from "../lib/salePayment";
+import { PageHeader, Card, Table, Th, Td, Badge, SortHeader, paymentStatusTone, EmptyState, ErrorText, DateRangePicker, Button, RowCard, RowCardStats, RowCardStat, FormGroup, Label, Input, Modal, RefLink } from "../components/ui";
 import ReceiptOptionsModal, { ModalOption } from "../components/ReceiptOptionsModal";
+import ExchangeTag from "../components/ExchangeTag";
 import DeliveryChargeSummary from "../components/DeliveryChargeSummary";
 import { useAuth } from "../context/AuthContext";
 
@@ -92,7 +95,17 @@ function filenameRangeTag(startIso: string, endIso: string): string {
   return sameMonth ? `${start.getDate()}-${formatFilenameTag(endIso)}` : `${formatFilenameTag(startIso)}-${formatFilenameTag(endIso)}`;
 }
 
+// The buyer's name — a link to their profile on the Customers page when the
+// sale has a real customer (not a walk-in, and not one that's since been deleted).
+function CustomerName({ sale }: { sale: Sale }) {
+  if (sale.customer_id && sale.customer_name) {
+    return <RefLink to={`/customers?open=${sale.customer_id}`}>{sale.customer_name}</RefLink>;
+  }
+  return <>{sale.deleted_customer_snapshot ? `[Deleted: ${sale.deleted_customer_snapshot}]` : "Walk-in"}</>;
+}
+
 export default function SaleHistoryPage() {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
 
@@ -117,6 +130,11 @@ export default function SaleHistoryPage() {
   // "Mark as paid / COD collected" — self-delivered orders only, since
   // courier-collected COD is settled separately in bulk elsewhere.
   const [codConfirmSale, setCodConfirmSale] = useState<Sale | null>(null);
+  // The already-rung-up sale being marked wholesale (admin): takes back its loyalty points.
+  const [wholesaleSale, setWholesaleSale] = useState<Sale | null>(null);
+  const [wholesaleReason, setWholesaleReason] = useState("");
+  const [wholesaleError, setWholesaleError] = useState<string | null>(null);
+  const [wholesaleBusy, setWholesaleBusy] = useState(false);
   const [codConfirming, setCodConfirming] = useState(false);
   const [codError, setCodError] = useState<string | null>(null);
   const [codPaymentMethod, setCodPaymentMethod] = useState<"cash" | "bank_transfer" | "card">("cash");
@@ -171,7 +189,7 @@ export default function SaleHistoryPage() {
     }
 
     if (activeTab === "cash") {
-      result = result.filter((s) => s.payment_method === "cash" && !s.is_voided);
+      result = result.filter((s) => s.payment_method === "cash" && !s.is_voided && !isAwaitingCod(s));
     } else if (activeTab === "credit_cod") {
       result = result.filter((s) => (s.payment_method === "credit" || s.sale_type === "online") && !s.is_voided);
     } else if (activeTab === "voided") {
@@ -269,7 +287,7 @@ export default function SaleHistoryPage() {
           sale.sale_type === "online" ? "Online" : "In-Store",
           `Rs. ${sale.total.toLocaleString()}`,
           `Rs. ${sale.amount_paid.toLocaleString()}`,
-          sale.payment_method ? sale.payment_method.replace("_", " ") : "—",
+          salePaymentLabel(sale),
           sale.is_voided ? "Voided" : sale.payment_status,
         ],
         styles: sale.is_voided ? [{ color: 150 }, { color: 150 }, { color: 150 }, { color: 150 }, { color: 150 }, { color: 150 }, { color: 150 }, { color: 150 }] : undefined,
@@ -357,6 +375,21 @@ export default function SaleHistoryPage() {
     }
   }
 
+  async function handleWholesale() {
+    if (!wholesaleSale) return;
+    setWholesaleError(null);
+    setWholesaleBusy(true);
+    try {
+      await api.put(`/sales/${wholesaleSale.id}/wholesale`, { reason: wholesaleReason.trim() || undefined });
+      setSales(await api.get<Sale[]>("/sales"));
+      setWholesaleSale(null);
+    } catch (err) {
+      setWholesaleError(err instanceof ApiRequestError ? err.message : "Failed to mark this sale wholesale");
+    } finally {
+      setWholesaleBusy(false);
+    }
+  }
+
   async function handleConfirmCod() {
     if (!codConfirmSale) return;
     setCodError(null);
@@ -400,7 +433,7 @@ export default function SaleHistoryPage() {
           <thead>
             <tr>
               <Th>SKU</Th>
-              <Th>Product</Th>
+              <Th className="min-w-[16rem]">Product</Th>
               <Th>Size/Color</Th>
               <Th>Qty</Th>
               <Th>Price</Th>
@@ -417,7 +450,7 @@ export default function SaleHistoryPage() {
                 >
                   {item.sku ?? "—"}
                 </td>
-                <Td className={item.is_returned ? "line-through" : ""}>
+                <Td className={`min-w-[16rem] ${item.is_returned ? "line-through" : ""}`}>
                   {item.product_title}
                   {item.is_returned ? (
                     <span className="ml-2 not-italic no-underline">
@@ -443,14 +476,18 @@ export default function SaleHistoryPage() {
           </p>
         )}
         <DeliveryChargeSummary sale={sale} className="mt-2" />
-        {!sale.is_voided && <p className="text-xs text-gray-400 mt-1">Loyalty points earned: {sale.loyalty_points_earned}</p>}
-        {sale.is_voided && (
+        {!sale.is_voided && (
+          <p className="text-xs text-gray-400 mt-1">
+            {sale.is_wholesale ? "Wholesale order — no loyalty points" : `Loyalty points earned: ${sale.loyalty_points_earned}`}
+          </p>
+        )}
+        {sale.is_voided ? (
           <p className="text-xs text-red-500 mt-2">
             Voided {sale.voided_at?.slice(0, 16).replace("T", " ")}
             {sale.void_reason ? ` — ${sale.void_reason}` : ""}
-            {sale.loyalty_points_earned > 0 && ` · ${sale.loyalty_points_earned} loyalty points reversed`}
+            {sale.loyalty_points_earned > 0 ? ` · ${sale.loyalty_points_earned} loyalty points reversed` : null}
           </p>
-        )}
+        ) : null}
       </>
     );
   }
@@ -474,6 +511,18 @@ export default function SaleHistoryPage() {
           <Receipt size={14} />
           View details
         </button>
+        {sale.sale_type === "online" && sale.delivery_status === "delivered" && !sale.is_voided && sale.customer_id && (
+          <button
+            onClick={() => {
+              setOpenMenuId(null);
+              navigate(`/sales/${sale.id}?exchange=1`);
+            }}
+            className="w-full flex items-center gap-2 px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition"
+          >
+            <Repeat size={14} />
+            Exchange by delivery
+          </button>
+        )}
         {sale.invoice.startsWith("OCD") &&
           !sale.is_voided &&
           sale.payment_status !== "paid" &&
@@ -504,6 +553,20 @@ export default function SaleHistoryPage() {
               {undoingId === sale.id ? "Undoing..." : "Undo COD confirmation"}
             </button>
           )}
+        {isAdmin && !sale.is_voided && !sale.is_wholesale && sale.status !== "quotation" && sale.customer_id && sale.loyalty_points_earned > 0 && (
+          <button
+            onClick={() => {
+              setOpenMenuId(null);
+              setWholesaleReason("");
+              setWholesaleError(null);
+              setWholesaleSale(sale);
+            }}
+            className="w-full flex items-center gap-2 px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition"
+          >
+            <Star size={14} />
+            Mark as wholesale
+          </button>
+        )}
         {isAdmin && !sale.is_voided && (
           <button
             onClick={() => handleVoid(sale)}
@@ -605,18 +668,21 @@ export default function SaleHistoryPage() {
                       className={`cursor-pointer hover:bg-gray-50 ${sale.is_voided ? "opacity-50" : ""}`}
                     >
                       <Td>
-                        {sale.invoice}
-                        {sale.is_voided ? " (Voided)" : ""}
+                        <div className="whitespace-nowrap">
+                          <RefLink to={`/sales/${sale.id}`}>{sale.invoice}</RefLink>
+                          {sale.is_voided ? " (Voided)" : ""}
+                        </div>
+                        <ExchangeTag sale={sale} />
                       </Td>
                       <Td>{sale.date.slice(0, 16).replace("T", " ")}</Td>
                       <Td>
-                        {sale.customer_name ?? (sale.deleted_customer_snapshot ? `[Deleted: ${sale.deleted_customer_snapshot}]` : "Walk-in")}
+                        <CustomerName sale={sale} />
                       </Td>
                       <Td>{sale.sale_type === "online" ? "Online" : "In-Store"}</Td>
                       <Td>Rs. {sale.total.toLocaleString()}</Td>
                       <Td>Rs. {sale.amount_paid.toLocaleString()}</Td>
                       <Td>
-                        <div className="capitalize">{sale.payment_method?.replace("_", " ") ?? "—"}</div>
+                        <div className="capitalize">{salePaymentLabel(sale)}</div>
                         {sale.change_due > 0 && <div className="text-xs text-gray-400">Change: Rs. {sale.change_due.toLocaleString()}</div>}
                         {sale.overpaid_amount > 0 && (
                           <div className="text-xs text-amber-600">Overpaid: Rs. {sale.overpaid_amount.toLocaleString()}</div>
@@ -670,13 +736,13 @@ export default function SaleHistoryPage() {
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="font-medium text-gray-900 leading-snug">
-                        {sale.invoice}
+                        <RefLink to={`/sales/${sale.id}`}>{sale.invoice}</RefLink>
                         {sale.is_voided ? " (Voided)" : ""}
                       </p>
+                      <ExchangeTag sale={sale} />
                       <p className="text-xs text-gray-400 mt-0.5">{sale.date.slice(0, 16).replace("T", " ")}</p>
                       <p className="text-xs text-gray-500 mt-1">
-                        {sale.customer_name ?? (sale.deleted_customer_snapshot ? `[Deleted: ${sale.deleted_customer_snapshot}]` : "Walk-in")} ·{" "}
-                        {sale.sale_type === "online" ? "Online" : "In-Store"}
+                        <CustomerName sale={sale} /> · {sale.sale_type === "online" ? "Online" : "In-Store"}
                       </p>
                     </div>
                     <div className="flex-shrink-0 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
@@ -702,7 +768,7 @@ export default function SaleHistoryPage() {
                   <RowCardStats>
                     <RowCardStat label="Total" value={`Rs. ${sale.total.toLocaleString()}`} />
                     <RowCardStat label="Paid" value={`Rs. ${sale.amount_paid.toLocaleString()}`} />
-                    <RowCardStat label="Payment" value={<span className="capitalize">{sale.payment_method?.replace("_", " ") ?? "—"}</span>} />
+                    <RowCardStat label="Payment" value={<span className="capitalize">{salePaymentLabel(sale)}</span>} />
                   </RowCardStats>
                   {(sale.change_due > 0 || sale.overpaid_amount > 0) && (
                     <p className="text-xs mt-1.5">
@@ -733,16 +799,50 @@ export default function SaleHistoryPage() {
         />
       )}
 
+      {wholesaleSale && (
+        <Modal
+          size="md"
+          onClose={() => setWholesaleSale(null)}
+          title="Mark as wholesale"
+          subtitle="Takes back the loyalty points this sale earned. It's added to the customer's points history; nothing else about the sale changes."
+          footer={
+            <>
+              <Button onClick={() => setWholesaleSale(null)}>Cancel</Button>
+              <Button variant="primary" onClick={handleWholesale} disabled={wholesaleBusy}>
+                {wholesaleBusy ? "Saving..." : "Remove points"}
+              </Button>
+            </>
+          }
+        >
+              <p className="text-sm text-gray-600 mb-1">
+                Invoice {wholesaleSale.invoice}
+                {wholesaleSale.customer_name ? ` · ${wholesaleSale.customer_name}` : ""}
+              </p>
+              <p className="text-2xl font-semibold text-gray-900 mb-1">{wholesaleSale.loyalty_points_earned} points</p>
+              <p className="text-xs text-gray-500 mb-3">will be taken back from the customer.</p>
+              <FormGroup>
+                <Label>Reason (optional)</Label>
+                <Input value={wholesaleReason} onChange={(e) => setWholesaleReason(e.target.value)} placeholder="e.g. Bulk order for resale" />
+              </FormGroup>
+              {wholesaleError && <ErrorText>{wholesaleError}</ErrorText>}
+        </Modal>
+      )}
+
       {codConfirmSale && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl">
-            <div className="p-5 border-b border-gray-100">
-              <h2 className="text-base font-semibold text-gray-900">
-                Confirm COD collected
-                <HelpHint text="This marks the order as fully paid and records the amount in the cash book, together, in one step." />
-              </h2>
-            </div>
-            <div className="p-5">
+        <Modal
+          size="md"
+          onClose={() => setCodConfirmSale(null)}
+          title="Confirm COD collected"
+          subtitle="Marks the order as fully paid and records the amount in the cash book, together, in one step."
+          footer={
+            <>
+              <Button onClick={() => setCodConfirmSale(null)}>Cancel</Button>
+              <Button variant="primary" onClick={handleConfirmCod} disabled={codConfirming}>
+                {codConfirming ? "Confirming..." : "Confirm, collected"}
+              </Button>
+            </>
+          }
+        >
               <p className="text-sm text-gray-600 mb-1">Invoice {codConfirmSale.invoice}</p>
               <p className="text-2xl font-semibold text-gray-900 mb-3">
                 Rs. {(codConfirmSale.total - codConfirmSale.amount_paid).toLocaleString()}
@@ -764,24 +864,7 @@ export default function SaleHistoryPage() {
                 </div>
               </div>
               {codError && <ErrorText>{codError}</ErrorText>}
-              <div className="flex gap-2">
-                <button
-                  onClick={handleConfirmCod}
-                  disabled={codConfirming}
-                  className="flex-1 bg-black text-white rounded-xl py-2.5 text-sm font-medium hover:bg-gray-800 transition disabled:opacity-50"
-                >
-                  {codConfirming ? "Confirming..." : "Confirm, collected"}
-                </button>
-                <button
-                  onClick={() => setCodConfirmSale(null)}
-                  className="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-medium hover:bg-gray-50 transition"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {skuCopyTooltip}

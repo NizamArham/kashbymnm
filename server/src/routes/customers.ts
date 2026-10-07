@@ -6,6 +6,10 @@ import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth, requireRole } from "../lib/auth";
 import { logAudit } from "../lib/auditLog";
 import { storeCreditSources } from "../lib/storeCreditSources";
+import { loyaltyBalance } from "../lib/loyalty";
+import { normalizePhone } from "../lib/phones";
+import { exchangeForSale } from "../lib/exchanges";
+import { refundStoreCredit, usableStoreCredit } from "../lib/storeCreditRefund";
 
 export const customersRouter = Router();
 
@@ -48,7 +52,10 @@ const LOYALTY_POINT_VALUE = 1;
 // loyalty_points = bonus_points (manually granted, kept for backward
 // compatibility with the legacy-customer import) + sum of every real
 // loyalty_transactions entry (earned, granted, redeemed, or reversed).
-// balance_due = sum of (total - amount_paid) across their sales
+// balance_due = sum of (total - amount_paid) across their sales, EXCEPT COD
+// orders: one still on its way is on_delivery (collected at the door), and one a
+// courier has already delivered is with_courier (the customer paid the courier;
+// it's shown separately until the courier settles)
 // last_order_date = most recent sale date, so repeat customers are easy
 // to spot at a glance without opening their full sale history
 // A voided sale contributes to none of these — it's kept for audit but
@@ -67,10 +74,58 @@ const USABLE_CREDIT_SUBQUERY = `
   )
 `;
 
+// How much of an unpaid online order its COD actually pays: cod_amount minus the
+// delivery fee — exactly what courier settlement credits to the sale (see the
+// settlement code in courierReconciliation.ts) — capped at what is unpaid. For an
+// ordinary COD order that is the whole unpaid balance; for a CREDIT order the COD
+// is only the delivery fee, so it comes to nothing and the product amount stays
+// owed in full. Written for a query that selects FROM sales.
+const COD_TOWARD_SALE_SQL = `MAX(0, MIN(
+  sales.total - sales.amount_paid,
+  MAX(0, COALESCE((SELECT dc.cod_amount - dc.delivery_fee - dc.pickup_collected FROM deliveries dc WHERE dc.sale_id = sales.id), 0))
+))`;
+// A credit order is a real debt whoever delivers it, so it's never COD here.
+const IS_COD_ORDER_SQL = `(sales.sale_type = 'online' AND COALESCE(sales.payment_method, '') <> 'credit')`;
+
+// COD a COURIER has already delivered and collected but not yet paid over: the
+// customer paid it — to the courier, at the door — so it isn't owed; the cash is
+// with the courier until they settle (see confirm-cod in sales.ts). Self delivery
+// (D2D) and on-demand riders hand the cash straight over, so those stay owed until
+// confirmed; a returned parcel is not "delivered".
+const WITH_COURIER_SQL = `(CASE WHEN ${IS_COD_ORDER_SQL} AND EXISTS (
+    SELECT 1 FROM deliveries hd LEFT JOIN delivery_partners hp ON hp.code = hd.delivery_partner
+    WHERE hd.sale_id = sales.id AND hd.delivery_status = 'delivered' AND hd.delivery_partner IS NOT NULL
+      AND hd.delivery_partner <> 'D2D' AND COALESCE(hp.kind, '') <> 'on_demand'
+  ) THEN ${COD_TOWARD_SALE_SQL} ELSE 0 END)`;
+
+// COD still to be collected at the door (not delivered yet — being packed, or on
+// its way). Nothing is owed on account for it; it's money collected on delivery.
+const ON_DELIVERY_SQL = `(CASE WHEN ${IS_COD_ORDER_SQL} AND EXISTS (
+    SELECT 1 FROM deliveries od WHERE od.sale_id = sales.id AND od.delivery_status IN ('pending', 'packed', 'dispatched')
+  ) THEN ${COD_TOWARD_SALE_SQL} ELSE 0 END)`;
+
+// An online exchange still waiting for the old item to come back: the item's
+// value comes off this order once it's collected, so until then that part is
+// neither owed nor paid — it's exchange credit pending return. (If the item never
+// comes back the exchange is closed and the part becomes owed.)
+const EXCHANGE_PENDING_SQL = `MAX(0, MIN(
+  COALESCE((
+    SELECT SUM(ei.applied_share) FROM online_exchange_items ei JOIN online_exchanges px ON px.id = ei.exchange_id
+    WHERE px.new_sale_id = sales.id AND px.status = 'awaiting_pickup' AND ei.status = 'awaiting'
+  ), 0),
+  sales.total - sales.amount_paid - ${WITH_COURIER_SQL} - ${ON_DELIVERY_SQL}
+))`;
+
+// What the customer really owes on a sale: what's unpaid, less any part of it a
+// COD is about to collect or has just collected, and any exchange credit pending.
+const REAL_OWED_SQL = `(sales.total - sales.amount_paid - ${WITH_COURIER_SQL} - ${ON_DELIVERY_SQL} - ${EXCHANGE_PENDING_SQL})`;
+
 const CALC_SUBQUERY = `
   customers.bonus_points +
   COALESCE((SELECT SUM(points) FROM loyalty_transactions WHERE customer_id = customers.id), 0) AS loyalty_points,
-  COALESCE((SELECT SUM(total - amount_paid) FROM sales WHERE customer_id = customers.id AND is_voided = 0 AND status = 'completed'), 0) AS balance_due,
+  COALESCE((SELECT SUM(${REAL_OWED_SQL}) FROM sales WHERE customer_id = customers.id AND is_voided = 0 AND status = 'completed'), 0) AS balance_due,
+  COALESCE((SELECT SUM(${WITH_COURIER_SQL}) FROM sales WHERE customer_id = customers.id AND is_voided = 0 AND status = 'completed'), 0) AS with_courier,
+  COALESCE((SELECT SUM(${ON_DELIVERY_SQL}) FROM sales WHERE customer_id = customers.id AND is_voided = 0 AND status = 'completed'), 0) AS on_delivery,
   ${USABLE_CREDIT_SUBQUERY} AS store_credit_balance,
   (SELECT MAX(date) FROM sales WHERE customer_id = customers.id AND is_voided = 0 AND status = 'completed') AS last_order_date
 `;
@@ -130,7 +185,13 @@ customersRouter.get(
 customersRouter.get(
   "/check-phone",
   asyncHandler(async (req, res) => {
-    const phone = String(req.query.phone ?? "").trim();
+    let phone: string | undefined;
+    try {
+      phone = normalizePhone(String(req.query.phone ?? ""));
+    } catch {
+      // Half-typed numbers are expected while someone is still typing — not an error here.
+      return res.json({ exists: false });
+    }
     if (!phone) return res.json({ exists: false });
 
     const existing = db
@@ -173,7 +234,7 @@ customersRouter.post(
       .prepare(
         `INSERT INTO customers (customer_code, name, phone, phone2, bonus_points, gender) VALUES (?, ?, ?, ?, ?, ?)`
       )
-      .run(customer_code, data.name, data.phone ?? null, data.phone2 ?? null, data.bonus_points ?? 0, data.gender);
+      .run(customer_code, data.name, normalizePhone(data.phone) ?? null, normalizePhone(data.phone2) ?? null, data.bonus_points ?? 0, data.gender);
 
     const created = db.prepare(`SELECT * FROM customers WHERE id = ?`).get(result.lastInsertRowid);
     res.status(201).json(created);
@@ -188,7 +249,13 @@ customersRouter.put(
     const existing = db.prepare(`SELECT * FROM customers WHERE id = ?`).get(req.params.id) as any;
     if (!existing) throw new ApiError(404, "Customer not found");
 
-    const merged = { ...existing, ...data };
+    // A number is only checked when it's being changed — saving a name edit
+    // never trips over an older record's number.
+    const phones: { phone?: string | null; phone2?: string | null } = {};
+    if (data.phone !== undefined && data.phone !== existing.phone) phones.phone = normalizePhone(data.phone) ?? null;
+    if (data.phone2 !== undefined && data.phone2 !== existing.phone2) phones.phone2 = normalizePhone(data.phone2) ?? null;
+
+    const merged = { ...existing, ...data, ...phones };
     // Correcting gender here only affects new filtering/segmentation —
     // it never regenerates customer_code, same as an invoice's category
     // is fixed forever once issued (see nextInvoiceCode).
@@ -586,6 +653,12 @@ customersRouter.get(
       details?: string[];
       sale_id?: number;
       sale_invoice?: string;
+      // A COD order the courier has delivered and collected — see WITH_COURIER_SQL.
+      courier_held?: boolean;
+      // A COD order not delivered yet — to be paid at the door.
+      on_delivery?: boolean;
+      // Exchange credit waiting for the old item to be collected.
+      exchange_pending?: boolean;
     };
     const methodLabel = (m: string | null) => {
       const t = (m ?? "").replace(/_/g, " ").trim();
@@ -751,6 +824,102 @@ customersRouter.get(
       });
     }
 
+    // COD orders a courier has delivered but not yet paid out. The customer
+    // paid (to the courier, at the door), so they aren't owing anything for
+    // these — each gets its own row taking it off what's owed, dated on the
+    // delivery, so the balance doesn't ask the customer for money that's
+    // simply still on its way to us from the courier.
+    const heldSales = db
+      .prepare(
+        `SELECT sales.id, sales.invoice, sales.date, ROUND(${WITH_COURIER_SQL}, 2) AS amount,
+                dl.delivery_date, COALESCE(dpt.name, dl.delivery_partner) AS partner_name
+         FROM sales
+         JOIN deliveries dl ON dl.sale_id = sales.id
+         LEFT JOIN delivery_partners dpt ON dpt.code = dl.delivery_partner
+         WHERE sales.customer_id = ? AND sales.is_voided = 0 AND sales.status = 'completed' AND ${WITH_COURIER_SQL} > 0.009
+         ORDER BY sales.date, sales.id`
+      )
+      .all(req.params.id) as { id: number; invoice: string; date: string; amount: number; delivery_date: string | null; partner_name: string }[];
+    for (const h of heldSales) {
+      let when = h.delivery_date ? (h.delivery_date.length >= 19 ? h.delivery_date.replace("T", " ") : `${h.delivery_date.slice(0, 10)} 23:59:59`) : h.date;
+      if (when < h.date) when = h.date;
+      entries.push({
+        date: when,
+        type: "payment" as const,
+        label: `Paid to ${h.partner_name} on delivery — awaiting courier payout (${h.invoice})`,
+        title: `Paid to ${h.partner_name} on delivery`,
+        details: [`${h.invoice} is paid — ${h.partner_name} collected it and will pay it over to us`],
+        amount: h.amount,
+        effect: -h.amount,
+        sale_id: h.id,
+        sale_invoice: h.invoice,
+        courier_held: true,
+      });
+    }
+
+    // COD orders not delivered yet: the customer pays at the door, so nothing is
+    // owed on account — each gets a row (right after its sale) taking it off,
+    // which disappears into a "paid to the courier" row once it's delivered.
+    const onWay = db
+      .prepare(
+        `SELECT sales.id, sales.invoice, sales.date, ROUND(${ON_DELIVERY_SQL}, 2) AS amount,
+                COALESCE(dpt.name, dl.delivery_partner, 'the courier') AS partner_name
+         FROM sales
+         JOIN deliveries dl ON dl.sale_id = sales.id
+         LEFT JOIN delivery_partners dpt ON dpt.code = dl.delivery_partner
+         WHERE sales.customer_id = ? AND sales.is_voided = 0 AND sales.status = 'completed' AND ${ON_DELIVERY_SQL} > 0.009
+         ORDER BY sales.date, sales.id`
+      )
+      .all(req.params.id) as { id: number; invoice: string; date: string; amount: number; partner_name: string }[];
+    for (const o of onWay) {
+      entries.push({
+        date: o.date,
+        type: "payment" as const,
+        label: `To pay on delivery — ${o.partner_name} (${o.invoice})`,
+        title: `To pay on delivery (${o.partner_name})`,
+        details: [`${o.invoice} is cash on delivery — the customer pays when it arrives`],
+        amount: o.amount,
+        effect: -o.amount,
+        sale_id: o.id,
+        sale_invoice: o.invoice,
+        on_delivery: true,
+      });
+    }
+
+    // Exchange credit pending: the replacement order is billed in full, and the old
+    // item's value comes off it once the courier has brought the item back.
+    const pendingExchanges = (
+      db
+        .prepare(
+          `SELECT sales.id, sales.invoice, sales.date, ROUND(${EXCHANGE_PENDING_SQL}, 2) AS amount
+           FROM sales
+           WHERE sales.customer_id = ? AND sales.is_voided = 0 AND sales.status = 'completed' AND ${EXCHANGE_PENDING_SQL} > 0.009
+           ORDER BY sales.date, sales.id`
+        )
+        .all(req.params.id) as { id: number; invoice: string; date: string; amount: number }[]
+    ).map((x) => {
+      const waiting = ((exchangeForSale(x.id)?.items ?? []) as { status: string; title: string | null; old_invoice: string }[]).filter((i) => i.status === "awaiting");
+      return {
+        ...x,
+        old_invoice: Array.from(new Set(waiting.map((i) => i.old_invoice))).join(", "),
+        old_item_title: waiting.length === 1 ? waiting[0].title : waiting.length > 1 ? `${waiting.length} old items` : null,
+      };
+    });
+    for (const x of pendingExchanges) {
+      entries.push({
+        date: x.date,
+        type: "payment" as const,
+        label: `Exchange credit pending return — ${x.old_item_title ?? "item"} from ${x.old_invoice} (${x.invoice})`,
+        title: `Exchange credit — waiting for ${x.old_item_title ?? "the old item"}`,
+        details: [`${x.invoice} replaces an item from ${x.old_invoice}; its value comes off once the courier brings the old item back`],
+        amount: x.amount,
+        effect: -x.amount,
+        sale_id: x.id,
+        sale_invoice: x.invoice,
+        exchange_pending: true,
+      });
+    }
+
     entries.sort((a, b) => a.date.localeCompare(b.date));
 
     // balance = owed on invoices − store credit held. A row's effect on
@@ -800,13 +969,52 @@ customersRouter.get(
     const visible = withBalance
       .filter((e) => !(e.type === "credit" && e.effect === 0 && e.sale_id != null))
       .map((e) => {
-        const kind = e.type === "credit" ? (e.credit_reason === "return_exchange" ? "return" : "credit") : e.type;
+        const kind = e.courier_held ? "courier" : e.on_delivery ? "on_delivery" : e.exchange_pending ? "exchange" : e.type === "credit" ? (e.credit_reason === "return_exchange" ? "return" : "credit") : e.type;
         const title = e.title ?? (e.type === "sale" ? e.sale_invoice : e.label.replace(/^Payment \((.+)\)$/, "$1"));
         const details = e.type === "sale" && e.sale_id != null && detailsBySale.has(e.sale_id) ? detailsBySale.get(e.sale_id) : e.details;
         return { ...e, kind, title, ...(details ? { details } : {}) };
       });
 
-    res.json({ customer, entries: visible, final_balance: runningBalance });
+    res.json({
+      customer,
+      entries: visible,
+      final_balance: runningBalance,
+      // COD still to be collected at the door (orders not yet delivered).
+      on_delivery: onWay.map((o) => ({ sale_id: o.id, invoice: o.invoice, partner: o.partner_name, amount: o.amount })),
+      // Paid to the courier at delivery, not yet paid over to the shop.
+      with_courier: heldSales.map((h) => ({ sale_id: h.id, invoice: h.invoice, partner: h.partner_name, amount: h.amount })),
+    });
+  })
+);
+
+// POST /api/customers/:id/store-credit-refund — admin only. Pays some of the
+// customer's store credit back out as money (cash from the till, or a bank
+// transfer) instead of leaving it to be spent: it comes off their credit and goes
+// in the cash book as an expense.
+customersRouter.post(
+  "/:id/store-credit-refund",
+  requireRole("admin"),
+  asyncHandler(async (req, res) => {
+    const data = z
+      .object({ amount: z.number().positive(), method: z.enum(["cash", "bank_transfer"]), note: z.string().optional() })
+      .parse(req.body);
+    const customer = db.prepare(`SELECT id, name FROM customers WHERE id = ?`).get(req.params.id) as { id: number; name: string } | undefined;
+    if (!customer) throw new ApiError(404, "Customer not found");
+
+    const { transaction_code } = refundStoreCredit({
+      customerId: customer.id,
+      amount: data.amount,
+      method: data.method,
+      note: data.note?.trim() || "refund requested by the customer",
+    });
+    logAudit(
+      req.user!,
+      "store_credit_refund",
+      "customer",
+      customer.id,
+      `Refunded Rs. ${data.amount.toLocaleString()} of ${customer.name}'s store credit (${data.method.replace("_", " ")}) — ${transaction_code}`
+    );
+    res.json({ transaction_code, store_credit: usableStoreCredit(customer.id) });
   })
 );
 
@@ -825,9 +1033,9 @@ customersRouter.get(
 
     const invoices = db
       .prepare(
-        `SELECT id, invoice, date, total, amount_paid, ROUND(total - amount_paid, 2) AS balance
+        `SELECT id, invoice, date, total, amount_paid, ROUND(${REAL_OWED_SQL}, 2) AS balance
          FROM sales
-         WHERE customer_id = ? AND is_voided = 0 AND status = 'completed' AND total - amount_paid > 0.009
+         WHERE customer_id = ? AND is_voided = 0 AND status = 'completed' AND ${REAL_OWED_SQL} > 0.009
          ORDER BY date, id`
       )
       .all(req.params.id);
@@ -896,12 +1104,12 @@ customersRouter.get(
 export function computeFifoAllocation(customerId: number, amount: number) {
   const outstandingSales = db
     .prepare(
-      `SELECT id, invoice, date, total, amount_paid
+      `SELECT id, invoice, date, total, amount_paid, ${REAL_OWED_SQL} AS real_owed
        FROM sales
        WHERE customer_id = ? AND is_voided = 0 AND status = 'completed' AND payment_status != 'paid'
        ORDER BY date ASC, id ASC`
     )
-    .all(customerId) as { id: number; invoice: string; date: string; total: number; amount_paid: number }[];
+    .all(customerId) as { id: number; invoice: string; date: string; total: number; amount_paid: number; real_owed: number }[];
 
   let remaining = amount;
   const allocations: {
@@ -916,8 +1124,9 @@ export function computeFifoAllocation(customerId: number, amount: number) {
 
   for (const sale of outstandingSales) {
     if (remaining <= 0) break;
-    const owed = sale.total - sale.amount_paid;
-    if (owed <= 0) continue;
+    // What's really owed on this sale — not the part a COD is collecting.
+    const owed = sale.real_owed;
+    if (owed <= 0.009) continue;
 
     const applied = Math.min(owed, remaining);
     const newAmountPaid = sale.amount_paid + applied;
@@ -1129,6 +1338,79 @@ customersRouter.post(
 const redeemLoyaltyInput = z.object({
   points: z.number().int().positive(),
 });
+
+const loyaltyAdjustInput = z.object({
+  // negative takes points away, positive gives some back
+  points: z.number().int().refine((n) => n !== 0, "Enter how many points"),
+  reason: z.string().trim().min(3, "A reason is required"),
+});
+
+// POST /api/customers/:id/loyalty-adjust — admin-only. Takes points away
+// (e.g. they were earned on wholesale buying) or gives some back (to undo a
+// mistake), always with a reason. It's one more entry in the loyalty
+// ledger, so the history shows exactly what changed, when and why — nothing
+// earlier is edited or deleted.
+customersRouter.post(
+  "/:id/loyalty-adjust",
+  requireRole("admin"),
+  asyncHandler(async (req, res) => {
+    const existing = db.prepare(`SELECT id, name FROM customers WHERE id = ?`).get(req.params.id) as { id: number; name: string } | undefined;
+    if (!existing) throw new ApiError(404, "Customer not found");
+    const data = loyaltyAdjustInput.parse(req.body);
+
+    const balance = loyaltyBalance(existing.id);
+    if (data.points < 0 && -data.points > balance) {
+      throw new ApiError(400, `${existing.name} only has ${balance} points — you can remove at most that many.`);
+    }
+
+    db.prepare(`INSERT INTO loyalty_transactions (customer_id, points, reason, notes) VALUES (?, ?, 'manual_adjustment', ?)`).run(
+      existing.id,
+      data.points,
+      `${data.points < 0 ? "Removed" : "Added"} by staff — ${data.reason}`
+    );
+    logAudit(
+      req.user!,
+      "loyalty_adjust",
+      "customer",
+      existing.id,
+      `${data.points < 0 ? "Removed" : "Added"} ${Math.abs(data.points)} loyalty points ${data.points < 0 ? "from" : "to"} ${existing.name} — ${data.reason}`
+    );
+
+    res.json(db.prepare(`SELECT customers.*, ${CALC_SUBQUERY} FROM customers WHERE customers.id = ?`).get(existing.id));
+  })
+);
+
+const loyaltyBlockInput = z.object({
+  blocked: z.boolean(),
+  reason: z.string().trim().optional(),
+});
+
+// PUT /api/customers/:id/loyalty-block — admin-only. A blocked customer
+// never earns loyalty points on new sales (a wholesale buyer, say); POS
+// shows it and records the sale without points. Points they already have
+// are untouched — take those away separately with loyalty-adjust.
+customersRouter.put(
+  "/:id/loyalty-block",
+  requireRole("admin"),
+  asyncHandler(async (req, res) => {
+    const existing = db.prepare(`SELECT id, name FROM customers WHERE id = ?`).get(req.params.id) as { id: number; name: string } | undefined;
+    if (!existing) throw new ApiError(404, "Customer not found");
+    const data = loyaltyBlockInput.parse(req.body);
+
+    if (data.blocked) {
+      if (!data.reason || data.reason.length < 3) throw new ApiError(400, "A reason is required to block loyalty points.");
+      db.prepare(
+        `UPDATE customers SET loyalty_blocked = 1, loyalty_block_reason = ?, loyalty_blocked_at = datetime('now', '+330 minutes') WHERE id = ?`
+      ).run(data.reason, existing.id);
+      logAudit(req.user!, "loyalty_block", "customer", existing.id, `Blocked loyalty points for ${existing.name} — ${data.reason}`);
+    } else {
+      db.prepare(`UPDATE customers SET loyalty_blocked = 0, loyalty_block_reason = NULL, loyalty_blocked_at = NULL WHERE id = ?`).run(existing.id);
+      logAudit(req.user!, "loyalty_block", "customer", existing.id, `Allowed loyalty points again for ${existing.name}`);
+    }
+
+    res.json(db.prepare(`SELECT customers.*, ${CALC_SUBQUERY} FROM customers WHERE customers.id = ?`).get(existing.id));
+  })
+);
 
 // POST /api/customers/:id/redeem-loyalty-points — trade loyalty
 // points in for store credit, reusing the existing store-credit

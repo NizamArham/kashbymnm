@@ -4,6 +4,7 @@ import { Search, Package, Receipt, User, Truck, ShoppingBag, UserCog, ArrowRight
 import { api, ApiRequestError } from "../lib/api";
 import { PageHeader, Card, Input, Button, Badge, ErrorText } from "../components/ui";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
+import ExchangeTag from "../components/ExchangeTag";
 
 type FindResult =
   | { type: "inventory"; data: InventoryResult }
@@ -39,6 +40,11 @@ interface SaleResult {
   is_voided: number;
   customer_name: string | null;
   deleted_customer_snapshot: string | null;
+  exchange_out_status: "awaiting" | "received" | "not_returned" | null;
+  exchange_out_invoice: string | null;
+  exchange_out_sale_id: number | null;
+  exchange_in_status: "awaiting_pickup" | "received" | "not_returned" | "cancelled" | null;
+  exchange_in_from: string | null;
 }
 interface CustomerResult {
   id: number;
@@ -292,6 +298,9 @@ export default function FindPage() {
             <Row label="Total" value={`Rs. ${result.data.total.toLocaleString()}`} />
             <Row label="Paid" value={`Rs. ${result.data.amount_paid.toLocaleString()}`} />
             <Row label="Status" value={<span className="capitalize">{result.data.payment_status}</span>} />
+            {(result.data.exchange_out_status || result.data.exchange_in_status) && (
+              <Row label="Exchange" value={<ExchangeTag sale={result.data} className="!mt-0 justify-end" />} />
+            )}
             <Button variant="primary" className="w-full mt-4 justify-center" onClick={() => navigate(`/sales/${result.data.id}`)}>
               View sale <ArrowRight size={14} className="ml-1.5" />
             </Button>

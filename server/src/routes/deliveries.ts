@@ -5,10 +5,11 @@ import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth, requireRole } from "../lib/auth";
 import { applyReturnCharge } from "./courierReconciliation";
 import { citypakCreateOrder } from "../lib/citypak";
-import { fardarCreateParcel } from "../lib/fardar";
+import { fardarCreateParcel, fardarCityName, postalCodeOf } from "../lib/fardar";
 import { syncCitypak } from "../lib/courierSync";
-import { getPartner, planDelivery } from "../lib/deliveryPartners";
+import { getPartner, planDelivery, OnDemandPaidBy } from "../lib/deliveryPartners";
 import { logAudit } from "../lib/auditLog";
+import { cancelExchangeForSale, exchangeForSale, recentExchangesBySale } from "../lib/exchanges";
 
 export const deliveriesRouter = Router();
 
@@ -56,8 +57,10 @@ deliveriesRouter.get(
          ${where}
          ORDER BY deliveries.id DESC`
       )
-      .all(...params);
-    res.json(rows);
+      .all(...params) as any[];
+    // Exchanges ride along so a delivery that's also collecting an old item says so.
+    const bySale = recentExchangesBySale();
+    res.json(rows.map((r) => ({ ...r, exchange: bySale.get(r.sale_id) ?? null })));
   })
 );
 
@@ -91,7 +94,7 @@ deliveriesRouter.get(
       )
       .all(row.sale_id);
 
-    res.json({ ...row, items });
+    res.json({ ...row, items, exchange: exchangeForSale(row.sale_id) });
   })
 );
 
@@ -215,7 +218,9 @@ deliveriesRouter.post(
       to_address_line_4: delivery.city,
       to_contact_name: delivery.customer_name || "Customer",
       to_contact_1: delivery.customer_phone,
-      description: `Order ${delivery.invoice}`.slice(0, 128),
+      // An exchange tells the courier, in words, to bring the old items back (CityPak
+      // has no exchange flag of its own — the description is what its rider sees).
+      description: `${exchangeForSale(delivery.sale_id)?.status === "awaiting_pickup" ? "EXCHANGE - collect the return package. " : ""}Order ${delivery.invoice}`.slice(0, 128),
       weight_g: Math.round(weightKg * 1000),
       cash_on_delivery_amount: delivery.cod_amount || 0,
       number_of_pieces: 1,
@@ -287,7 +292,11 @@ deliveriesRouter.post(
          GROUP BY title`
       )
       .all(delivery.sale_id) as { title: string; qty: number }[];
-    const description = itemRows.map((r) => `${r.title} x${r.qty}`).join(", ").slice(0, 150) || `Order ${delivery.invoice}`;
+    // An exchange order is booked with Fardar as an exchange: the rider delivers the new
+    // items and collects the old ones on the same visit. (Their API takes an exchange flag.)
+    const isExchange = exchangeForSale(delivery.sale_id)?.status === "awaiting_pickup";
+    const itemsText = itemRows.map((r) => `${r.title} x${r.qty}`).join(", ") || `Order ${delivery.invoice}`;
+    const description = (isExchange ? `EXCHANGE - ${itemsText}` : itemsText).slice(0, 150);
 
     const phone2 = toLocalPhone(delivery.customer_phone2);
     const waybill = await fardarCreateParcel({
@@ -297,13 +306,13 @@ deliveriesRouter.post(
       recipient_name: delivery.customer_name || "Customer",
       recipient_contact_1: phone1,
       recipient_contact_2: phone2 && phone2 !== phone1 ? phone2 : undefined,
-      recipient_address: [delivery.address_line1, delivery.address_line2].filter(Boolean).join(", "),
-      // Postal-list names carry a district code ("Talawa(KG)") that
-      // isn't part of the city's name.
-      recipient_city: String(delivery.city).replace(/\s*\(.*?\)\s*$/, "").trim(),
+      // The postal code rides on the end of the address, since Fardar's city
+      // field must be the plain place name.
+      recipient_address: [delivery.address_line1, delivery.address_line2, postalCodeOf(String(delivery.city))].filter(Boolean).join(", "),
+      recipient_city: fardarCityName(String(delivery.city)),
       // What the courier collects on delivery (0 when it's prepaid).
       amount: delivery.cod_amount || 0,
-      exchange: false,
+      exchange: isExchange,
     });
 
     db.prepare(`UPDATE deliveries SET tracking_number = ? WHERE id = ?`).run(waybill, delivery.id);
@@ -324,6 +333,28 @@ deliveriesRouter.post(
   })
 );
 
+// Re-prices an on-demand order from a fare / who-pays choice, the same way
+// checkout does. A credit order only ever collects the fee on delivery; an
+// ordinary one owes whatever was unpaid, adjusted by how the delivery
+// charge changed. Shared by "change partner" and "set the fare later".
+function repriceOnDemand(
+  d: any,
+  partner: ReturnType<typeof getPartner>,
+  choice: { delivery_fare?: number; delivery_paid_by?: OnDemandPaidBy }
+) {
+  const plan = planDelivery({ is_free_delivery: false, ...choice }, partner);
+  if (d.fee_paid > plan.fee) {
+    throw new ApiError(
+      409,
+      `The customer already paid Rs. ${d.fee_paid.toLocaleString()} for delivery, which is more than the Rs. ${plan.fee.toLocaleString()} this would charge — choose "Customer pays" with a fare of at least that.`
+    );
+  }
+  const cod = d.sale_payment_method === "credit" ? plan.fee : Math.max(0, d.cod_amount - d.delivery_fee + plan.fee);
+  return { plan, cod };
+}
+
+const onDemandPaidBy = z.enum(["customer", "shop", "rider_direct"]);
+
 // PUT /api/deliveries/:id/partner — switch which delivery partner an
 // order ships with, any time before the courier actually has it
 // (pending or packed — once dispatched, COD and settlement are already
@@ -332,7 +363,8 @@ deliveriesRouter.post(
 //   customer was quoted (and any COD) is left exactly as agreed — the
 //   courier's own cost is worked out from ITS tariff at settlement.
 // - Uber / PickMe-style on-demand: priced the same way POS does it —
-//   the fare is typed in, plus who pays (customer / free / we pay now).
+//   the fare is typed in (or left for later), plus who pays (customer /
+//   free / we pay now / customer pays the rider).
 // The previous courier's tracking number and waybill no longer mean
 // anything, so they're cleared (a packed order goes back to pending to
 // get a fresh waybill) and the old details are kept in the notes.
@@ -343,7 +375,7 @@ deliveriesRouter.put(
       .object({
         delivery_partner: z.string().min(1),
         delivery_fare: z.number().nonnegative().optional(),
-        delivery_paid_by: z.enum(["customer", "shop", "shop_upfront"]).optional(),
+        delivery_paid_by: onDemandPaidBy.optional(),
       })
       .parse(req.body);
 
@@ -370,29 +402,16 @@ deliveriesRouter.put(
     let isFree: number = d.is_free_delivery;
     let paidBy: string | null = null;
     let actualFare: number | null = null;
+    let riderDirect = 0;
 
     if (partner.kind === "on_demand") {
-      if (!(data.delivery_fare && data.delivery_fare > 0)) {
-        throw new ApiError(400, `Enter the delivery fare for ${partner.name}.`);
-      }
-      const plan = planDelivery(
-        { is_free_delivery: false, delivery_fare: data.delivery_fare, delivery_paid_by: data.delivery_paid_by },
-        partner
-      );
-      if (d.fee_paid > plan.fee) {
-        throw new ApiError(
-          409,
-          `The customer already paid Rs. ${d.fee_paid.toLocaleString()} for delivery, which is more than the Rs. ${plan.fee.toLocaleString()} this would charge — choose "Customer pays" with a fare of at least that.`
-        );
-      }
-      // A credit order only ever collects the fee on delivery; an
-      // ordinary one owes whatever was unpaid, adjusted by how the
-      // delivery charge changed.
-      cod = d.sale_payment_method === "credit" ? plan.fee : Math.max(0, d.cod_amount - d.delivery_fee + plan.fee);
-      fee = plan.fee;
-      isFree = plan.isFree ? 1 : 0;
-      paidBy = plan.paidBy;
-      actualFare = plan.actualFare;
+      const priced = repriceOnDemand(d, partner, data);
+      cod = priced.cod;
+      fee = priced.plan.fee;
+      isFree = priced.plan.isFree ? 1 : 0;
+      paidBy = priced.plan.paidBy;
+      actualFare = priced.plan.actualFare;
+      riderDirect = priced.plan.riderDirect ? 1 : 0;
     }
 
     const trackingBefore: string | null = d.tracking_number && d.tracking_number !== d.invoice ? d.tracking_number : null;
@@ -403,7 +422,7 @@ deliveriesRouter.put(
     db.prepare(
       `UPDATE deliveries
        SET delivery_partner = ?, delivery_fee = ?, cod_amount = ?, is_free_delivery = ?,
-           delivery_paid_by = ?, actual_fare = ?,
+           delivery_paid_by = ?, actual_fare = ?, rider_direct = ?,
            tracking_number = ?, citypak_order_id = NULL,
            delivery_status = 'pending', waybill_number = NULL, packed_at = NULL,
            notes = CASE WHEN notes IS NULL OR notes = '' THEN ? ELSE notes || char(10) || ? END
@@ -415,6 +434,7 @@ deliveriesRouter.put(
       isFree,
       paidBy,
       actualFare,
+      riderDirect,
       // an on-demand app has no tracking numbers, so the invoice number
       // stands in; a courier gets its own once the waybill is generated
       partner.kind === "on_demand" ? d.invoice : null,
@@ -424,6 +444,60 @@ deliveriesRouter.put(
     );
 
     logAudit(req.user!, "delivery_partner_change", "delivery", d.id, `${d.invoice}: ${note}`);
+    res.json(db.prepare(`SELECT * FROM deliveries WHERE id = ?`).get(d.id));
+  })
+);
+
+// PUT /api/deliveries/:id/fare — set (or correct) the fare of an on-demand
+// order once it's known: billed or credited first, Flash booked later. It
+// re-prices exactly like checkout would have — the customer is charged the
+// fare unless "we pay" — and the order stops being "awaiting fare", so it
+// can be packed. Also the way to switch to "customer pays the rider" when
+// it turns out there's no fare for us to record. Allowed until the order is
+// delivered (the rider's fare is often confirmed after pick-up).
+deliveriesRouter.put(
+  "/:id/fare",
+  asyncHandler(async (req, res) => {
+    const data = z
+      .object({
+        delivery_fare: z.number().nonnegative().optional(),
+        delivery_paid_by: onDemandPaidBy.optional(),
+      })
+      .parse(req.body);
+
+    const d = db
+      .prepare(
+        `SELECT deliveries.*, sales.invoice, sales.is_voided, sales.payment_method AS sale_payment_method
+         FROM deliveries JOIN sales ON sales.id = deliveries.sale_id
+         WHERE deliveries.id = ?`
+      )
+      .get(req.params.id) as any;
+    if (!d) throw new ApiError(404, "Delivery not found");
+    if (d.is_voided) throw new ApiError(409, "This order's sale was voided — there's nothing to price.");
+    if (!["pending", "packed", "dispatched"].includes(d.delivery_status)) {
+      throw new ApiError(409, `This order is already ${d.delivery_status} — its fare can't be changed anymore.`);
+    }
+    const partner = getPartner(d.delivery_partner);
+    if (partner?.kind !== "on_demand") {
+      throw new ApiError(400, "Only Uber / PickMe-style orders have a fare — a courier's charge comes from its tariff.");
+    }
+
+    const choice: OnDemandPaidBy = data.delivery_paid_by ?? (d.rider_direct ? "rider_direct" : d.delivery_paid_by ?? "customer");
+    if (choice !== "rider_direct" && !(data.delivery_fare && data.delivery_fare > 0)) {
+      throw new ApiError(400, `Enter the delivery fare for ${partner.name}.`);
+    }
+    const { plan, cod } = repriceOnDemand(d, partner, { delivery_fare: data.delivery_fare, delivery_paid_by: choice });
+
+    db.prepare(
+      `UPDATE deliveries
+       SET delivery_fee = ?, cod_amount = ?, is_free_delivery = ?, delivery_paid_by = ?, actual_fare = ?, rider_direct = ?
+       WHERE id = ?`
+    ).run(plan.fee, cod, plan.isFree ? 1 : 0, plan.paidBy, plan.actualFare, plan.riderDirect ? 1 : 0, d.id);
+
+    const what = plan.riderDirect
+      ? "customer pays the rider directly"
+      : `fare Rs. ${plan.actualFare!.toLocaleString()}, ${plan.paidBy === "shop" ? "we pay (free delivery)" : "charged to the customer"}`;
+    logAudit(req.user!, "delivery_fare_set", "delivery", d.id, `${d.invoice} (${partner.name}): ${what}`);
     res.json(db.prepare(`SELECT * FROM deliveries WHERE id = ?`).get(d.id));
   })
 );
@@ -441,6 +515,14 @@ deliveriesRouter.put(
     if (!existing) throw new ApiError(404, "Delivery not found");
     if (existing.delivery_status !== "pending") {
       throw new ApiError(409, `This order is already ${existing.delivery_status} — only pending orders can be packed.`);
+    }
+
+    // An on-demand order billed before its ride was booked has no fare yet
+    // — it waits here, on hold, until the fare is entered (or switched to
+    // "customer pays the rider").
+    const onDemand = getPartner(existing.delivery_partner)?.kind === "on_demand";
+    if (onDemand && !existing.rider_direct && existing.actual_fare == null) {
+      throw new ApiError(409, "This order is on hold — the delivery fare isn't entered yet. Add the fare first, then pack it.");
     }
 
     const waybill_number = nextWaybillNumber();
@@ -505,6 +587,11 @@ deliveriesRouter.put(
       data.notes ?? null,
       req.params.id
     );
+
+    // The customer refused the parcel, so the whole thing goes back — the
+    // exchange never happened: their old item stays with them, and the courier's
+    // return trip (below) is ours in full.
+    cancelExchangeForSale(existing.sale_id, "Parcel returned — the customer refused it");
 
     // Only a delivery the courier actually had (dispatched) incurs a
     // return-trip fee — one that never left "packed" was never picked up,

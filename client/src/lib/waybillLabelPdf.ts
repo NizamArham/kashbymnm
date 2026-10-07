@@ -2,6 +2,7 @@ import jsPDF from "jspdf";
 import JsBarcode from "jsbarcode";
 import { NAME_LOGO_PNG_BASE64, NAME_LOGO_ASPECT_RATIO } from "./logoAsset";
 import { WaybillLabelData } from "../components/WaybillLabel";
+import { SaleExchange } from "./types";
 
 // Renders the A6 waybill label by drawing directly into the PDF with
 // jsPDF's own text/shape primitives, instead of screenshotting the live
@@ -118,11 +119,13 @@ function layoutTopGroup(doc: jsPDF, data: WaybillLabelData, startY: number, draw
   if (draw) doc.text(data.customerName || "Customer Name", MARGIN, startY + y + nameDims.h * 0.78);
   y += nameDims.h + 0.4;
 
-  const addressJoined = data.addressLines.filter(Boolean).join(", ") || "Address line 1";
-  const addressText = `${addressJoined},`;
+  // An order that needs no address (Uber / PickMe) leaves these lines
+  // empty rather than printing the blank template's placeholders.
+  const addressJoined = data.addressLines.filter(Boolean).join(", ") || (data.addressNotNeeded ? "" : "Address line 1");
+  const addressText = addressJoined ? `${addressJoined},` : "";
   doc.setFont("helvetica", "normal");
   doc.setFontSize(fs(12));
-  const addressLines: string[] = doc.splitTextToSize(addressText, CONTENT_W).slice(0, 3);
+  const addressLines: string[] = addressText ? doc.splitTextToSize(addressText, CONTENT_W).slice(0, 3) : [];
   const addressLineBase = doc.getTextDimensions("Mg").h;
   const addressLineSpacing = addressLineBase * 1.3;
   for (const line of addressLines) {
@@ -131,11 +134,13 @@ function layoutTopGroup(doc: jsPDF, data: WaybillLabelData, startY: number, draw
   }
   y += 0.5;
 
-  const cityLine = data.city ? (data.cityPostalCode ? `${data.city} [${data.cityPostalCode}].` : `${data.city}.`) : "City";
+  const cityLine = data.city ? (data.cityPostalCode ? `${data.city} [${data.cityPostalCode}].` : `${data.city}.`) : data.addressNotNeeded ? "" : "City";
   doc.setFontSize(fs(12));
-  const cityDims = doc.getTextDimensions(cityLine);
-  if (draw) doc.text(cityLine, MARGIN, startY + y + cityDims.h * 0.78);
-  y += cityDims.h + 1.0;
+  if (cityLine) {
+    const cityDims = doc.getTextDimensions(cityLine);
+    if (draw) doc.text(cityLine, MARGIN, startY + y + cityDims.h * 0.78);
+    y += cityDims.h + 1.0;
+  }
 
   const phonesText = data.phones.filter(Boolean).join(" / ") || "Telephone Number";
   doc.setFontSize(fs(11.5));
@@ -268,8 +273,8 @@ function layoutBottomGroup(doc: jsPDF, data: WaybillLabelData, startY: number, d
   return y;
 }
 
-export function generateWaybillLabelPdf(data: WaybillLabelData): jsPDF {
-  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: [PAGE_W, PAGE_H], compress: true });
+// Draws one A6 waybill label onto the doc's current page.
+function drawWaybillLabel(doc: jsPDF, data: WaybillLabelData) {
   doc.setTextColor(0, 0, 0);
 
   const usableHeight = PAGE_H - MARGIN * 2;
@@ -297,6 +302,252 @@ export function generateWaybillLabelPdf(data: WaybillLabelData): jsPDF {
   layoutTopGroup(doc, data, topStart, true);
   layoutMiddleGroup(doc, data, middleStart, true);
   layoutBottomGroup(doc, data, bottomStart, true);
+}
 
+export function generateWaybillLabelPdf(data: WaybillLabelData): jsPDF {
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: [PAGE_W, PAGE_H], compress: true });
+  drawWaybillLabel(doc, data);
+  return doc;
+}
+
+// ---------------------------------------------------------------------------
+// Exchange orders print THREE labels in one go (one A6 page each):
+//   1. the ordinary waybill — pasted on the parcel going out
+//   2. a delivery note — tells the delivery person to collect the return package
+//      while delivering this one
+//   3. the return waybill — goes in the same bag as the delivery note; the customer
+//      sticks it on the return package and hands that over at the same visit
+// The delivery note has NO barcode on purpose: it travels with the parcel, and a courier
+// who scanned it instead of the waybill would add a status to the wrong thing. The
+// return waybill carries the SAME waybill number as the parcel (an exchange parcel is one
+// waybill at the courier — there is no second number).
+// ---------------------------------------------------------------------------
+
+export interface ExchangeReturnItem {
+  title: string;
+  variant: string; // "XS, Black" — may be empty
+  invoice: string; // the invoice the item came from
+}
+
+// The old items the courier is to bring back, for an exchange that is still waiting
+// for them; null for an ordinary order (or an exchange that's already settled).
+export function returnItemsOf(exchange: SaleExchange | null | undefined): ExchangeReturnItem[] | null {
+  if (!exchange || exchange.status !== "awaiting_pickup") return null;
+  const items = exchange.items
+    .filter((i) => i.status === "awaiting")
+    .map((i) => ({ title: i.title ?? "Item", variant: [i.size, i.color].filter(Boolean).join(", "), invoice: i.old_invoice }));
+  return items.length ? items : null;
+}
+
+interface TextOpts {
+  x?: number;
+  size: number;
+  style?: "normal" | "bold" | "italic" | "bolditalic";
+  align?: "left" | "center" | "right";
+  maxWidth?: number;
+  maxLines?: number;
+  lineSpacing?: number;
+}
+
+// One block of text: measures it and, when `draw` is set, paints it at y. Returns the
+// height used, so a layout is just a list of these with gaps — the same
+// measure-then-draw idea as the groups above, so the page can be fitted by scaling.
+function textBlock(doc: jsPDF, draw: boolean, y: number, text: string, o: TextOpts): number {
+  doc.setFont("helvetica", o.style ?? "normal");
+  doc.setFontSize(fs(o.size));
+  const lines: string[] = o.maxWidth ? doc.splitTextToSize(text, o.maxWidth).slice(0, o.maxLines ?? 99) : [text];
+  const base = doc.getTextDimensions("Mg").h;
+  const step = base * (o.lineSpacing ?? 1.25);
+  const align = o.align ?? "left";
+  const x = o.x ?? (align === "center" ? PAGE_W / 2 : align === "right" ? RIGHT_X : MARGIN);
+  if (draw) lines.forEach((line, i) => doc.text(line, x, y + i * step + base * 0.78, { align }));
+  return lines.length ? base + (lines.length - 1) * step : 0;
+}
+
+function drawFitted(doc: jsPDF, layout: (startY: number, draw: boolean) => number) {
+  const usable = PAGE_H - MARGIN * 2;
+  for (SCALE = 1; ; SCALE = Math.round((SCALE - 0.02) * 100) / 100) {
+    if (layout(0, false) <= usable || SCALE <= 0.6) break;
+  }
+  doc.setTextColor(0, 0, 0);
+  layout(MARGIN, true);
+}
+
+// The header line every label starts with: shop code on the left, date on the right,
+// then a rule.
+function labelHeader(doc: jsPDF, draw: boolean, y: number, left: string, date: string): number {
+  const h = textBlock(doc, draw, y, left, { size: 14, style: "bold" });
+  if (draw) textBlock(doc, true, y, date, { size: 14, style: "bolditalic", align: "right" });
+  if (draw) divider(doc, y + h + 2);
+  return h + 2 + 4;
+}
+
+const MAX_LISTED = 4;
+
+// 2/3 — the delivery note for the courier's rider. Deliberately plain: type, fine rules
+// and one outlined box (no fills, no barcode), so the instruction is the thing you see.
+function layoutCollectNote(doc: jsPDF, data: WaybillLabelData, items: ExchangeReturnItem[], startY: number, draw: boolean): number {
+  let y = 0;
+  const at = () => startY + y;
+  const label = (text: string) => textBlock(doc, draw, at(), text, { size: 8.5, style: "bold" }) + 1.8;
+  // A fine rule between sections, with the same air above and below every time.
+  const section = () => {
+    y += 4;
+    if (draw) {
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.2);
+      doc.line(MARGIN, at(), RIGHT_X, at());
+    }
+    y += 4;
+  };
+
+  // Title, with the date at the right on the same line; a firm rule under it.
+  const titleH = textBlock(doc, draw, at(), "DELIVERY NOTE", { size: 21, style: "bold" });
+  if (draw) {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(fs(10.5));
+    const dateH = doc.getTextDimensions("Mg").h;
+    textBlock(doc, true, at() + titleH - dateH, data.date, { size: 10.5, align: "right" });
+  }
+  y += titleH + 2.5;
+  if (draw) divider(doc, at());
+  y += 6;
+
+  // The instruction, boxed — the one thing the rider must do.
+  const boxTop = y;
+  y += 3.5;
+  const padX = 3.5;
+  y += textBlock(doc, draw, at(), "INSTRUCTION", { size: 8.5, style: "bold", x: MARGIN + padX }) + 1.8;
+  y += textBlock(doc, draw, at(), "Collect the return package when you deliver this parcel.", { size: 14, style: "bold", x: MARGIN + padX, maxWidth: CONTENT_W - padX * 2, maxLines: 3 }) + 2.5;
+  y += textBlock(
+    doc,
+    draw,
+    at(),
+    "The return waybill is in the same bag as this note. The customer sticks it on the return package and hands it to you at the same time.",
+    { size: 9.5, x: MARGIN + padX, maxWidth: CONTENT_W - padX * 2, maxLines: 4 }
+  );
+  y += 3.5;
+  if (draw) {
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.4);
+    doc.rect(MARGIN, startY + boxTop, CONTENT_W, y - boxTop);
+  }
+  y += 6;
+
+  y += label("TO COLLECT");
+  for (const i of items.slice(0, MAX_LISTED)) {
+    y += textBlock(doc, draw, at(), `${i.title}${i.variant ? ` (${i.variant})` : ""}`, { size: 11.5, maxWidth: CONTENT_W, maxLines: 2 }) + 1.4;
+  }
+  if (items.length > MAX_LISTED) y += textBlock(doc, draw, at(), `+ ${items.length - MAX_LISTED} more`, { size: 11.5, style: "italic" }) + 1.4;
+
+  section();
+  y += label("CUSTOMER");
+  y += textBlock(doc, draw, at(), data.customerName || "Customer", { size: 13, style: "bold", maxWidth: CONTENT_W, maxLines: 1 }) + 0.8;
+  const addr = [data.addressLines.filter(Boolean).join(", "), data.city].filter(Boolean).join(", ");
+  if (addr) y += textBlock(doc, draw, at(), addr, { size: 10.5, maxWidth: CONTENT_W, maxLines: 2 }) + 0.8;
+  const phones = data.phones.filter(Boolean).join(" / ");
+  if (phones) y += textBlock(doc, draw, at(), phones, { size: 10.5 }) + 0.8;
+
+  if (data.paymentType === "COD" && data.codAmount > 0) {
+    section();
+    // Label at the left, the amount at the right, sharing one baseline.
+    const amount = `${Math.round(data.codAmount).toLocaleString("en-US")} LKR`;
+    const amountH = textBlock(doc, draw, at(), amount, { size: 20, style: "bold", align: "right" });
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(fs(8.5));
+    const labelH = doc.getTextDimensions("Mg").h;
+    if (draw) textBlock(doc, true, at() + amountH - labelH, "COD TO COLLECT", { size: 8.5, style: "bold" });
+    y += amountH;
+  }
+
+  // Which parcel this belongs to — plain text only, never a barcode.
+  section();
+  y += textBlock(doc, draw, at(), `${data.orderRef}${data.trackingNumber ? ` · ${data.trackingNumber}` : ""}`, { size: 9.5 });
+
+  return y;
+}
+
+// 3/3 — the return waybill that goes inside the parcel.
+function layoutReturnWaybill(doc: jsPDF, data: WaybillLabelData, items: ExchangeReturnItem[], startY: number, draw: boolean): number {
+  let y = 0;
+  const at = () => startY + y;
+
+  y += labelHeader(doc, draw, at(), "[ RETURN WAYBILL ]", data.date);
+
+  // Going back to the shop.
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(fs(11.5));
+  const tagH = draw ? blackTag(doc, "DELIVER [ TO ]", MARGIN, at(), fs(11.5)) : doc.getTextDimensions("DELIVER [ TO ]").h + TAG_PAD_Y * 2;
+  y += tagH + 2.5;
+  y += textBlock(doc, draw, at(), data.returnBusinessName || "M&M Clothing", { size: 17, style: "bold", maxWidth: CONTENT_W, maxLines: 1 }) + 0.8;
+  for (const line of data.returnAddressLines.filter(Boolean)) {
+    y += textBlock(doc, draw, at(), line, { size: 11.5, maxWidth: CONTENT_W, maxLines: 2 }) + 0.4;
+  }
+  if (data.returnPhone) y += textBlock(doc, draw, at(), data.returnPhone, { size: 11.5, style: "bold" }) + 0.8;
+  y += 1.5;
+
+  if (draw) divider(doc, at());
+  y += 3.5;
+
+  // Coming from the customer.
+  y += textBlock(doc, draw, at(), "FROM", { size: 9, style: "bold" }) + 0.6;
+  y += textBlock(doc, draw, at(), data.customerName || "Customer", { size: 13, style: "bold", maxWidth: CONTENT_W, maxLines: 1 }) + 0.6;
+  const addr = [data.addressLines.filter(Boolean).join(", "), data.city].filter(Boolean).join(", ");
+  if (addr) y += textBlock(doc, draw, at(), addr, { size: 10, maxWidth: CONTENT_W, maxLines: 2 }) + 0.6;
+  const phones = data.phones.filter(Boolean).join(" / ");
+  if (phones) y += textBlock(doc, draw, at(), phones, { size: 10 }) + 0.6;
+  y += 1.5;
+
+  if (draw) divider(doc, at());
+  y += 3.5;
+
+  const waybill = data.trackingNumber;
+  const rowH = textBlock(doc, draw, at(), "EXCHANGE RETURN", { size: 11.5, style: "bold" });
+  if (draw) textBlock(doc, true, at(), "No COD", { size: 11.5, style: "bold", align: "right" });
+  y += rowH + 1.2;
+  y += textBlock(doc, draw, at(), `Ref: ${data.orderRef}`, { size: 10.5, style: "bold" }) + 1.2;
+  const listed = items.slice(0, MAX_LISTED).map((i) => `${i.title}${i.variant ? ` (${i.variant})` : ""}`);
+  const more = items.length > MAX_LISTED ? ` + ${items.length - MAX_LISTED} more` : "";
+  y += textBlock(doc, draw, at(), `Returning: ${listed.join(", ")}${more}`, { size: 9.5, maxWidth: CONTENT_W, maxLines: 3 }) + 2;
+
+  if (draw) divider(doc, at());
+  y += 3.5;
+
+  // The same waybill number (and barcode) as the parcel that was sent out.
+  const barcode = waybill ? barcodePng(waybill) : null;
+  const bcWidth = 52;
+  const bcHeight = barcode ? Math.min(11, bcWidth / barcode.aspect) : 0;
+  if (draw && barcode) doc.addImage(barcode.dataUrl, "PNG", (PAGE_W - bcWidth) / 2, at(), bcWidth, bcHeight, undefined, "FAST");
+  y += bcHeight + 1.5;
+  y += textBlock(doc, draw, at(), waybill || data.orderRef, { size: 10.5, style: "bold", align: "center" }) + 3;
+
+  // What the customer does with it, in a box so it's the thing they read.
+  const stepsTop = y;
+  y += 3;
+  y += textBlock(doc, draw, at(), "WHAT TO DO", { size: 9.5, style: "bold", x: MARGIN + 3 }) + 1.6;
+  y += textBlock(
+    doc,
+    draw,
+    at(),
+    "Stick this waybill on the return package and hand it to the delivery person when your exchange parcel is delivered.",
+    { size: 11, x: MARGIN + 3, maxWidth: CONTENT_W - 6, maxLines: 4 }
+  );
+  y += 3;
+  if (draw) {
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.4);
+    doc.rect(MARGIN, startY + stepsTop, CONTENT_W, y - stepsTop);
+  }
+
+  return y;
+}
+
+export function generateExchangeWaybillsPdf(data: WaybillLabelData, returnItems: ExchangeReturnItem[]): jsPDF {
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: [PAGE_W, PAGE_H], compress: true });
+  drawWaybillLabel(doc, data);
+  doc.addPage([PAGE_W, PAGE_H], "portrait");
+  drawFitted(doc, (startY, draw) => layoutCollectNote(doc, data, returnItems, startY, draw));
+  doc.addPage([PAGE_W, PAGE_H], "portrait");
+  drawFitted(doc, (startY, draw) => layoutReturnWaybill(doc, data, returnItems, startY, draw));
   return doc;
 }

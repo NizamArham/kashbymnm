@@ -3,9 +3,11 @@ import { z } from "zod";
 import { db } from "../db/connection";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { nextTransactionCode } from "../lib/codes";
-import { requireAuth, requireRole } from "../lib/auth";
+import { requireAuth, requireRole, AuthUser } from "../lib/auth";
 import { logAudit } from "../lib/auditLog";
 import { LOYALTY_RATE_PERCENT } from "./sales";
+import { returnsInRange } from "../lib/returnedRevenue";
+import { itemInActiveExchange } from "../lib/exchanges";
 
 export const returnsRouter = Router();
 
@@ -88,6 +90,29 @@ returnsRouter.get(
   })
 );
 
+// GET /api/returns/revenue-impact?start=YYYY-MM-DD&end=YYYY-MM-DD — what was
+// handed back (store credit for returned items, cash/bank refunds) on each day
+// in the range, so a revenue figure can be shown net of returns. Same rule as
+// the Analytics page — see lib/returnedRevenue.ts.
+returnsRouter.get(
+  "/revenue-impact",
+  asyncHandler(async (req, res) => {
+    const start = String(req.query.start ?? "");
+    const end = String(req.query.end ?? "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
+      throw new ApiError(400, "start and end must be YYYY-MM-DD");
+    }
+    const byDay = new Map<string, { amount: number; count: number }>();
+    for (const r of returnsInRange(start, end)) {
+      const day = byDay.get(r.day) ?? { amount: 0, count: 0 };
+      day.amount += r.amount;
+      day.count += 1;
+      byDay.set(r.day, day);
+    }
+    res.json({ days: Array.from(byDay, ([day, v]) => ({ day, ...v })).sort((a, b) => a.day.localeCompare(b.day)) });
+  })
+);
+
 // POST /api/returns/requests — staff submits a return request. This
 // NEVER touches stock, cash book, or loyalty points — it only exists as
 // a pending record until an admin decides on it.
@@ -115,6 +140,12 @@ returnsRouter.post(
     // longer exists. Existing/historical return records are unaffected
     // (see REQUEST_SELECT above, which uses LEFT JOIN for display).
     if (!saleItem) throw new ApiError(404, "Sale item not found");
+
+    // An item that's part of an online exchange is dealt with there — returning it
+    // here too would credit it twice.
+    if (itemInActiveExchange(data.sale_item_id)) {
+      throw new ApiError(409, "This item is part of an online exchange — it's received from that replacement order, not returned separately.");
+    }
 
     const alreadyHandled = db
       .prepare(`SELECT id FROM return_requests WHERE sale_item_id = ? AND status IN ('pending','approved')`)
@@ -164,175 +195,182 @@ returnsRouter.post(
 // PUT /api/returns/requests/:id/approve — admin-only. This is where the
 // original instant-return logic now lives: it only runs once a request
 // is approved, not the moment staff submit one.
+export type ReturnDecision = z.infer<typeof decisionInput>;
+
+// Approves a pending return request: the unit goes back on the shelf (or to
+// damaged), the money or store credit goes back, loyalty points are reversed.
+// The approve route and an online exchange being received both come through here,
+// so a return means exactly the same thing whichever way it was started.
+export function approveReturnRequest(requestId: number | string, user: AuthUser, data: ReturnDecision) {
+  const request = db.prepare(`SELECT * FROM return_requests WHERE id = ?`).get(requestId) as any;
+  if (!request) throw new ApiError(404, "Return request not found");
+  if (request.status !== "pending") throw new ApiError(409, `This request has already been ${request.status}.`);
+
+  const saleItem = db
+    .prepare(
+      `SELECT sale_items.*, sales.invoice, sales.customer_id, sales.loyalty_points_earned, sales.total, sales.amount_paid,
+              sales.subtotal, sales.discount
+       FROM sale_items JOIN sales ON sales.id = sale_items.sale_id
+       WHERE sale_items.id = ?`
+    )
+    .get(request.sale_item_id) as any;
+  if (!saleItem) throw new ApiError(404, "Sale item not found");
+
+  let exchangeUnit: any = null;
+  if (request.resolution === "exchange") {
+    exchangeUnit = db.prepare(`SELECT * FROM inventory WHERE id = ?`).get(request.exchange_inventory_id);
+    if (!exchangeUnit) throw new ApiError(400, "Exchange inventory unit no longer exists");
+    if (exchangeUnit.status !== "available") {
+      throw new ApiError(409, "Exchange inventory unit is no longer available for sale");
+    }
+  }
+
+  const refundMethod = data.payment_method ?? "cash";
+  if (request.resolution === "refund" && refundMethod === "bank_transfer") {
+    if (!saleItem.customer_id) {
+      throw new ApiError(400, "This is a walk-in sale with no customer attached — a bank transfer refund needs a real customer account. Use cash instead.");
+    }
+    if (!data.bank_account_id) {
+      throw new ApiError(400, "Select which of the customer's bank accounts to refund into");
+    }
+    const account = db
+      .prepare(`SELECT * FROM customer_bank_accounts WHERE id = ? AND customer_id = ?`)
+      .get(data.bank_account_id, saleItem.customer_id);
+    if (!account) throw new ApiError(400, "That bank account isn't on file for this customer");
+  }
+
+  // A "refund" only ever gives back money that was actually collected —
+  // sales.amount_paid also counts store credit redeemed toward the sale,
+  // which was never real cash either (same distinction as the void
+  // handler), so that's excluded here too. Whatever fraction of the
+  // sale was never actually paid for is written off the customer's
+  // balance instead (see the sales.total adjustment below) rather than
+  // manufacturing a cash_book expense for money that was never received
+  // — this is exactly what a credit (unpaid) sale needs: the return
+  // reduces what they owe, it doesn't touch cash on hand at all.
+  const creditRedeemedRow = db
+    .prepare(
+      `SELECT COALESCE(SUM(-amount), 0) as total FROM store_credit_transactions
+       WHERE reference_id = ? AND reason = 'redemption'`
+    )
+    .get(saleItem.sale_id) as { total: number };
+  const realCashPaid = Math.max(0, saleItem.amount_paid - creditRedeemedRow.total);
+  const paidFraction = saleItem.total > 0 ? Math.min(1, realCashPaid / saleItem.total) : 0;
+
+  const refund_amount = request.resolution === "refund" ? Math.round(saleItem.unit_price * paidFraction) : 0;
+  const ledgerWriteOff = request.resolution === "refund" ? saleItem.unit_price - refund_amount : 0;
+  // An immediate exchange creates no new sale for the replacement to
+  // earn its own points on, so those stay; a refund or a store-credit
+  // return doesn't (the replacement is a separate, new sale).
+  const pointsToReverse =
+    request.resolution === "refund" || request.resolution === "store_credit_exchange" ? pointsEarnedOnItem(saleItem) : 0;
+
+  const runApproval = db.transaction(() => {
+    const returnResult = db
+      .prepare(
+        `INSERT INTO returns (sale_item_id, condition, resolution, refund_amount, exchange_inventory_id, reason)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        request.sale_item_id,
+        request.condition,
+        request.resolution,
+        refund_amount,
+        request.exchange_inventory_id,
+        request.reason
+      );
+    const returnId = returnResult.lastInsertRowid;
+
+    const newStatus = request.condition === "clean" ? "available" : "damaged";
+    db.prepare(`UPDATE inventory SET status = ? WHERE id = ?`).run(newStatus, saleItem.inventory_id);
+
+    if (request.resolution === "refund") {
+      if (refund_amount > 0) {
+        db.prepare(
+          `INSERT INTO cash_book (transaction_code, type, category, payment_method, reference_id, amount, notes)
+           VALUES (?, 'expense', 'return_refund', ?, ?, ?, ?)`
+        ).run(nextTransactionCode(), refundMethod, returnId, refund_amount, `Refund for invoice ${saleItem.invoice}`);
+      }
+
+      // The part of this item that was never actually paid for comes
+      // off the sale's total instead — the customer no longer owes for
+      // an item they no longer have, without inventing a cash outflow
+      // that never happened. Recompute payment_status too, since
+      // shrinking total can turn an unpaid/partial sale fully paid.
+      if (ledgerWriteOff > 0) {
+        const newTotal = saleItem.total - ledgerWriteOff;
+        const newPaymentStatus =
+          newTotal <= 0 || saleItem.amount_paid >= newTotal ? "paid" : saleItem.amount_paid > 0 ? "partial" : "unpaid";
+        db.prepare(`UPDATE sales SET total = ?, payment_status = ? WHERE id = ?`).run(
+          newTotal,
+          newPaymentStatus,
+          saleItem.sale_id
+        );
+      }
+    }
+
+    if (pointsToReverse > 0) {
+      db.prepare(`UPDATE sales SET loyalty_points_earned = MAX(0, loyalty_points_earned - ?) WHERE id = ?`).run(
+        pointsToReverse,
+        saleItem.sale_id
+      );
+      if (saleItem.customer_id) {
+        db.prepare(
+          `INSERT INTO loyalty_transactions (customer_id, points, reason, reference_id, notes)
+           VALUES (?, ?, 'manual_adjustment', ?, ?)`
+        ).run(saleItem.customer_id, -pointsToReverse, saleItem.sale_id, `Reversed on return — invoice ${saleItem.invoice}`);
+      }
+    }
+
+    if (request.resolution === "exchange") {
+      db.prepare(`UPDATE inventory SET status = 'sold' WHERE id = ?`).run(request.exchange_inventory_id);
+    }
+
+    if (request.resolution === "store_credit_exchange") {
+      // The returned item's value becomes real, expiring store
+      // credit — the customer picks their actual replacement later,
+      // as a genuinely new sale, applying this credit as a payment
+      // source there (see customers.ts / the sale checkout flow).
+      const expiryDays = request.credit_expiry_days ?? 45;
+      const expiresAt = new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000).toISOString();
+      db.prepare(
+        `INSERT INTO store_credit_transactions (customer_id, amount, reason, reference_id, notes, expires_at)
+         VALUES (?, ?, 'return_exchange', ?, ?, ?)`
+      ).run(
+        saleItem.customer_id,
+        saleItem.unit_price,
+        returnId,
+        `Credit from return on invoice ${saleItem.invoice} — expires in ${expiryDays} days`,
+        expiresAt
+      );
+    }
+
+    db.prepare(
+      `UPDATE return_requests SET status = 'approved', decided_by = ?, decided_at = datetime('now', '+330 minutes'), decision_reason = ?, return_id = ?
+       WHERE id = ?`
+    ).run(user.id, data.decision_reason ?? null, returnId, requestId);
+
+    return returnId;
+  });
+
+  const returnId = runApproval();
+
+  logAudit(
+    user,
+    "return_approve",
+    "return_request",
+    Number(requestId),
+    `Approved return on invoice ${saleItem.invoice} — ${request.resolution.replace(/_/g, " ")}${refund_amount > 0 ? ` (Rs. ${refund_amount.toLocaleString()} refunded)` : ""}`
+  );
+
+  return db.prepare(`${REQUEST_SELECT} WHERE return_requests.id = ?`).get(requestId);
+}
+
 returnsRouter.put(
   "/requests/:id/approve",
   requireRole("admin"),
   asyncHandler(async (req, res) => {
-    const data = decisionInput.parse(req.body);
-
-    const request = db.prepare(`SELECT * FROM return_requests WHERE id = ?`).get(req.params.id) as any;
-    if (!request) throw new ApiError(404, "Return request not found");
-    if (request.status !== "pending") throw new ApiError(409, `This request has already been ${request.status}.`);
-
-    const saleItem = db
-      .prepare(
-        `SELECT sale_items.*, sales.invoice, sales.customer_id, sales.loyalty_points_earned, sales.total, sales.amount_paid,
-                sales.subtotal, sales.discount
-         FROM sale_items JOIN sales ON sales.id = sale_items.sale_id
-         WHERE sale_items.id = ?`
-      )
-      .get(request.sale_item_id) as any;
-    if (!saleItem) throw new ApiError(404, "Sale item not found");
-
-    let exchangeUnit: any = null;
-    if (request.resolution === "exchange") {
-      exchangeUnit = db.prepare(`SELECT * FROM inventory WHERE id = ?`).get(request.exchange_inventory_id);
-      if (!exchangeUnit) throw new ApiError(400, "Exchange inventory unit no longer exists");
-      if (exchangeUnit.status !== "available") {
-        throw new ApiError(409, "Exchange inventory unit is no longer available for sale");
-      }
-    }
-
-    const refundMethod = data.payment_method ?? "cash";
-    if (request.resolution === "refund" && refundMethod === "bank_transfer") {
-      if (!saleItem.customer_id) {
-        throw new ApiError(400, "This is a walk-in sale with no customer attached — a bank transfer refund needs a real customer account. Use cash instead.");
-      }
-      if (!data.bank_account_id) {
-        throw new ApiError(400, "Select which of the customer's bank accounts to refund into");
-      }
-      const account = db
-        .prepare(`SELECT * FROM customer_bank_accounts WHERE id = ? AND customer_id = ?`)
-        .get(data.bank_account_id, saleItem.customer_id);
-      if (!account) throw new ApiError(400, "That bank account isn't on file for this customer");
-    }
-
-    // A "refund" only ever gives back money that was actually collected —
-    // sales.amount_paid also counts store credit redeemed toward the sale,
-    // which was never real cash either (same distinction as the void
-    // handler), so that's excluded here too. Whatever fraction of the
-    // sale was never actually paid for is written off the customer's
-    // balance instead (see the sales.total adjustment below) rather than
-    // manufacturing a cash_book expense for money that was never received
-    // — this is exactly what a credit (unpaid) sale needs: the return
-    // reduces what they owe, it doesn't touch cash on hand at all.
-    const creditRedeemedRow = db
-      .prepare(
-        `SELECT COALESCE(SUM(-amount), 0) as total FROM store_credit_transactions
-         WHERE reference_id = ? AND reason = 'redemption'`
-      )
-      .get(saleItem.sale_id) as { total: number };
-    const realCashPaid = Math.max(0, saleItem.amount_paid - creditRedeemedRow.total);
-    const paidFraction = saleItem.total > 0 ? Math.min(1, realCashPaid / saleItem.total) : 0;
-
-    const refund_amount = request.resolution === "refund" ? Math.round(saleItem.unit_price * paidFraction) : 0;
-    const ledgerWriteOff = request.resolution === "refund" ? saleItem.unit_price - refund_amount : 0;
-    // An immediate exchange creates no new sale for the replacement to
-    // earn its own points on, so those stay; a refund or a store-credit
-    // return doesn't (the replacement is a separate, new sale).
-    const pointsToReverse =
-      request.resolution === "refund" || request.resolution === "store_credit_exchange" ? pointsEarnedOnItem(saleItem) : 0;
-
-    const runApproval = db.transaction(() => {
-      const returnResult = db
-        .prepare(
-          `INSERT INTO returns (sale_item_id, condition, resolution, refund_amount, exchange_inventory_id, reason)
-           VALUES (?, ?, ?, ?, ?, ?)`
-        )
-        .run(
-          request.sale_item_id,
-          request.condition,
-          request.resolution,
-          refund_amount,
-          request.exchange_inventory_id,
-          request.reason
-        );
-      const returnId = returnResult.lastInsertRowid;
-
-      const newStatus = request.condition === "clean" ? "available" : "damaged";
-      db.prepare(`UPDATE inventory SET status = ? WHERE id = ?`).run(newStatus, saleItem.inventory_id);
-
-      if (request.resolution === "refund") {
-        if (refund_amount > 0) {
-          db.prepare(
-            `INSERT INTO cash_book (transaction_code, type, category, payment_method, reference_id, amount, notes)
-             VALUES (?, 'expense', 'return_refund', ?, ?, ?, ?)`
-          ).run(nextTransactionCode(), refundMethod, returnId, refund_amount, `Refund for invoice ${saleItem.invoice}`);
-        }
-
-        // The part of this item that was never actually paid for comes
-        // off the sale's total instead — the customer no longer owes for
-        // an item they no longer have, without inventing a cash outflow
-        // that never happened. Recompute payment_status too, since
-        // shrinking total can turn an unpaid/partial sale fully paid.
-        if (ledgerWriteOff > 0) {
-          const newTotal = saleItem.total - ledgerWriteOff;
-          const newPaymentStatus =
-            newTotal <= 0 || saleItem.amount_paid >= newTotal ? "paid" : saleItem.amount_paid > 0 ? "partial" : "unpaid";
-          db.prepare(`UPDATE sales SET total = ?, payment_status = ? WHERE id = ?`).run(
-            newTotal,
-            newPaymentStatus,
-            saleItem.sale_id
-          );
-        }
-      }
-
-      if (pointsToReverse > 0) {
-        db.prepare(`UPDATE sales SET loyalty_points_earned = MAX(0, loyalty_points_earned - ?) WHERE id = ?`).run(
-          pointsToReverse,
-          saleItem.sale_id
-        );
-        if (saleItem.customer_id) {
-          db.prepare(
-            `INSERT INTO loyalty_transactions (customer_id, points, reason, reference_id, notes)
-             VALUES (?, ?, 'manual_adjustment', ?, ?)`
-          ).run(saleItem.customer_id, -pointsToReverse, saleItem.sale_id, `Reversed on return — invoice ${saleItem.invoice}`);
-        }
-      }
-
-      if (request.resolution === "exchange") {
-        db.prepare(`UPDATE inventory SET status = 'sold' WHERE id = ?`).run(request.exchange_inventory_id);
-      }
-
-      if (request.resolution === "store_credit_exchange") {
-        // The returned item's value becomes real, expiring store
-        // credit — the customer picks their actual replacement later,
-        // as a genuinely new sale, applying this credit as a payment
-        // source there (see customers.ts / the sale checkout flow).
-        const expiryDays = request.credit_expiry_days ?? 45;
-        const expiresAt = new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000).toISOString();
-        db.prepare(
-          `INSERT INTO store_credit_transactions (customer_id, amount, reason, reference_id, notes, expires_at)
-           VALUES (?, ?, 'return_exchange', ?, ?, ?)`
-        ).run(
-          saleItem.customer_id,
-          saleItem.unit_price,
-          returnId,
-          `Credit from return on invoice ${saleItem.invoice} — expires in ${expiryDays} days`,
-          expiresAt
-        );
-      }
-
-      db.prepare(
-        `UPDATE return_requests SET status = 'approved', decided_by = ?, decided_at = datetime('now', '+330 minutes'), decision_reason = ?, return_id = ?
-         WHERE id = ?`
-      ).run(req.user!.id, data.decision_reason ?? null, returnId, req.params.id);
-
-      return returnId;
-    });
-
-    const returnId = runApproval();
-
-    logAudit(
-      req.user!,
-      "return_approve",
-      "return_request",
-      Number(req.params.id),
-      `Approved return on invoice ${saleItem.invoice} — ${request.resolution.replace(/_/g, " ")}${refund_amount > 0 ? ` (Rs. ${refund_amount.toLocaleString()} refunded)` : ""}`
-    );
-
-    const updated = db.prepare(`${REQUEST_SELECT} WHERE return_requests.id = ?`).get(req.params.id);
-    res.json(updated);
+    res.json(approveReturnRequest(req.params.id, req.user!, decisionInput.parse(req.body)));
   })
 );
 

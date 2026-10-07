@@ -7,6 +7,8 @@ import { requireAuth, requireRole } from "../lib/auth";
 import { logAudit } from "../lib/auditLog";
 import { getPartner, planDelivery, DeliveryPartnerRow } from "../lib/deliveryPartners";
 import { storeCreditSources } from "../lib/storeCreditSources";
+import { loyaltyBalance } from "../lib/loyalty";
+import { SALE_EXCHANGE_FLAGS_SQL, cancelExchangeForSale, checkExchangeSources, exchangeForSale, exchangesOutOfSale } from "../lib/exchanges";
 
 export const salesRouter = Router();
 
@@ -64,19 +66,37 @@ const saleInput = z.object({
   // On-demand partners (Uber, PickMe Flash...) have no weight tariff —
   // the actual fare is typed in per order, and delivery_paid_by says who
   // bears it: 'customer' (charged to them), 'shop' (free delivery, we
-  // pay), or 'shop_upfront' (we've paid the rider on their behalf, so
-  // it's added to their bill). Ignored for ordinary couriers.
+  // pay) or 'rider_direct' (the customer pays the rider themselves —
+  // no fare to record). The fare can be left out when
+  // the ride isn't booked yet: the order then waits, fare to be
+  // confirmed, until it's entered. Ignored for ordinary couriers.
   delivery_fare: z.number().nonnegative().optional(),
-  delivery_paid_by: z.enum(["customer", "shop", "shop_upfront"]).optional(),
+  delivery_paid_by: z.enum(["customer", "shop", "rider_direct"]).optional(),
   // When true, the product total is tracked as customer credit (balance
   // due) rather than collected at all today — only the delivery fee is
   // ever COD in this case, regardless of amount_paid.
   is_credit_order: z.boolean().default(false),
+  // A wholesale order earns no loyalty points. (A customer marked as never
+  // earning points is treated the same way, whatever this says.)
+  is_wholesale: z.boolean().default(false),
   // Set when this checkout is the final step of a saved quotation that
   // was reopened in POS — the quotation is consumed (deleted) in the
   // same transaction that creates the real sale, so it can't be
   // converted twice.
   quotation_id: z.number().int().positive().optional(),
+  // An online exchange: this order replaces item(s) the customer already has
+  // from delivered orders, and the courier collects the old items when it
+  // delivers this one. The order can hold as many pieces as they like — the old
+  // items' value comes off its total. customer_share_pct is how much of the
+  // courier's pickup charge the customer pays (0 = we pay, 50 = half and half,
+  // 100 = they pay).
+  exchange: z
+    .object({
+      old_sale_item_ids: z.array(z.number().int().positive()).min(1).max(20),
+      pickup_charge: z.number().nonnegative().default(0),
+      customer_share_pct: z.number().int().min(0).max(100).default(0),
+    })
+    .optional(),
 });
 
 // A quotation only ever needs the "what are we selling, to whom, at
@@ -254,7 +274,9 @@ salesRouter.get(
     const rows = db
       .prepare(
         `SELECT sales.*, customers.name as customer_name, customers.customer_code,
-                deliveries.delivery_partner, delivery_partners.kind as delivery_partner_kind
+                deliveries.delivery_partner, delivery_partners.kind as delivery_partner_kind,
+                deliveries.delivery_status as delivery_status,
+                ${SALE_EXCHANGE_FLAGS_SQL}
          FROM sales
          LEFT JOIN customers ON customers.id = sales.customer_id
          LEFT JOIN deliveries ON deliveries.sale_id = sales.id
@@ -279,8 +301,10 @@ salesRouter.get(
                 delivery_partners.waybill_code as delivery_partner_waybill_code,
                 delivery_partners.kind as delivery_partner_kind,
                 deliveries.delivery_fee, deliveries.is_free_delivery as delivery_is_free,
-                deliveries.delivery_paid_by, deliveries.cod_amount as delivery_cod_amount,
-                deliveries.fee_paid as delivery_fee_paid, deliveries.delivery_status
+                deliveries.delivery_paid_by, deliveries.actual_fare as delivery_actual_fare,
+                deliveries.rider_direct as delivery_rider_direct, deliveries.cod_amount as delivery_cod_amount,
+                deliveries.fee_paid as delivery_fee_paid, deliveries.delivery_status,
+                deliveries.tracking_number as delivery_tracking_number
          FROM sales
          LEFT JOIN customers ON customers.id = sales.customer_id
          LEFT JOIN deliveries ON deliveries.sale_id = sales.id
@@ -334,6 +358,8 @@ salesRouter.get(
       ...sale,
       items,
       delivery_address,
+      exchange: exchangeForSale(sale.id),
+      exchanged_out: exchangesOutOfSale(sale.id),
       store_credit_applied: credit,
       store_credit_sources: credit > 0 ? storeCreditSources(sale.id, sale.customer_id) : [],
     });
@@ -363,27 +389,26 @@ salesRouter.post(
       quotationInvoice = quote.invoice;
     }
 
+    let loyaltyBlocked = false;
     if (data.customer_id) {
-      const customer = db.prepare(`SELECT id, is_suspended FROM customers WHERE id = ?`).get(data.customer_id) as
-        | { id: number; is_suspended: number }
+      const customer = db.prepare(`SELECT id, is_suspended, loyalty_blocked FROM customers WHERE id = ?`).get(data.customer_id) as
+        | { id: number; is_suspended: number; loyalty_blocked: number }
         | undefined;
       if (!customer) throw new ApiError(400, "Referenced customer does not exist");
       if (customer.is_suspended) {
         throw new ApiError(409, "This customer is suspended and can't be attached to a new sale until reactivated.");
       }
+      loyaltyBlocked = customer.loyalty_blocked === 1;
     }
 
-    // The delivery partner has to be a real, currently-active one — and
-    // an on-demand one (Uber, PickMe...) needs its fare, since there's
-    // no tariff to work it out from.
+    // The delivery partner has to be a real, currently-active one. An
+    // on-demand one (Uber, PickMe...) has no tariff — its fare is typed
+    // in, or left for later (planDelivery below decides what's allowed).
     let partner: DeliveryPartnerRow | undefined;
     if (data.sale_type === "online" && data.delivery_partner) {
       partner = getPartner(data.delivery_partner);
       if (!partner || !partner.is_active) {
         throw new ApiError(400, "That delivery partner isn't available — pick another one.");
-      }
-      if (partner.kind === "on_demand" && !(data.delivery_fare && data.delivery_fare > 0)) {
-        throw new ApiError(400, `Enter the delivery fare for ${partner.name}.`);
       }
     }
 
@@ -395,16 +420,26 @@ salesRouter.post(
       throw new ApiError(400, "Credit sales require a selected customer — it isn't offered to walk-ins.");
     }
 
+    // An online exchange has to start from an item this customer really has from
+    // a delivered order, and be delivered by a partner who can collect it.
+    let exchangeSources: ReturnType<typeof checkExchangeSources> | null = null;
+    if (data.exchange) {
+      if (data.sale_type !== "online") throw new ApiError(400, "An exchange by delivery has to be an online order.");
+      if (!partner) throw new ApiError(400, "Pick the delivery partner who will deliver the replacement and collect the old item.");
+      if (isCredit) throw new ApiError(400, "An exchange can't be billed on credit.");
+      exchangeSources = checkExchangeSources(data.exchange.old_sale_item_ids, data.customer_id);
+    }
+
     // Validate every inventory item up front (must exist and be
     // available) and compute subtotal/discount/total — shared with the
     // quotation endpoint below so a quoted price is always exactly what
     // a real checkout of the same cart would charge.
-    const { subtotal, manual_discount, coupon_discount, coupon_code, discount, total, loyalty_points_earned } = priceItems(
-      data.items,
-      data.manual_discount_type,
-      data.manual_discount_value,
-      data.coupon_code
-    );
+    const priced = priceItems(data.items, data.manual_discount_type, data.manual_discount_value, data.coupon_code);
+    const { subtotal, manual_discount, coupon_discount, coupon_code, discount, total } = priced;
+    // Wholesale orders, and customers marked as never earning points, get
+    // none — the sale is simply recorded without any.
+    const isWholesale = data.is_wholesale || loyaltyBlocked;
+    const loyalty_points_earned = isWholesale ? 0 : priced.loyalty_points_earned;
 
     // Store credit, cash/change, and the resulting payment_status —
     // validated against the customer's REAL store credit balance, never
@@ -451,6 +486,31 @@ salesRouter.post(
     const invoice =
       (quotationInvoice && invoiceCodeFromQuotation(quotationInvoice, invoiceCategory)) || nextInvoiceCode(invoiceCategory);
 
+    // What the exchange comes to: the old items' value together comes off this order's
+    // total (never more than the total — the rest stays as store credit, or is
+    // refunded when the items are received), shared out over the items in order so each
+    // one knows its part. The customer's share of the pickup charge is collected with the COD.
+    const exchangePlan = exchangeSources
+      ? (() => {
+          const creditAmount = exchangeSources.reduce((sum, s) => sum + s.unit_price, 0);
+          const applied = Math.min(creditAmount, total);
+          let pool = applied;
+          const items = exchangeSources.map((s) => {
+            const share = Math.min(s.unit_price, pool);
+            pool -= share;
+            return { saleItemId: s.sale_item_id, credit: s.unit_price, share };
+          });
+          return {
+            items,
+            creditAmount,
+            applied,
+            pickupCharge: data.exchange!.pickup_charge,
+            sharePct: data.exchange!.customer_share_pct,
+            pickupCollected: Math.round((data.exchange!.pickup_charge * data.exchange!.customer_share_pct) / 100),
+          };
+        })()
+      : null;
+
     // better-sqlite3 transactions are synchronous, which fits perfectly
     // here — no partial writes possible if something throws mid-way.
     const runSaleTransaction = db.transaction(() => {
@@ -458,9 +518,9 @@ salesRouter.post(
         .prepare(
           `INSERT INTO sales
              (invoice, customer_id, salesperson, subtotal, discount, manual_discount, coupon_discount, coupon_code,
-              total, amount_paid, payment_status, payment_method, sale_type, loyalty_points_earned,
+              total, amount_paid, payment_status, payment_method, sale_type, loyalty_points_earned, is_wholesale,
               amount_received, change_due, overpaid_amount)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           invoice,
@@ -477,6 +537,7 @@ salesRouter.post(
           storedPaymentMethod,
           data.sale_type,
           loyalty_points_earned,
+          isWholesale ? 1 : 0,
           data.amount_received ?? null,
           change_due,
           overpaid_amount
@@ -547,8 +608,10 @@ salesRouter.post(
             .get(data.customer_id) as { id: number } | undefined;
           defaultAddressId = defaultAddress?.id ?? null;
         }
+        // An exchange goes back to the same door the old item was delivered to.
+        if (exchangeSources?.[0]?.address_id) defaultAddressId = exchangeSources[0].address_id;
 
-        const { isOnDemand, paidBy, actualFare, isFree, fee: delivery_fee } = deliveryPlan!;
+        const { isOnDemand, paidBy, riderDirect, actualFare, isFree, fee: delivery_fee } = deliveryPlan!;
         // COD to collect = whatever of the order wasn't already paid,
         // plus the delivery fee (0 if free) — a fixed figure computed
         // once at order time, not recalculated later against a sale
@@ -557,13 +620,18 @@ salesRouter.post(
         // paid, floored at 0 — UNLESS the product is on credit, in which
         // case COD is only ever the delivery fee, since the product
         // total is tracked as balance due instead of being collected now.
-        const cod_amount = data.is_credit_order ? delivery_fee : Math.max(0, total + delivery_fee - data.amount_paid);
+        // For an exchange the old item's value comes off (once it's collected)
+        // and the customer's share of the pickup charge rides along.
+        const cod_amount = data.is_credit_order
+          ? delivery_fee
+          : Math.max(0, total - (exchangePlan?.applied ?? 0) + delivery_fee + (exchangePlan?.pickupCollected ?? 0) - data.amount_paid);
 
         db.prepare(
           `INSERT INTO deliveries
              (sale_id, address_id, delivery_status, delivery_partner, package_weight_kg,
-              is_free_delivery, delivery_fee, cod_amount, tracking_number, delivery_paid_by, actual_fare, fee_paid)
-           VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+              is_free_delivery, delivery_fee, cod_amount, tracking_number, delivery_paid_by, actual_fare, rider_direct, fee_paid,
+              pickup_collected, notes)
+           VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).run(
           saleId,
           defaultAddressId,
@@ -577,8 +645,41 @@ salesRouter.post(
           isOnDemand ? invoice : null,
           paidBy,
           actualFare,
-          feePaid
+          riderDirect ? 1 : 0,
+          feePaid,
+          exchangePlan?.pickupCollected ?? 0,
+          exchangeSources
+            ? `EXCHANGE — collect the old item${exchangeSources.length > 1 ? "s" : ""} from the customer: ${exchangeSources
+                .map(
+                  (s) =>
+                    `${s.product_title ?? "item"}${[s.size, s.color].filter(Boolean).length ? ` (${[s.size, s.color].filter(Boolean).join(", ")})` : ""} from ${s.invoice}`
+                )
+                .join("; ")}`
+            : null
         );
+
+        if (exchangePlan) {
+          const exchangeId = db
+            .prepare(
+              `INSERT INTO online_exchanges
+                 (new_sale_id, old_sale_item_id, credit_amount, applied_amount, pickup_charge, customer_share_pct, pickup_collected)
+               VALUES (?, ?, ?, ?, ?, ?, ?)`
+            )
+            .run(
+              saleId,
+              exchangePlan.items[0].saleItemId,
+              exchangePlan.creditAmount,
+              exchangePlan.applied,
+              exchangePlan.pickupCharge,
+              exchangePlan.sharePct,
+              exchangePlan.pickupCollected
+            ).lastInsertRowid;
+          for (const it of exchangePlan.items) {
+            db.prepare(
+              `INSERT INTO online_exchange_items (exchange_id, old_sale_item_id, credit_amount, applied_share) VALUES (?, ?, ?, ?)`
+            ).run(exchangeId, it.saleItemId, it.credit, it.share);
+          }
+        }
       }
 
       // The quotation this sale came from is fully replaced by the
@@ -950,6 +1051,47 @@ salesRouter.put(
     res.json(updated);
   })
 );
+// PUT /api/sales/:id/wholesale — admin-only. Marks a sale that already went
+// through as wholesale and takes back the loyalty points it earned (one
+// ledger entry, so the history shows it). If the customer has already
+// spent some of those points (redeemed for store credit), only what's still
+// there is taken back and the rest is reported, not clawed out of negative.
+salesRouter.put(
+  "/:id/wholesale",
+  requireRole("admin"),
+  asyncHandler(async (req, res) => {
+    const { reason } = z.object({ reason: z.string().trim().max(200).optional() }).parse(req.body);
+    const sale = db.prepare(`SELECT * FROM sales WHERE id = ?`).get(req.params.id) as any;
+    if (!sale) throw new ApiError(404, "Sale not found");
+    if (sale.status === "quotation") throw new ApiError(409, "A quotation hasn't earned any points.");
+    if (sale.is_voided) throw new ApiError(409, "This sale was voided — its points were already reversed.");
+    if (sale.is_wholesale) throw new ApiError(409, "This sale is already marked wholesale.");
+
+    const earned: number = sale.loyalty_points_earned;
+    const available = sale.customer_id ? Math.max(0, loyaltyBalance(sale.customer_id)) : 0;
+    const removed = Math.min(earned, available);
+
+    db.transaction(() => {
+      db.prepare(`UPDATE sales SET is_wholesale = 1, loyalty_points_earned = 0 WHERE id = ?`).run(sale.id);
+      if (removed > 0) {
+        db.prepare(
+          `INSERT INTO loyalty_transactions (customer_id, points, reason, reference_id, notes)
+           VALUES (?, ?, 'manual_adjustment', ?, ?)`
+        ).run(sale.customer_id, -removed, sale.id, `Wholesale order — points removed, invoice ${sale.invoice}${reason ? ` (${reason})` : ""}`);
+      }
+    })();
+
+    logAudit(
+      req.user!,
+      "sale_wholesale",
+      "sale",
+      sale.id,
+      `${sale.invoice}: marked wholesale — ${removed} loyalty points removed${removed < earned ? ` (${earned - removed} had already been spent)` : ""}${reason ? ` — ${reason}` : ""}`
+    );
+    res.json({ sale: db.prepare(`SELECT * FROM sales WHERE id = ?`).get(sale.id), points_removed: removed, points_already_used: earned - removed });
+  })
+);
+
 // billing mistake: every sold unit goes back to 'available', the income
 // entry is reversed in the cash book, and any pending delivery is
 // cancelled. The sale record itself is kept (is_voided = 1) rather than
@@ -969,6 +1111,10 @@ salesRouter.put(
     const items = db.prepare(`SELECT * FROM sale_items WHERE sale_id = ?`).all(req.params.id) as any[];
 
     const runVoidTransaction = db.transaction(() => {
+      // A voided replacement order ends its exchange too: the old item stays with
+      // the customer, nothing was taken off anything.
+      cancelExchangeForSale(sale.id, "The replacement invoice was voided");
+
       // Return each physical unit to sellable stock.
       for (const item of items) {
         db.prepare(`UPDATE inventory SET status = 'available' WHERE id = ?`).run(item.inventory_id);

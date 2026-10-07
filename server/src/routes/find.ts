@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db } from "../db/connection";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth, requireRole } from "../lib/auth";
+import { SALE_EXCHANGE_FLAGS_SQL } from "../lib/exchanges";
 
 export const findRouter = Router();
 
@@ -35,7 +36,8 @@ findRouter.get(
     const sale = db
       .prepare(
         `SELECT sales.id, sales.invoice, sales.date, sales.total, sales.amount_paid, sales.payment_status,
-                sales.sale_type, sales.is_voided, customers.name as customer_name, sales.deleted_customer_snapshot
+                sales.sale_type, sales.is_voided, customers.name as customer_name, sales.deleted_customer_snapshot,
+                ${SALE_EXCHANGE_FLAGS_SQL}
          FROM sales
          LEFT JOIN customers ON customers.id = sales.customer_id
          WHERE LOWER(sales.invoice) = LOWER(?)`
@@ -139,13 +141,27 @@ findRouter.get(
     const sales = db
       .prepare(
         `SELECT sales.id, sales.invoice as title, COALESCE(customers.name, 'Walk-in') as subtitle,
+                ${SALE_EXCHANGE_FLAGS_SQL},
                 ${rank("sales.invoice")} as rnk
          FROM sales LEFT JOIN customers ON customers.id = sales.customer_id
          WHERE sales.invoice LIKE ? OR customers.name LIKE ?
          ORDER BY rnk, sales.id DESC LIMIT 6`
       )
       .all(startsWith, like, like)
-      .map((r: any) => ({ type: "sale", id: r.id, title: r.title, subtitle: r.subtitle, route: `/sales/${r.id}` }));
+      .map((r: any) => {
+        // An invoice caught up in an exchange says so right in the suggestion.
+        const tag =
+          r.exchange_out_status === "awaiting"
+            ? " · exchange pending"
+            : r.exchange_out_status === "received"
+            ? " · exchanged"
+            : r.exchange_out_status === "not_returned"
+            ? " · exchange: item not returned"
+            : r.exchange_in_status
+            ? " · exchange order"
+            : "";
+        return { type: "sale", id: r.id, title: r.title, subtitle: `${r.subtitle}${tag}`, route: `/sales/${r.id}` };
+      });
 
     const staff = db
       .prepare(

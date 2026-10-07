@@ -27,6 +27,7 @@ import { backupRouter } from "./routes/backup";
 import { giftVouchersRouter } from "./routes/giftVouchers";
 import { deliveryPartnersRouter } from "./routes/deliveryPartners";
 import { webhooksRouter } from "./routes/webhooks";
+import { exchangesRouter } from "./routes/exchanges";
 import { startCourierSync } from "./lib/courierSync";
 
 const app = express();
@@ -68,6 +69,7 @@ app.use("/api/audit-log", auditLogRouter);
 app.use("/api/backup", backupRouter);
 app.use("/api/gift-vouchers", giftVouchersRouter);
 app.use("/api/delivery-partners", deliveryPartnersRouter);
+app.use("/api/exchanges", exchangesRouter);
 // Called by outside services rather than logged-in staff, so each route
 // guards itself (a secret in its address) — see routes/webhooks.ts.
 app.use("/api/webhooks", webhooksRouter);

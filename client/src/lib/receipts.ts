@@ -4,6 +4,7 @@ import { NAME_LOGO_PNG_BASE64, NAME_LOGO_ASPECT_RATIO } from "./logoAsset";
 import { barcodePng } from "./waybillLabelPdf";
 import { waybillShopCode } from "./delivery";
 import { api } from "./api";
+import { whatsappNumber } from "./phone";
 import { previewPdf } from "./pdfPreview";
 
 // ---------------------------------------------------------------------
@@ -159,30 +160,86 @@ function paymentBreakdown(sale: Sale) {
 // payable is the total WITH delivery, shown for ordinary orders; a
 // credit order's product total stays on the customer's account, so only
 // the delivery fee is collected on delivery and no combined total applies.
+// "Old item collected on delivery (INV)" / "Old items collected on delivery (INV, INV)" —
+// the small line under an exchange's credit.
+function exchangeCollectNote(exchange: NonNullable<Sale["exchange"]>): string {
+  const invoices = Array.from(new Set(exchange.items.map((i) => i.old_invoice))).join(", ");
+  return `Old item${exchange.items.length === 1 ? "" : "s"} collected on delivery (${invoices})`;
+}
+
 export function deliveryBreakdown(sale: Sale) {
   if (sale.status === "quotation" || sale.sale_type !== "online") return null;
   const fee = sale.delivery_fee ?? 0;
-  if (!(fee > 0) || sale.delivery_is_free) return null;
   const cod = sale.delivery_cod_amount ?? 0;
   const state: "paid" | "collected" | "due" = sale.delivery_status === "delivered" ? "collected" : cod > 0 ? "due" : "paid";
+  // Free delivery is said outright ("FREE"), not left off the bill. There's no
+  // delivery fee to add, so no combined total; whatever is still to be paid
+  // (the order itself, on delivery) is the COD amount.
+  // An exchange waiting for its old item: the old item's value comes off once it's
+  // collected, and the customer's share of the pickup charge rides along in the COD.
+  // What they pay at the door is the COD figure, not total + fee.
+  const exchange = sale.exchange && sale.exchange.status === "awaiting_pickup" ? sale.exchange : null;
+  if (sale.delivery_is_free) {
+    return { fee: 0, free: true, note: null as string | null, cod, state, payable: null as number | null, exchange };
+  }
+  if (!(fee > 0)) return null;
   return {
     fee,
-    // When we've already paid the rider on their behalf, say so — that's
-    // the reason the fare is on their bill.
-    note: sale.delivery_paid_by === "shop_upfront" ? "Paid upfront by us on your behalf" : null,
+    free: false,
+    note: null as string | null,
     cod,
     state,
-    payable: sale.payment_method === "credit" ? null : sale.total + fee,
+    payable: (sale.payment_method === "credit" || exchange ? null : sale.total + fee) as number | null,
+    exchange,
   };
 }
 
-// Which "Shipping" line to print — matches how the sale actually left
-// (or didn't leave) the shop. Just the courier's own name (or "Own
-// Delivery" when no courier partner is set) — the actual address, when
-// there is one, already gets its own line right below this.
-function shippingLabel(sale: Sale): string {
-  if (sale.sale_type !== "online") return "In-Store Pickup";
-  return sale.delivery_partner_name ?? "Own Delivery";
+// An Uber / PickMe order has no delivery charge on the bill when either the
+// customer pays the rider themselves, or the ride isn't booked yet (billed
+// or credited first, Flash later) — say so, so a missing delivery line isn't
+// read as "free". Null when deliveryBreakdown has a charge to show anyway,
+// or the delivery is free for the customer.
+export function deliveryNotice(sale: Sale): { value: string; text: string } | null {
+  if (sale.status === "quotation" || sale.sale_type !== "online" || sale.delivery_partner_kind !== "on_demand") return null;
+  if (sale.delivery_rider_direct) return { value: "Pay the rider direct", text: "Customer pays the rider directly" };
+  if (sale.delivery_actual_fare == null && sale.delivery_paid_by !== "shop" && !sale.delivery_is_free) {
+    return { value: "To be confirmed", text: "Delivery fare to be confirmed" };
+  }
+  return null;
+}
+
+// The three order lines every invoice carries — each is simply left off
+// when there's nothing to say, so an in-store bill isn't padded out with
+// blanks:
+//   Order Type — Online / In-Store, plus "Wholesale" when it was rung up as
+//                a wholesale order, so a low price reads as the reason
+//   Delivery   — the courier or service (Fardar, PickMe Flash…) and, once
+//                it has one, its waybill number
+//   Shipping   — the delivery address
+function orderTypeLabel(sale: Sale): string {
+  const type = sale.sale_type === "online" ? "Online" : "In-Store";
+  return sale.is_wholesale ? `${type} · Wholesale` : type;
+}
+
+function deliveryService(sale: Sale): { name: string; label: string; waybill: string | null } | null {
+  if (sale.sale_type !== "online" || !sale.delivery_partner_name) return null;
+  const tracking = sale.delivery_tracking_number?.trim();
+  // An on-demand app has no waybill of its own — the invoice number stands
+  // in for it, which would only repeat the line above. `label` is what the
+  // Delivery line prints: the service, plus "Free" when delivery costs the
+  // customer nothing.
+  return {
+    name: sale.delivery_partner_name,
+    label: sale.delivery_is_free ? `${sale.delivery_partner_name} · Free` : sale.delivery_partner_name,
+    waybill: tracking && tracking !== sale.invoice ? tracking : null,
+  };
+}
+
+function shippingAddress(sale: Sale): string | null {
+  const addr = sale.delivery_address;
+  if (sale.sale_type !== "online" || !addr) return null;
+  const parts = [addr.address_line1, addr.address_line2, addr.city].filter(Boolean);
+  return parts.length ? parts.join(", ") : null;
 }
 
 // What to show as "Payment". A COD order's payment_method is stored as
@@ -193,6 +250,10 @@ function shippingLabel(sale: Sale): string {
 // that, with the same shop/courier code already used on the waybill
 // (e.g. "MNM X CPAK") rather than a payment method that hasn't happened.
 function paymentDisplay(sale: Sale): string {
+  // A credit order isn't cash on delivery — the product goes on the customer's
+  // account (any delivery fee still shows on its own line). Only a normal
+  // unpaid online order is COD.
+  if (sale.payment_method === "credit") return "Credit";
   if (sale.sale_type === "online" && sale.payment_status !== "paid") {
     return `COD [${sale.delivery_partner_waybill_code ?? waybillShopCode(sale.delivery_partner)}]`;
   }
@@ -259,7 +320,7 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
   // longest label ("Bill To"), so every value lines up regardless of
   // how short its own label is.
   const labelX = marginX;
-  const valueX = marginX + 27;
+  const valueX = marginX + 31;
   doc.setFont("helvetica", "normal");
   doc.setFontSize(12);
 
@@ -294,24 +355,20 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
       doc.setFont("helvetica", "normal");
     }
   });
-  // For an online order with an address on file, the Shipping row shows
-  // the actual delivery address instead of the courier's name — the
-  // courier is already identifiable from the Payment row above it
-  // (e.g. "COD [MNM X CPAK]"), so repeating "CityPak" here was
-  // redundant with something the address line couldn't also tell you.
-  // In-store (or online with no address on file) still shows the
-  // plain shipping label as before.
-  const addr = sale.delivery_address;
-  const hasAddress = addr && (addr.address_line1 || addr.city);
-  const showAddressAsShipping = sale.sale_type === "online" && hasAddress;
-  kvRow("Shipping", (x, yy) => {
-    if (showAddressAsShipping) {
-      const addressParts = [addr!.address_line1, addr!.address_line2, addr!.city].filter(Boolean);
-      doc.text(addressParts.join(", "), x, yy);
-    } else {
-      doc.text(shippingLabel(sale), x, yy);
-    }
-  });
+  kvRow("Order Type", (x, yy) => doc.text(orderTypeLabel(sale), x, yy));
+  const service = deliveryService(sale);
+  if (service) {
+    kvRow("Delivery", (x, yy) => {
+      doc.text(service.label, x, yy);
+      if (service.waybill) {
+        doc.setFont("helvetica", "italic");
+        doc.text(`Waybill ${service.waybill}`, x + doc.getTextWidth(service.label) + 3, yy);
+        doc.setFont("helvetica", "normal");
+      }
+    });
+  }
+  const shipTo = shippingAddress(sale);
+  if (shipTo) kvRow("Shipping", (x, yy) => doc.text(shipTo, x, yy));
 
   y += 6;
 
@@ -425,7 +482,8 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
   const paymentLines = (storeCredit > 0 ? 1 : 0) + (showPaid ? 1 : 0) + (showBalance ? 1 : 0);
 
   const delivery = deliveryBreakdown(sale);
-  const deliveryRoom = delivery ? 7 + (delivery.note ? 4.5 : 0) + (delivery.payable !== null ? 7 : 0) + 7 : 0;
+  const notice = delivery ? null : deliveryNotice(sale);
+  const deliveryRoom = delivery ? 7 + (delivery.note ? 4.5 : 0) + (delivery.payable !== null ? 7 : 0) + 7 + (delivery.exchange ? 18 : 0) : notice ? 7 : 0;
 
   if (y + 46 + paymentLines * 6.5 + creditSources.length * 4.5 + deliveryRoom > 270) {
     doc.addPage();
@@ -507,11 +565,28 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
   }
 
   if (delivery) {
+    if (delivery.exchange) {
+      // The old item's value, taken off once the courier has collected the item.
+      y += 6;
+      doc.setFontSize(9.5);
+      doc.setTextColor(90);
+      doc.text("Exchange credit", totalsX, y);
+      doc.text(`- ${amountOnly(delivery.exchange.applied_amount)}`, rightX, y, { align: "right" });
+      y += 4.5;
+      doc.setFontSize(7.5);
+      doc.setTextColor(150);
+      doc.text(exchangeCollectNote(delivery.exchange), totalsX, y);
+    }
     y += 6;
     doc.setFontSize(9.5);
     doc.setTextColor(90);
     doc.text("Delivery Charges", totalsX, y);
-    doc.text(`+ ${amountOnly(delivery.fee)}`, rightX, y, { align: "right" });
+    doc.text(delivery.free ? "FREE" : `+ ${amountOnly(delivery.fee)}`, rightX, y, { align: "right" });
+    if (delivery.exchange && delivery.exchange.pickup_collected > 0) {
+      y += 6;
+      doc.text("Pickup charge (your share)", totalsX, y);
+      doc.text(`+ ${amountOnly(delivery.exchange.pickup_collected)}`, rightX, y, { align: "right" });
+    }
     if (delivery.note) {
       y += 4.5;
       doc.setFontSize(7.5);
@@ -530,19 +605,31 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
       doc.text(amountLKR(delivery.payable), rightX, y, { align: "right" });
     }
     // The line that answers "did they pay for delivery?" — spelled out
-    // rather than left to be inferred from the numbers above.
-    y += 6.5;
-    doc.setFontSize(10);
-    doc.setTextColor(20);
-    if (delivery.state === "due") {
-      doc.text("Pay on Delivery", totalsX, y);
-      doc.text(amountLKR(delivery.cod), rightX, y, { align: "right" });
-    } else {
-      doc.text("Delivery", totalsX, y);
-      doc.text(delivery.state === "paid" ? "PAID" : "COLLECTED", rightX, y, { align: "right" });
+    // rather than left to be inferred from the numbers above. When the
+    // closing recap below already says it ("Pay 3,900LKR on delivery", or
+    // "Delivery Fee — Paid"), this row would just say it a second time, so
+    // it's left out then and the totals end on "Total incl. Delivery".
+    const closingRecapSaysIt = delivery.free || !!delivery.exchange || (!showBalance && delivery.payable !== null);
+    if (!closingRecapSaysIt) {
+      y += 6.5;
+      doc.setFontSize(10);
+      doc.setTextColor(20);
+      if (delivery.state === "due") {
+        doc.text("Pay on Delivery", totalsX, y);
+        doc.text(amountLKR(delivery.cod), rightX, y, { align: "right" });
+      } else {
+        doc.text("Delivery Fee", totalsX, y);
+        doc.text(delivery.state === "paid" ? "PAID" : "COLLECTED", rightX, y, { align: "right" });
+      }
     }
     doc.setFontSize(9.5);
     doc.setTextColor(90);
+  } else if (notice) {
+    y += 6;
+    doc.setFontSize(9.5);
+    doc.setTextColor(90);
+    doc.text("Delivery Fee", totalsX, y);
+    doc.text(notice.value, rightX, y, { align: "right" });
   }
 
   if (totalSavings > 0) {
@@ -575,7 +662,7 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
   // fresh page rather than let it run into the footer. A bill with a
   // Balance Due already states its Total and Balance in the totals
   // block above, so its recap skips the Total row and needs less room.
-  const recapNeeds = showBalance ? (needsPayHere ? 35 : 17) : needsPayHere ? 42 : 30;
+  const recapNeeds = showBalance ? (needsPayHere ? 41 : 17) : needsPayHere ? 42 : 30;
   if (y + recapNeeds > 270) {
     doc.addPage();
     y = 20;
@@ -589,11 +676,14 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
     // No separate "Payable" figure here: next to a Paid status it read
     // as if the whole amount was still owed, and the combined total is
     // already stated in the totals block above.
-    if (delivery && delivery.payable !== null) {
+    if (delivery && (delivery.free || delivery.exchange) && delivery.state === "due") {
+      // Free delivery, or an exchange: what's paid on delivery is the COD figure.
+      kvRow("Pay", (x, yy) => doc.text(`${delivery.cod.toLocaleString()}LKR on delivery`, x, yy));
+    } else if (delivery && !delivery.free && !delivery.exchange && delivery.payable !== null) {
       if (delivery.state === "due") {
         kvRow("Pay", (x, yy) => doc.text(`${delivery.cod.toLocaleString()}LKR on delivery`, x, yy));
       } else {
-        kvRow("Delivery", (x, yy) => doc.text(delivery.state === "paid" ? "Paid" : "Collected on delivery", x, yy));
+        kvRow("Delivery Fee", (x, yy) => doc.text(delivery.state === "paid" ? "Paid" : "Collected on delivery", x, yy));
       }
     } else {
       kvRow("Total", (x, yy) => doc.text(`${sale.total.toLocaleString()}LKR`, x, yy));
@@ -601,6 +691,11 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
   }
 
   if (needsPayHere) {
+    // The amount still owed, right above the account to pay it into — so the
+    // two read together at a glance instead of the figure being up in the
+    // totals block. (Only the balance: if part was already paid, that's
+    // what is left to pay, not the full total.)
+    if (showBalance) kvRow("Pay", (x, yy) => doc.text(`${amountOwed.toLocaleString()}LKR`, x, yy));
     const { accountName, accountNumber, bankName } = shopBankDetails(businessInfo);
     kvRow("Pay Here", (x, yy) => doc.text(accountName, x, yy));
     doc.setTextColor(20);
@@ -665,8 +760,8 @@ export function generateThermalPdf(sale: Sale): jsPDF {
   const marginX = 4;
   const contentWidth = widthMm - marginX * 2;
   const items = groupSaleItemsForDisplay(sale.items ?? []);
-  const addr = sale.delivery_address;
-  const hasAddress = sale.sale_type === "online" && addr && (addr.address_line1 || addr.city);
+  const shipTo = shippingAddress(sale);
+  const service = deliveryService(sale);
 
   // Estimate height: header + meta + optional address line + one line per
   // item (plus a possible wrapped SKU line) + totals + footer, with
@@ -674,12 +769,13 @@ export function generateThermalPdf(sale: Sale): jsPDF {
   const breakdown = paymentBreakdown(sale);
   const estimatedHeight =
     60 +
-    (hasAddress ? 8 : 0) +
+    (shipTo ? 8 : 0) +
+    (service ? (service.waybill ? 8 : 4) : 0) +
     items.length * 10 +
     40 +
     (breakdown.storeCredit > 0 || breakdown.showBalance ? 12 : 0) +
     breakdown.creditSources.length * 6 +
-    (deliveryBreakdown(sale) ? 22 : 0);
+    (deliveryBreakdown(sale) ? 22 + (deliveryBreakdown(sale)!.exchange ? 10 : 0) : deliveryNotice(sale) ? 6 : 0);
 
   const doc = new jsPDF({ unit: "mm", format: [widthMm, estimatedHeight] });
   let y = 8;
@@ -704,11 +800,18 @@ export function generateThermalPdf(sale: Sale): jsPDF {
   y += 4;
   doc.text(`Customer: ${sale.customer_name ?? "Walk-in"}`, marginX, y);
   y += 4;
-  doc.text(`Type: ${sale.sale_type === "online" ? "Online" : "In-store"}`, marginX, y);
+  doc.text(`Type: ${orderTypeLabel(sale)}`, marginX, y);
   y += 4;
-  if (hasAddress) {
-    const addressParts = [addr!.address_line1, addr!.address_line2, addr!.city].filter(Boolean);
-    const addressLines = doc.splitTextToSize(`Deliver to: ${addressParts.join(", ")}`, contentWidth);
+  if (service) {
+    doc.text(`Delivery: ${service.label}`, marginX, y);
+    y += 4;
+    if (service.waybill) {
+      doc.text(`Waybill: ${service.waybill}`, marginX, y);
+      y += 4;
+    }
+  }
+  if (shipTo) {
+    const addressLines = doc.splitTextToSize(`Shipping: ${shipTo}`, contentWidth);
     doc.text(addressLines, marginX, y);
     y += addressLines.length * 3.6;
   }
@@ -732,12 +835,22 @@ export function generateThermalPdf(sale: Sale): jsPDF {
     doc.text(money(item.line_total), widthMm - marginX, y, { align: "right" });
     y += 4.2;
 
+    // Marked down: the original price, struck through. A price above the
+    // original (an admin's call) shows nothing extra.
     const wasDiscounted = item.original_selling_price != null && item.original_selling_price > item.unit_price;
     if (wasDiscounted) {
-      doc.setFontSize(6);
+      doc.setFontSize(6.5);
       doc.setTextColor(140);
-      doc.text(`(was ${money(item.original_selling_price!)})`, widthMm - marginX, y, { align: "right" });
+      const originalText = money(item.original_selling_price!);
+      const rightEdge = widthMm - marginX;
+      doc.text(originalText, rightEdge, y, { align: "right" });
+      const strikeWidth = doc.getTextWidth(originalText);
+      doc.setDrawColor(140);
+      doc.setLineWidth(0.15);
+      doc.setLineDashPattern([], 0);
+      doc.line(rightEdge - strikeWidth, y - 0.9, rightEdge, y - 0.9);
       doc.setTextColor(0);
+      doc.setDrawColor(0);
       y += 3.5;
     }
     y += 1.3;
@@ -819,9 +932,23 @@ export function generateThermalPdf(sale: Sale): jsPDF {
 
     const delivery = deliveryBreakdown(sale);
     if (delivery) {
+      if (delivery.exchange) {
+        doc.text("Exchange credit", marginX, y);
+        doc.text(`-${money(delivery.exchange.applied_amount)}`, widthMm - marginX, y, { align: "right" });
+        y += 4;
+        doc.setFontSize(6);
+        doc.text(exchangeCollectNote(delivery.exchange), marginX, y);
+        doc.setFontSize(7);
+        y += 3.5;
+      }
       doc.text("Delivery charges", marginX, y);
-      doc.text(`+${money(delivery.fee)}`, widthMm - marginX, y, { align: "right" });
+      doc.text(delivery.free ? "FREE" : `+${money(delivery.fee)}`, widthMm - marginX, y, { align: "right" });
       y += 4;
+      if (delivery.exchange && delivery.exchange.pickup_collected > 0) {
+        doc.text("Pickup charge (your share)", marginX, y);
+        doc.text(`+${money(delivery.exchange.pickup_collected)}`, widthMm - marginX, y, { align: "right" });
+        y += 4;
+      }
       if (delivery.note) {
         doc.setFontSize(6);
         doc.text(delivery.note, marginX, y);
@@ -835,18 +962,27 @@ export function generateThermalPdf(sale: Sale): jsPDF {
         doc.text(money(delivery.payable), widthMm - marginX, y, { align: "right" });
         y += 5;
       }
-      // Whether delivery has been paid, stated outright.
+      // Whether delivery has been paid, stated outright. Free delivery has no
+      // fee to be paid or collected — only what's still to pay on delivery.
+      const showClosing = !delivery.free || delivery.state === "due";
       doc.setFontSize(8);
       if (delivery.state === "due") {
         doc.text("PAY ON DELIVERY", marginX, y);
         doc.text(money(delivery.cod), widthMm - marginX, y, { align: "right" });
-      } else {
-        doc.text("DELIVERY", marginX, y);
+      } else if (!delivery.free) {
+        doc.text("DELIVERY FEE", marginX, y);
         doc.text(delivery.state === "paid" ? "PAID" : "COLLECTED", widthMm - marginX, y, { align: "right" });
       }
       doc.setFont("courier", "normal");
       doc.setFontSize(7);
-      y += 6;
+      y += showClosing ? 6 : 2;
+    } else {
+      const notice = deliveryNotice(sale);
+      if (notice) {
+        doc.text("Delivery fee", marginX, y);
+        doc.text(notice.value, widthMm - marginX, y, { align: "right" });
+        y += 5;
+      }
     }
   }
 
@@ -884,16 +1020,16 @@ export function buildWhatsAppMessage(sale: Sale, businessInfo?: BusinessInfo | n
   lines.push(`*${businessInfo?.business_name || "M&M Clothing"} — ${isQuotation ? "Price Quotation" : "Receipt"}*`);
   lines.push(`${isQuotation ? "Quotation" : "Invoice"}: ${sale.invoice}`);
   lines.push(`Date: ${formatDate(sale.date)}`);
-  const addr = sale.delivery_address;
-  if (sale.sale_type === "online" && addr && (addr.address_line1 || addr.city)) {
-    const addressParts = [addr.address_line1, addr.address_line2, addr.city].filter(Boolean);
-    lines.push(`Deliver to: ${addressParts.join(", ")}`);
-  }
+  lines.push(`Order Type: ${orderTypeLabel(sale)}`);
+  const service = deliveryService(sale);
+  if (service) lines.push(`Delivery: ${service.label}${service.waybill ? ` (Waybill ${service.waybill})` : ""}`);
+  const shipTo = shippingAddress(sale);
+  if (shipTo) lines.push(`Shipping: ${shipTo}`);
   lines.push("");
   for (const item of items) {
     const detail = [item.size, item.color].filter(Boolean).join("/");
     const wasDiscounted = item.original_selling_price != null && item.original_selling_price > item.unit_price;
-    const wasNote = wasDiscounted ? ` _(was ${money(item.original_selling_price!)})_` : "";
+    const wasNote = wasDiscounted ? ` ~${money(item.original_selling_price!)}~` : "";
     lines.push(`${item.product_title ?? "Item"}${detail ? ` (${detail})` : ""} x${item.quantity} — ${money(item.line_total)}${wasNote}`);
   }
   lines.push("");
@@ -920,16 +1056,20 @@ export function buildWhatsAppMessage(sale: Sale, businessInfo?: BusinessInfo | n
     if (showBalance) lines.push(`*Balance due: ${money(amountOwed)}*`);
     const delivery = deliveryBreakdown(sale);
     if (delivery) {
-      lines.push(`Delivery charges: +${money(delivery.fee)}`);
+      if (delivery.exchange) {
+        lines.push(`Exchange credit: -${money(delivery.exchange.applied_amount)} _(${exchangeCollectNote(delivery.exchange).toLowerCase()})_`);
+      }
+      lines.push(delivery.free ? "Delivery charges: FREE" : `Delivery charges: +${money(delivery.fee)}`);
+      if (delivery.exchange && delivery.exchange.pickup_collected > 0) {
+        lines.push(`Pickup charge (your share): +${money(delivery.exchange.pickup_collected)}`);
+      }
       if (delivery.note) lines.push(`_${delivery.note}_`);
       if (delivery.payable !== null) lines.push(`*Total incl. delivery: ${money(delivery.payable)}*`);
-      lines.push(
-        delivery.state === "due"
-          ? `*To pay on delivery: ${money(delivery.cod)}*`
-          : delivery.state === "paid"
-          ? "Delivery: PAID"
-          : "Delivery: collected"
-      );
+      if (delivery.state === "due") lines.push(`*To pay on delivery: ${money(delivery.cod)}*`);
+      else if (!delivery.free) lines.push(delivery.state === "paid" ? "Delivery fee: PAID" : "Delivery fee: collected");
+    } else {
+      const notice = deliveryNotice(sale);
+      if (notice) lines.push(`Delivery fee: ${notice.value}`);
     }
     lines.push("");
     lines.push("Thank you for shopping with us!");
@@ -954,8 +1094,7 @@ export function sendWhatsAppBill(sale: Sale, phone: string) {
     .get<BusinessInfo | null>("/business-info")
     .catch(() => null)
     .then((businessInfo) => {
-      const digitsOnly = phone.replace(/\D/g, "").replace(/^0/, "");
       const text = encodeURIComponent(buildWhatsAppMessage(sale, businessInfo));
-      if (win) win.location.href = `https://wa.me/94${digitsOnly}?text=${text}`;
+      if (win) win.location.href = `https://wa.me/${whatsappNumber(phone)}?text=${text}`;
     });
 }
