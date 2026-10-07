@@ -16,7 +16,9 @@
     "db:migrate-product-hard-delete": "tsx src/db/migrate-product-hard-delete.ts",
     "db:seed": "tsx src/db/seed.ts",
     "db:import-opening-stock": "tsx src/db/import-opening-stock.ts",
-    "db:import-legacy-customers": "tsx src/db/import-legacy-customers.ts"
+    "db:import-legacy-customers": "tsx src/db/import-legacy-customers.ts",
+    "tunnel": "bash scripts/tunnel.sh",
+    "tunnel:url": "bash scripts/tunnel.sh url"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

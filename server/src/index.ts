@@ -34,6 +34,20 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 const HOST = "0.0.0.0";
 
+// Fardar's status callback reaches this machine through a public tunnel
+// (ngrok etc.), which would otherwise put the whole API on the internet.
+// A tunnel stamps every request it forwards with X-Forwarded-For, which
+// requests straight from this machine or the shop's network never carry —
+// so anything that came through one may only reach the webhook routes.
+app.use((req, res, next) => {
+  const viaTunnel = Boolean(req.headers["x-forwarded-for"] || req.headers["x-forwarded-host"]);
+  if (viaTunnel && !req.path.startsWith("/api/webhooks/")) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  next();
+});
+
 app.use(cors()); // fine to leave open — this only ever runs on your own machine
 app.use(express.json());
 
@@ -77,7 +91,7 @@ app.use("/api/webhooks", webhooksRouter);
 // Must be registered last — Express error-handling middleware.
 app.use(errorHandler);
 
-app.listen(PORT, HOST, () => {
+app.listen(Number(PORT), HOST, () => {
   console.log(`M&M Clothing server running at http://localhost:${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/api/health`);
   startCourierSync();
