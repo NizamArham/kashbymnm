@@ -723,7 +723,7 @@ purchasesRouter.post(
     const total_cost = data.items.reduce((sum, item) => sum + item.unit_cost * item.quantity, 0);
     const quantityBeingAdded = data.items.reduce((sum, item) => sum + item.quantity, 0);
 
-    let purchaseId: number | bigint;
+    let purchaseId!: number | bigint; // always set inside the transaction below
     let purchase_code: string;
     let fulfilledLine: any = null;
     // A soft warning only — never blocks the request. Populated when

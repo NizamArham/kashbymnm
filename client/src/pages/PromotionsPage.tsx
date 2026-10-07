@@ -1,5 +1,5 @@
-import { useEffect, useState, ReactNode } from "react";
-import { Plus, Ticket, Gift, Pencil, Trash2, Shuffle, X, Clock, CheckCircle2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Plus, Ticket, Gift, Pencil, Trash2, Shuffle, Clock, CheckCircle2 } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Coupon, GiftVoucher } from "../lib/types";
 import {
@@ -14,6 +14,7 @@ import {
   Input,
   Label,
   FormGroup,
+  Modal,
   Dropdown,
   DatePicker,
   EmptyState,
@@ -48,27 +49,6 @@ function daysUntil(expiresAt: string): number {
 function ExpiryBadge({ expiresAt }: { expiresAt: string | null }) {
   if (!expiresAt) return <Badge label="No expiry" tone="neutral" />;
   return <Badge label={isExpired(expiresAt) ? `Expired ${expiresAt.slice(0, 10)}` : expiresAt.slice(0, 10)} tone={isExpired(expiresAt) ? "danger" : "neutral"} />;
-}
-
-// Shared, roomier modal shell — replaces the old cramped max-w-sm popup
-// with something that actually has space to lay fields out in pairs.
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
-      <div
-        className="bg-white rounded-2xl border border-gray-200 shadow-xl p-7 w-full max-w-xl max-h-[90vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="text-base font-semibold text-gray-900">{title}</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-            <X size={18} />
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
 }
 
 export default function PromotionsPage() {
@@ -264,7 +244,19 @@ function CouponFormModal({ coupon, onClose, onSaved }: { coupon?: Coupon; onClos
   }
 
   return (
-    <Modal title={isEdit ? "Edit coupon" : "New coupon"} onClose={onClose}>
+    <Modal
+      size="lg"
+      onClose={onClose}
+      title={isEdit ? "Edit coupon" : "New coupon"}
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" disabled={submitting} onClick={handleSubmit}>
+            {submitting ? "Saving..." : isEdit ? "Save changes" : "Create coupon"}
+          </Button>
+        </>
+      }
+    >
       <p className="text-xs text-gray-400 mb-4 -mt-2">
         Shared by text, social media, or however you like — the code alone is what a customer needs, so it's live the moment you create it.
       </p>
@@ -328,12 +320,6 @@ function CouponFormModal({ coupon, onClose, onSaved }: { coupon?: Coupon; onClos
 
       {error && <ErrorText>{error}</ErrorText>}
 
-      <div className="flex gap-2 mt-4">
-        <Button variant="primary" disabled={submitting} onClick={handleSubmit}>
-          {submitting ? "Saving..." : isEdit ? "Save changes" : "Create coupon"}
-        </Button>
-        <Button onClick={onClose}>Cancel</Button>
-      </div>
     </Modal>
   );
 }
@@ -602,7 +588,19 @@ function VoucherFormModal({ voucher, onClose, onSaved }: { voucher?: GiftVoucher
   }
 
   return (
-    <Modal title={isEdit ? "Edit gift voucher" : "New gift voucher"} onClose={onClose}>
+    <Modal
+      size="lg"
+      onClose={onClose}
+      title={isEdit ? "Edit gift voucher" : "New gift voucher"}
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" disabled={submitting} onClick={handleSubmit}>
+            {submitting ? "Saving..." : isEdit ? "Save changes" : "Issue voucher"}
+          </Button>
+        </>
+      }
+    >
       {!isEdit && (
         <p className="text-xs text-gray-400 mb-4 -mt-2">
           Printed with its own barcode, like a cheque book — it sits dormant until a customer actually buys it at POS. That sale is what
@@ -684,12 +682,6 @@ function VoucherFormModal({ voucher, onClose, onSaved }: { voucher?: GiftVoucher
 
       {error && <ErrorText>{error}</ErrorText>}
 
-      <div className="flex gap-2 mt-4">
-        <Button variant="primary" disabled={submitting} onClick={handleSubmit}>
-          {submitting ? "Saving..." : isEdit ? "Save changes" : "Issue voucher"}
-        </Button>
-        <Button onClick={onClose}>Cancel</Button>
-      </div>
     </Modal>
   );
 }

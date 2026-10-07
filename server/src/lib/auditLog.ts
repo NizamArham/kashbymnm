@@ -23,6 +23,8 @@ export type AuditAction =
   | "cheque_bounce"
   | "cheque_delete"
   | "inventory_remove"
+  | "inventory_restore"
+  | "product_price_change"
   | "coupon_create"
   | "coupon_edit"
   | "coupon_delete"
@@ -32,7 +34,19 @@ export type AuditAction =
   | "delivery_partner_create"
   | "delivery_partner_edit"
   | "delivery_partner_change"
-  | "delivery_status_sync";
+  | "delivery_fare_set"
+  | "delivery_fee_change"
+  | "exchange_received"
+  | "exchange_not_returned"
+  | "store_credit_refund"
+  | "delivery_status_sync"
+  | "courier_charge_edit"
+  | "courier_balance_adjust"
+  | "courier_balance_adjust_undo"
+  | "sale_payment_recorded"
+  | "loyalty_adjust"
+  | "loyalty_block"
+  | "sale_wholesale";
 
 export function logAudit(
   actor: AuthUser,

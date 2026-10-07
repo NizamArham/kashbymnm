@@ -66,11 +66,12 @@ export function sortInventoryForDisplay<T extends SortableUnit>(units: T[]): T[]
   });
 }
 
-export interface ProductGroup<T> {
+// What a search result shows per product: just the product and its units.
+export interface SearchProductGroup<T> {
   product_id: number;
   product_title: string;
   brand?: string;
-  selling_price?: number;
+  selling_price?: number | null;
   units: T[];
 }
 
@@ -81,10 +82,10 @@ export interface ProductGroup<T> {
  * lookup flow: the table shows one row per product, and expanding a row
  * reveals its full, sorted variant list.
  */
-export function groupByProduct<T extends SortableUnit & { product_id: number; product_title?: string; brand?: string; selling_price?: number }>(
+export function groupByProduct<T extends SortableUnit & { product_id: number; product_title?: string; brand?: string; selling_price?: number | null }>(
   units: T[]
-): ProductGroup<T>[] {
-  const map = new Map<number, ProductGroup<T>>();
+): SearchProductGroup<T>[] {
+  const map = new Map<number, SearchProductGroup<T>>();
 
   for (const unit of units) {
     let group = map.get(unit.product_id);
@@ -193,7 +194,7 @@ export interface ProductGroup<T> {
   product_title: string;
   brand?: string;
   category?: string | null;
-  selling_price?: number;
+  selling_price?: number | null;
   availableCount: number;
   damagedCount: number;
   units: T[]; // sorted by color then size
@@ -206,7 +207,7 @@ export interface ProductGroup<T> {
  * show its full color/size breakdown.
  */
 export function groupInventoryByProduct<
-  T extends SortableUnit & { product_id: number; status: string; brand?: string; category?: string | null; selling_price?: number }
+  T extends SortableUnit & { product_id: number; status: string; brand?: string; category?: string | null; selling_price?: number | null }
 >(units: T[]): ProductGroup<T>[] {
   const byProduct = new Map<number, T[]>();
   for (const unit of units) {

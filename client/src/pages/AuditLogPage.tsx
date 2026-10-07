@@ -29,6 +29,8 @@ const ACTION_META: Record<string, { label: string; icon: typeof AlertTriangle; t
   cheque_bounce: { label: "Cheque bounced", icon: AlertTriangle, tone: "danger" },
   cheque_delete: { label: "Deleted cheque", icon: Trash2, tone: "danger" },
   inventory_remove: { label: "Removed stock unit", icon: PackageMinus, tone: "warning" },
+  product_price_change: { label: "Changed a product's selling price", icon: Pencil, tone: "neutral" },
+  inventory_restore: { label: "Put a unit back in stock", icon: PackageMinus, tone: "neutral" },
   coupon_create: { label: "Created coupon", icon: Ticket, tone: "neutral" },
   coupon_edit: { label: "Edited coupon", icon: Pencil, tone: "neutral" },
   coupon_delete: { label: "Deleted coupon", icon: Trash2, tone: "danger" },
@@ -38,7 +40,19 @@ const ACTION_META: Record<string, { label: string; icon: typeof AlertTriangle; t
   delivery_partner_create: { label: "Added delivery partner", icon: Pencil, tone: "neutral" },
   delivery_partner_edit: { label: "Edited delivery partner", icon: Pencil, tone: "neutral" },
   delivery_partner_change: { label: "Changed order's courier", icon: Pencil, tone: "neutral" },
+  delivery_fare_set: { label: "Set delivery fare", icon: Pencil, tone: "neutral" },
+  delivery_fee_change: { label: "Changed delivery fee", icon: Pencil, tone: "neutral" },
+  exchange_received: { label: "Received exchange item", icon: Pencil, tone: "neutral" },
+  exchange_not_returned: { label: "Exchange item not returned", icon: Pencil, tone: "warning" },
+  store_credit_refund: { label: "Refunded store credit", icon: Pencil, tone: "neutral" },
   delivery_status_sync: { label: "Courier updated delivery", icon: Pencil, tone: "neutral" },
+  courier_charge_edit: { label: "Edited courier charge", icon: Pencil, tone: "neutral" },
+  courier_balance_adjust: { label: "Corrected courier balance", icon: Pencil, tone: "neutral" },
+  courier_balance_adjust_undo: { label: "Undid courier balance correction", icon: Pencil, tone: "neutral" },
+  sale_payment_recorded: { label: "Recorded a payment on a sale", icon: Pencil, tone: "neutral" },
+  loyalty_adjust: { label: "Changed loyalty points", icon: Pencil, tone: "neutral" },
+  loyalty_block: { label: "Changed whether a customer earns points", icon: Pencil, tone: "neutral" },
+  sale_wholesale: { label: "Marked sale wholesale", icon: Pencil, tone: "neutral" },
 };
 
 function actionMeta(action: string) {
@@ -107,7 +121,7 @@ export default function AuditLogPage() {
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search description or staff... (/)"
+              placeholder="Search description or staff..."
               className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-gray-400"
             />
           </div>

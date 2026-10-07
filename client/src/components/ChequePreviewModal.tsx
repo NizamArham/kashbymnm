@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { X, RotateCcw, Landmark } from "lucide-react";
+import { RotateCcw, Landmark } from "lucide-react";
 import { ChequeInfo } from "../lib/types";
-import { Badge, BadgeTone } from "./ui";
+import { Badge, BadgeTone, Button, Modal } from "./ui";
 
 const ONES = [
   "", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",
@@ -144,29 +144,28 @@ export default function ChequePreviewModal({
   const [wordsLine1, wordsLine2] = splitIntoTwoLines(amountInWords(cheque.amount), 42);
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        {/* The cheque number and bank are already printed on the cheque
-            face itself right below — repeating them as a bold title here
-            was pure duplication. One slim status-and-controls row is all
-            the chrome this needs. */}
-        <div className="px-5 py-3.5 flex items-center justify-between">
+    <Modal
+      size="xl"
+      onClose={onClose}
+      title={
+        <span className="inline-flex items-center gap-2">
+          Cheque preview
           <Badge label={STATUS_LABELS[cheque.status] ?? cheque.status} tone={statusTone(cheque.status)} />
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => setFlipped((f) => !f)}
-              className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-800"
-            >
-              <RotateCcw size={12} />
-              {flipped ? "View front" : "View back"}
-            </button>
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-              <X size={18} />
-            </button>
-          </div>
-        </div>
-
-        <div className="p-5 pt-0">
+        </span>
+      }
+      subtitle={`${cheque.bank_name} · ${cheque.cheque_number}`}
+      footer={
+        <>
+          <Button onClick={() => setFlipped((f) => !f)} className="inline-flex items-center gap-1.5">
+            <RotateCcw size={14} />
+            {flipped ? "View front" : "View back"}
+          </Button>
+          <Button variant="primary" onClick={onClose}>
+            Close
+          </Button>
+        </>
+      }
+    >
           <div style={{ perspective: "1800px" }}>
             <div
               className="relative w-full min-h-[372px] sm:min-h-[306px] transition-transform duration-500"
@@ -362,8 +361,6 @@ export default function ChequePreviewModal({
               </div>
             </div>
           </div>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

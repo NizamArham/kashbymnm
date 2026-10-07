@@ -16,7 +16,7 @@ import {
 import { api, ApiRequestError } from "../lib/api";
 import { SupplierPayment, SupplierBalance, Supplier, Purchase, BankAccount } from "../lib/types";
 import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
-import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Table, Th, Td, Dropdown, EmptyState, DateRangePicker, DatePicker, HelpHint, TabToggle } from "../components/ui";
+import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Table, Th, Td, Dropdown, EmptyState, DateRangePicker, DatePicker, HelpHint, TabToggle, Modal } from "../components/ui";
 
 type ExpandedTab = "activity";
 
@@ -423,35 +423,48 @@ export default function SupplierPaymentsPage() {
       {error && <ErrorText>{error}</ErrorText>}
 
       {showRecord && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-[880px] h-[640px] shadow-2xl flex flex-col overflow-hidden">
-            <div className="px-6 py-3.5 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
-              <div className="flex items-center gap-3 min-w-0">
-                {paymentStep === 2 && (
-                  <button
-                    onClick={() => setPaymentStep(1)}
-                    className="text-gray-400 hover:text-gray-700 flex-shrink-0"
-                    title="Back to method"
-                  >
-                    <ArrowLeft size={18} />
-                  </button>
-                )}
-                <h2 className="text-base font-semibold text-gray-900 flex-shrink-0">
-                  {paymentStep === 1 ? "Record a payment" : "Payment details"}
-                </h2>
-              </div>
-              <button
+        <Modal
+          size="2xl"
+          height="h-[min(640px,calc(100dvh-2rem))]"
+          flush
+          onClose={() => {
+            setShowRecord(false);
+            setPaymentStep(1);
+          }}
+          title={
+            <span className="inline-flex items-center gap-3">
+              {paymentStep === 2 && (
+                <button
+                  type="button"
+                  onClick={() => setPaymentStep(1)}
+                  className="text-gray-400 hover:text-gray-700 flex-shrink-0"
+                  title="Back to method"
+                >
+                  <ArrowLeft size={18} />
+                </button>
+              )}
+              {paymentStep === 1 ? "Record a payment" : "Payment details"}
+            </span>
+          }
+          footer={
+            <>
+              <Button
                 onClick={() => {
                   setShowRecord(false);
                   setPaymentStep(1);
                 }}
-                className="text-gray-400 hover:text-gray-600 flex-shrink-0 ml-3"
               >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="flex-1 min-h-0 overflow-hidden">
+                Cancel
+              </Button>
+              {paymentStep === 2 && (
+                <Button variant="primary" onClick={handleRecordPayment} disabled={submitting}>
+                  {submitting ? "Recording..." : "Record payment"}
+                </Button>
+              )}
+            </>
+          }
+        >
+<div className="h-full overflow-hidden">
               {paymentStep === 1 ? (
                 <div className="h-full flex flex-col items-center justify-center px-6">
                   <p className="text-sm text-gray-700 mb-5">How was this payment made?</p>
@@ -785,24 +798,7 @@ export default function SupplierPaymentsPage() {
                 </div>
               )}
             </div>
-
-            <div className="px-6 py-3 border-t border-gray-100 flex justify-end gap-2 flex-shrink-0 bg-white">
-              <Button
-                onClick={() => {
-                  setShowRecord(false);
-                  setPaymentStep(1);
-                }}
-              >
-                Cancel
-              </Button>
-              {paymentStep === 2 && (
-                <Button variant="primary" onClick={handleRecordPayment} disabled={submitting}>
-                  {submitting ? "Recording..." : "Record payment"}
-                </Button>
-              )}
-            </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {loading ? (

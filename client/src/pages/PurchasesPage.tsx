@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Package, Clock, Trash2, Download, X } from "lucide-react";
+import { Package, Clock, Trash2, Download } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Supplier, Purchase, AvailableUnit } from "../lib/types";
 import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
@@ -27,6 +27,7 @@ import {
   RowCardStats,
   RowCardStat,
   HelpHint,
+  Modal,
 } from "../components/ui";
 
 type PurchasesTab = "record" | "pending" | "history" | "returns";
@@ -1284,15 +1285,19 @@ export default function PurchasesPage() {
       ) : null}
 
       {editingPurchase && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl">
-            <div className="p-5 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-base font-semibold text-gray-900">Edit {editingPurchase.purchase_code}</h2>
-              <button onClick={() => setEditingPurchase(null)} className="text-gray-400 hover:text-gray-600">
-                <X size={18} />
-              </button>
-            </div>
-            <div className="p-5">
+        <Modal
+          size="lg"
+          onClose={() => setEditingPurchase(null)}
+          title={`Edit ${editingPurchase.purchase_code}`}
+          footer={
+            <>
+              <Button onClick={() => setEditingPurchase(null)}>Cancel</Button>
+              <Button variant="primary" onClick={saveEdit} disabled={editSubmitting}>
+                {editSubmitting ? "Saving..." : "Save changes"}
+              </Button>
+            </>
+          }
+        >
               <FormGroup>
                 <Label>Supplier</Label>
                 <Dropdown
@@ -1334,15 +1339,7 @@ export default function PurchasesPage() {
               )}
 
               {editError && <ErrorText>{editError}</ErrorText>}
-              <div className="flex gap-2 mt-2">
-                <Button variant="primary" onClick={saveEdit} disabled={editSubmitting}>
-                  {editSubmitting ? "Saving..." : "Save changes"}
-                </Button>
-                <Button onClick={() => setEditingPurchase(null)}>Cancel</Button>
-              </div>
-            </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

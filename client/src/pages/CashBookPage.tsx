@@ -1,9 +1,16 @@
-import { useEffect, useState, FormEvent, Fragment } from "react";
+import { useEffect, useRef, useState, FormEvent, Fragment } from "react";
 import { Landmark, Pencil, X, Check, Loader2, ArrowLeftRight, Plus, Minus, Wallet, Building2, ArrowUpRight, ArrowDownLeft, ChevronDown, ChevronRight, Download } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { CashBookEntry } from "../lib/types";
+import { cleanMoney } from "../lib/numberInput";
 import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
-import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, EmptyState, Dropdown, DateRangePicker, HelpHint, RefLink } from "../components/ui";
+import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, EmptyState, Dropdown, DateRangePicker, HelpHint, RefLink, Modal } from "../components/ui";
+
+// Row geometry used to work out how many entries fit on screen: a row with
+// its date and transaction code on two lines, and the header row above them.
+const DEFAULT_PAGE_SIZE = 7;
+const TABLE_ROW_HEIGHT = 53;
+const TABLE_HEAD_HEIGHT = 37;
 
 const PAYMENT_METHOD_OPTIONS = [
   { value: "cash", label: "Cash" },
@@ -63,11 +70,13 @@ function typeLabel(t: string): string {
   return t;
 }
 
+// Thousands commas while typing, keeping a typed decimal point and cents
+// exactly as entered ("1,250." stays "1,250." until the cents arrive).
 function formatAmountInput(raw: string): string {
   if (!raw) return "";
-  const n = parseInt(raw, 10);
-  if (isNaN(n)) return "";
-  return n.toLocaleString("en-US");
+  const [whole, cents] = raw.split(".");
+  const wholeText = whole ? parseInt(whole, 10).toLocaleString("en-US") : "0";
+  return cents === undefined ? wholeText : `${wholeText}.${cents}`;
 }
 
 // An inline-edit control that sits exactly where the text it replaces was.
@@ -104,7 +113,12 @@ export default function CashBookPage() {
   const [error, setError] = useState<string | null>(null);
   const [dateStart, setDateStart] = useState(initialRange.start);
   const [dateEnd, setDateEnd] = useState(initialRange.end);
-  const PAGE_SIZE = 7;
+  // How many entries a page holds. On desktop the page fits the screen, so
+  // this follows the room the table has (see the observer below); on a
+  // phone it stays at a short fixed page.
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const tableBodyRef = useRef<HTMLDivElement>(null);
+  const PAGE_SIZE = pageSize;
 
   const [stats, setStats] = useState<{
     current_balance: number;
@@ -179,7 +193,28 @@ export default function CashBookPage() {
   useEffect(() => {
     loadEntries();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entriesPage, dateStart, dateEnd]);
+  }, [entriesPage, dateStart, dateEnd, pageSize]);
+
+  // Fill the table area with as many rows as fit — never fewer than 5. The
+  // area keeps the same height whether it is loading, empty or full (the
+  // footer is always there), so this can't flip back and forth.
+  useEffect(() => {
+    const el = tableBodyRef.current;
+    if (!el) return;
+    const fit = () => {
+      if (!window.matchMedia("(min-width: 1024px)").matches) return setPageSize(DEFAULT_PAGE_SIZE);
+      const rows = Math.floor((el.clientHeight - TABLE_HEAD_HEIGHT) / TABLE_ROW_HEIGHT);
+      setPageSize(Math.min(30, Math.max(5, rows)));
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(el);
+    window.addEventListener("resize", fit);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", fit);
+    };
+  }, []);
 
   useEffect(() => {
     loadStats();
@@ -356,19 +391,21 @@ export default function CashBookPage() {
   const isFiltered = !!(dateStart || dateEnd);
 
   return (
-    <div>
-      <PageHeader
-        title="Cash book"
-        subtitle="Sales, returns, purchases, supplier payments, cheques, and courier settlements are logged here automatically."
-        action={
-          <Button onClick={() => setShowTransfer(true)} className="inline-flex items-center gap-1.5">
-            <ArrowLeftRight size={14} />
-            Move cash / bank
-          </Button>
-        }
-      />
+    <div className="flex flex-col lg:flex-1 lg:min-h-0">
+      <div className="flex-shrink-0">
+        <PageHeader
+          title="Cash book"
+          subtitle="Sales, returns, purchases, supplier payments, cheques, and courier settlements are logged here automatically."
+          action={
+            <Button onClick={() => setShowTransfer(true)} className="inline-flex items-center gap-1.5">
+              <ArrowLeftRight size={14} />
+              Move cash / bank
+            </Button>
+          }
+        />
+      </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4 flex-shrink-0">
         <div className="bg-white border border-gray-200 rounded-2xl px-4 py-3.5">
           <div className="flex items-center gap-2 mb-1">
             <Landmark size={14} className="text-gray-400" />
@@ -415,8 +452,8 @@ export default function CashBookPage() {
 
       {error && <ErrorText>{error}</ErrorText>}
 
-      <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-4 items-start">
-        <Card className="lg:sticky lg:top-6">
+      <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] lg:grid-rows-[minmax(0,1fr)] gap-4 items-start lg:items-stretch lg:flex-1 lg:min-h-0">
+        <Card className="lg:min-h-0 lg:overflow-y-auto">
           <div className="flex items-center gap-2 mb-4">
             <Plus size={14} className="text-gray-400" />
             <h2 className="text-sm font-semibold text-gray-900">Add manual entry</h2>
@@ -458,12 +495,9 @@ export default function CashBookPage() {
               <Label>Amount (Rs.)</Label>
               <input
                 type="text"
-                inputMode="numeric"
+                inputMode="decimal"
                 value={formatAmountInput(amount)}
-                onChange={(e) => {
-                  const raw = e.target.value.replace(/[^\d]/g, "");
-                  setAmount(raw);
-                }}
+                onChange={(e) => setAmount(cleanMoney(e.target.value))}
                 placeholder="0"
                 className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-lg font-medium tabular-nums text-right placeholder:text-right text-black focus:outline-none focus:border-gray-400"
               />
@@ -488,9 +522,9 @@ export default function CashBookPage() {
           </form>
         </Card>
 
-        <div className="min-w-0">
-          <Card className="p-0 overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-3 flex-wrap">
+        <div className="min-w-0 flex flex-col lg:min-h-0">
+          <Card className="p-0 overflow-hidden flex flex-col lg:flex-1 lg:min-h-0">
+            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-3 flex-wrap flex-shrink-0">
               <div>
                 <h2 className="text-sm font-semibold text-gray-900">All entries</h2>
                 <p className="text-xs text-gray-400 mt-0.5">
@@ -538,11 +572,12 @@ export default function CashBookPage() {
               </div>
             </div>
             {downloadError && (
-              <div className="px-4 pt-3">
+              <div className="px-4 pt-3 flex-shrink-0">
                 <ErrorText>{downloadError}</ErrorText>
               </div>
             )}
 
+            <div ref={tableBodyRef} className="lg:flex-1 lg:min-h-0 lg:overflow-y-auto">
             {loading ? (
               <div className="p-4">
                 <p className="text-sm text-gray-400">Loading...</p>
@@ -557,8 +592,8 @@ export default function CashBookPage() {
             ) : (
               <>
                 <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-gray-50 border-b border-gray-100">
+                  <thead className="sticky top-0 z-10 bg-gray-50 shadow-[inset_0_-1px_0_0_#f3f4f6]">
+                    <tr className="bg-gray-50">
                       <th className="w-[24px] px-2 py-2.5"></th>
                       <th className="text-left px-3 py-2.5 text-xs font-medium text-gray-400">Date</th>
                       <th className="text-left px-3 py-2.5 text-xs font-medium text-gray-400 min-w-[84px]">Type</th>
@@ -746,99 +781,95 @@ export default function CashBookPage() {
                     })}
                   </tbody>
                 </table>
-
-                <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 bg-gray-50/50">
-                  <p className="text-xs text-gray-500">
-                    Showing <span className="text-gray-700">{rangeStart}–{rangeEnd}</span> of{" "}
-                    <span className="text-gray-700">{entriesTotal.toLocaleString()}</span>
-                  </p>
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => setEntriesPage((p) => Math.max(1, p - 1))}
-                      disabled={entriesPage === 1}
-                      className="px-2.5 py-1 text-xs border border-gray-200 rounded-lg hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed bg-white"
-                    >
-                      Previous
-                    </button>
-                    <span className="px-2 text-xs text-gray-500 tabular-nums">
-                      Page {entriesPage} of {totalPages}
-                    </span>
-                    <button
-                      onClick={() => setEntriesPage((p) => p + 1)}
-                      disabled={entriesPage >= totalPages}
-                      className="px-2.5 py-1 text-xs border border-gray-200 rounded-lg hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed bg-white"
-                    >
-                      Next
-                    </button>
-                  </div>
-                </div>
               </>
             )}
+            </div>
+
+            {/* Always shown, so the table area above keeps one height whether it is loading, empty or full. */}
+            <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 bg-gray-50/50 flex-shrink-0">
+              <p className="text-xs text-gray-500">
+                Showing <span className="text-gray-700">{rangeStart}–{rangeEnd}</span> of{" "}
+                <span className="text-gray-700">{entriesTotal.toLocaleString()}</span>
+              </p>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setEntriesPage((p) => Math.max(1, p - 1))}
+                  disabled={entriesPage === 1}
+                  className="px-2.5 py-1 text-xs border border-gray-200 rounded-lg hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed bg-white"
+                >
+                  Previous
+                </button>
+                <span className="px-2 text-xs text-gray-500 tabular-nums">
+                  Page {entriesPage} of {totalPages}
+                </span>
+                <button
+                  onClick={() => setEntriesPage((p) => p + 1)}
+                  disabled={entriesPage >= totalPages}
+                  className="px-2.5 py-1 text-xs border border-gray-200 rounded-lg hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed bg-white"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
           </Card>
         </div>
       </div>
 
       {showTransfer && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl">
-            <div className="p-5 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-base font-semibold text-gray-900">
-                Move cash / bank
-                <HelpHint text="This isn't credit or debit — it's the same money, just held differently. Both sides are recorded together so totals stay correct." />
-              </h2>
-              <button onClick={() => setShowTransfer(false)} className="text-gray-400 hover:text-gray-600">
-                <X size={18} />
-              </button>
-            </div>
-            <div className="p-5">
-              <FormGroup>
-                <Label>Direction</Label>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setTransferDirection("cash_to_bank")}
-                    className={`flex-1 border rounded-xl px-3 py-2.5 text-sm text-left ${
-                      transferDirection === "cash_to_bank" ? "border-black bg-black text-white" : "border-gray-200 text-gray-700 hover:border-gray-400"
-                    }`}
-                  >
-                    Cash → Bank
-                    <div className={`text-xs mt-0.5 ${transferDirection === "cash_to_bank" ? "text-gray-300" : "text-gray-400"}`}>
-                      Depositing cash in hand
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTransferDirection("bank_to_cash")}
-                    className={`flex-1 border rounded-xl px-3 py-2.5 text-sm text-left ${
-                      transferDirection === "bank_to_cash" ? "border-black bg-black text-white" : "border-gray-200 text-gray-700 hover:border-gray-400"
-                    }`}
-                  >
-                    Bank → Cash
-                    <div className={`text-xs mt-0.5 ${transferDirection === "bank_to_cash" ? "text-gray-300" : "text-gray-400"}`}>
-                      Withdrawing to cash in hand
-                    </div>
-                  </button>
-                </div>
-              </FormGroup>
-              <FormGroup>
-                <Label>Amount (Rs.)</Label>
-                <Input type="number" min="0" value={transferAmount} onChange={(e) => setTransferAmount(e.target.value)} />
-              </FormGroup>
-              <FormGroup>
-                <Label>Notes (optional)</Label>
-                <Input value={transferNotes} onChange={(e) => setTransferNotes(e.target.value)} />
-              </FormGroup>
-              {transferError && <ErrorText>{transferError}</ErrorText>}
-              {transferSuccess && <SuccessText>{transferSuccess}</SuccessText>}
-              <div className="flex justify-end gap-2 mt-2">
-                <Button onClick={() => setShowTransfer(false)}>Cancel</Button>
-                <Button variant="primary" onClick={handleTransfer} disabled={transferSubmitting}>
-                  {transferSubmitting ? "Recording..." : "Record transfer"}
-                </Button>
+        <Modal
+          size="md"
+          onClose={() => setShowTransfer(false)}
+          title="Move cash / bank"
+          subtitle="This isn't credit or debit — it's the same money, just held differently. Both sides are recorded together so totals stay correct."
+          footer={
+            <>
+              <Button onClick={() => setShowTransfer(false)}>Cancel</Button>
+              <Button variant="primary" onClick={handleTransfer} disabled={transferSubmitting}>
+                {transferSubmitting ? "Recording..." : "Record transfer"}
+              </Button>
+            </>
+          }
+        >
+        <FormGroup>
+          <Label>Direction</Label>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setTransferDirection("cash_to_bank")}
+              className={`flex-1 border rounded-xl px-3 py-2.5 text-sm text-left ${
+                transferDirection === "cash_to_bank" ? "border-black bg-black text-white" : "border-gray-200 text-gray-700 hover:border-gray-400"
+              }`}
+            >
+              Cash → Bank
+              <div className={`text-xs mt-0.5 ${transferDirection === "cash_to_bank" ? "text-gray-300" : "text-gray-400"}`}>
+                Depositing cash in hand
               </div>
-            </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => setTransferDirection("bank_to_cash")}
+              className={`flex-1 border rounded-xl px-3 py-2.5 text-sm text-left ${
+                transferDirection === "bank_to_cash" ? "border-black bg-black text-white" : "border-gray-200 text-gray-700 hover:border-gray-400"
+              }`}
+            >
+              Bank → Cash
+              <div className={`text-xs mt-0.5 ${transferDirection === "bank_to_cash" ? "text-gray-300" : "text-gray-400"}`}>
+                Withdrawing to cash in hand
+              </div>
+            </button>
           </div>
-        </div>
+        </FormGroup>
+        <FormGroup>
+          <Label>Amount (Rs.)</Label>
+          <Input type="number" min="0" value={transferAmount} onChange={(e) => setTransferAmount(e.target.value)} />
+        </FormGroup>
+        <FormGroup>
+          <Label>Notes (optional)</Label>
+          <Input value={transferNotes} onChange={(e) => setTransferNotes(e.target.value)} />
+        </FormGroup>
+        {transferError && <ErrorText>{transferError}</ErrorText>}
+        {transferSuccess && <SuccessText>{transferSuccess}</SuccessText>}
+        </Modal>
       )}
     </div>
   );

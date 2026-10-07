@@ -1,7 +1,7 @@
 import { ReactNode, useState, useRef, useEffect, useLayoutEffect, forwardRef } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
-import { ChevronDown, ChevronUp, Check, Plus, CalendarDays, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, Minus } from "lucide-react";
+import { ChevronDown, ChevronUp, Check, Plus, CalendarDays, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, Minus, X, MoreVertical } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 
 // ---------------------------------------------------------------------
@@ -15,6 +15,9 @@ import { api, ApiRequestError } from "../lib/api";
 //    20, 24  stat tiles          32+  empty-state artwork
 //  A close button is always <X size={18} /> in text-gray-400 — never a
 //  typed "✕".
+// Dialogs: <Modal> only — a header (title, optional subtitle, close), a body
+//    that scrolls when it has to, and a footer that stays put with the
+//    actions. Never a hand-built "fixed inset-0" overlay.
 // Buttons: <Button> (rounded-xl; sm = px-3 py-1.5 text-xs, md = px-4
 //    py-2.5 text-sm), icon + label gap-1.5. Table-row actions: <RowActions>.
 // Status / type labels: <Badge> only.
@@ -178,6 +181,7 @@ export function Dropdown({
   onCreateNew,
   createNewLabel = "+ Add new",
   size = "md",
+  menuClassName = "",
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -191,6 +195,9 @@ export function Dropdown({
   // same text size and a row-friendly height, so editing a row doesn't
   // make it taller than its neighbours.
   size?: "sm" | "md";
+  // Extra classes for the open list — e.g. a minimum width when the trigger
+  // itself is narrow (a country-code picker) but the options need room.
+  menuClassName?: string;
 }) {
   const compact = size === "sm";
   const [open, setOpen] = useState(false);
@@ -304,7 +311,7 @@ export function Dropdown({
         <div
           className={`absolute z-20 w-full ${compact ? "min-w-[9rem] rounded-xl" : "rounded-2xl"} bg-white border border-gray-200 shadow-xl overflow-hidden ${
             openUpward ? "bottom-full mb-1.5" : "mt-1.5"
-          }`}
+          } ${menuClassName}`}
         >
           {/* Searching happens directly in the trigger input above (when
               searchable) — no separate search box in the panel anymore. */}
@@ -508,6 +515,88 @@ export function HelpHint({ text, className = "" }: { text: string; className?: s
   );
 }
 
+// Every dialog in the app. The header and the footer never scroll away — only
+// the body between them does — so the title and the action buttons are always
+// in reach however long the content gets. Escape and a click outside close it
+// (only the top-most one, when a dialog opens another).
+//   size   — sm 448px · md 512px (default) · lg 576px · xl 672px · 2xl 896px · 3xl 1024px
+//   footer — the action buttons, right-aligned (usually Cancel then the main one)
+//   stacked — set when it opens on top of another dialog
+//   height — a fixed panel height instead of "as tall as the content" (wizards
+//            with side-by-side columns); flush — a body with no padding that
+//            doesn't scroll itself, for content that lays out and scrolls its own columns
+const MODAL_WIDTH = { sm: "max-w-md", md: "max-w-lg", lg: "max-w-xl", xl: "max-w-2xl", "2xl": "max-w-4xl", "3xl": "max-w-5xl" } as const;
+const openModals: symbol[] = [];
+
+export function Modal({
+  title,
+  subtitle,
+  onClose,
+  children,
+  footer,
+  size = "md",
+  stacked = false,
+  dismissOnBackdrop = true,
+  height,
+  flush = false,
+}: {
+  title: ReactNode;
+  subtitle?: ReactNode;
+  onClose: () => void;
+  children: ReactNode;
+  footer?: ReactNode;
+  size?: keyof typeof MODAL_WIDTH;
+  stacked?: boolean;
+  dismissOnBackdrop?: boolean;
+  height?: string;
+  flush?: boolean;
+}) {
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+
+  useEffect(() => {
+    const id = Symbol("modal");
+    openModals.push(id);
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape" && openModals[openModals.length - 1] === id) closeRef.current();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      const at = openModals.indexOf(id);
+      if (at >= 0) openModals.splice(at, 1);
+    };
+  }, []);
+
+  return (
+    <div
+      className={`fixed inset-0 ${stacked ? "z-[70]" : "z-50"} flex items-center justify-center bg-black/50 p-4`}
+      onClick={dismissOnBackdrop ? onClose : undefined}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        className={`flex ${height ?? "max-h-[calc(100dvh-2rem)]"} w-full ${MODAL_WIDTH[size]} flex-col overflow-hidden rounded-2xl bg-white shadow-2xl`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex flex-shrink-0 items-start justify-between gap-4 border-b border-gray-100 px-6 py-4">
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold text-gray-900">{title}</h2>
+            {subtitle && <p className="mt-0.5 text-xs text-gray-400">{subtitle}</p>}
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close" className="-mr-1 flex-shrink-0 rounded-lg p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600">
+            <X size={18} />
+          </button>
+        </div>
+        <div className={flush ? "min-h-0 flex-1 overflow-hidden" : "min-h-0 flex-1 overflow-y-auto px-6 py-5"}>{children}</div>
+        {footer && (
+          <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2 border-t border-gray-100 bg-gray-50 px-6 py-3.5">{footer}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function FormGroup({ children }: { children: ReactNode }) {
   return <div className="mb-4">{children}</div>;
 }
@@ -542,7 +631,8 @@ export function Table({ children, className = "" }: { children: ReactNode; class
   );
 }
 
-export function Th({ children, className = "" }: { children: ReactNode; className?: string }) {
+// children is optional: an empty header cell (an actions column) is normal.
+export function Th({ children, className = "" }: { children?: ReactNode; className?: string }) {
   return <th className={`text-left px-3 py-2.5 text-xs font-medium text-gray-400 border-b border-gray-100 ${className}`}>{children}</th>;
 }
 
@@ -636,6 +726,89 @@ export function RowActions({ actions }: { actions: RowAction[] }) {
         </button>
       ))}
     </div>
+  );
+}
+
+// The "three dots" button at the end of a row, opening a small list of actions.
+// The list is drawn above everything else (not inside the table), so a table
+// that scrolls or clips its content can't cut it off, and it opens upward when
+// there's no room below.
+export function ActionMenu({ items }: { items: { label: string; icon?: ReactNode; onClick: () => void }[] }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; right: number; up: boolean }>({ top: 0, right: 0, up: false });
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  function toggle(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!open && buttonRef.current) {
+      const r = buttonRef.current.getBoundingClientRect();
+      const roomBelow = window.innerHeight - r.bottom;
+      const needed = items.length * 38 + 12;
+      setPos({ top: roomBelow < needed ? r.top : r.bottom, right: window.innerWidth - r.right, up: roomBelow < needed });
+    }
+    setOpen((o) => !o);
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    function close(e: Event) {
+      if (menuRef.current?.contains(e.target as Node) || buttonRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [open]);
+
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={toggle}
+        title="Actions"
+        aria-label="Actions"
+        className="rounded-lg p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700"
+      >
+        <MoreVertical size={16} />
+      </button>
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            onClick={(e) => e.stopPropagation()}
+            style={{ position: "fixed", right: pos.right, ...(pos.up ? { bottom: window.innerHeight - pos.top + 4 } : { top: pos.top + 4 }) }}
+            className="z-[80] w-52 rounded-xl border border-gray-200 bg-white py-1 shadow-lg"
+          >
+            {items.map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  item.onClick();
+                }}
+                className="flex w-full items-center gap-2 px-3.5 py-2 text-left text-sm text-gray-700 transition hover:bg-gray-50"
+              >
+                {item.icon}
+                {item.label}
+              </button>
+            ))}
+          </div>,
+          document.body
+        )}
+    </>
   );
 }
 
@@ -776,9 +949,20 @@ export function NewSupplierModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl border border-gray-200 shadow-xl p-5 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
-        <h3 className="text-sm font-semibold text-gray-900 mb-3">New supplier</h3>
+    <Modal
+      size="sm"
+      stacked
+      onClose={onClose}
+      title="New supplier"
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" disabled={submitting} onClick={handleCreate}>
+            {submitting ? "Creating..." : "Create supplier"}
+          </Button>
+        </>
+      }
+    >
         <FormGroup>
           <Label>Name</Label>
           <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
@@ -792,16 +976,7 @@ export function NewSupplierModal({
           <Input value={city} onChange={(e) => setCity(e.target.value)} />
         </FormGroup>
         {error && <ErrorText>{error}</ErrorText>}
-        <div className="flex gap-2 mt-2">
-          <Button variant="primary" size="sm" disabled={submitting} onClick={handleCreate}>
-            {submitting ? "Creating..." : "Create supplier"}
-          </Button>
-          <Button size="sm" onClick={onClose}>
-            Cancel
-          </Button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -837,24 +1012,26 @@ export function NewCategoryModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl border border-gray-200 shadow-xl p-5 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
-        <h3 className="text-sm font-semibold text-gray-900 mb-3">New category</h3>
+    <Modal
+      size="sm"
+      stacked
+      onClose={onClose}
+      title="New category"
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" disabled={submitting} onClick={handleCreate}>
+            {submitting ? "Creating..." : "Create category"}
+          </Button>
+        </>
+      }
+    >
         <FormGroup>
           <Label>Name</Label>
           <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
         </FormGroup>
         {error && <ErrorText>{error}</ErrorText>}
-        <div className="flex gap-2 mt-2">
-          <Button variant="primary" size="sm" disabled={submitting} onClick={handleCreate}>
-            {submitting ? "Creating..." : "Create category"}
-          </Button>
-          <Button size="sm" onClick={onClose}>
-            Cancel
-          </Button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -894,25 +1071,27 @@ export function NewSubCategoryModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl border border-gray-200 shadow-xl p-5 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
-        <h3 className="text-sm font-semibold text-gray-900 mb-3">New sub-category</h3>
-        <p className="text-xs text-gray-400 mb-3">Under {categoryName}</p>
+    <Modal
+      size="sm"
+      stacked
+      onClose={onClose}
+      title="New sub-category"
+      subtitle={`Under ${categoryName}`}
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" disabled={submitting} onClick={handleCreate}>
+            {submitting ? "Creating..." : "Create sub-category"}
+          </Button>
+        </>
+      }
+    >
         <FormGroup>
           <Label>Name</Label>
           <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
         </FormGroup>
         {error && <ErrorText>{error}</ErrorText>}
-        <div className="flex gap-2 mt-2">
-          <Button variant="primary" size="sm" disabled={submitting} onClick={handleCreate}>
-            {submitting ? "Creating..." : "Create sub-category"}
-          </Button>
-          <Button size="sm" onClick={onClose}>
-            Cancel
-          </Button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 

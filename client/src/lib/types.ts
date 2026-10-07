@@ -171,7 +171,15 @@ export interface Customer {
   phone2: string | null;
   gender: CustomerGender;
   loyalty_points: number;
+  // A customer who never earns points (a wholesale buyer) — new sales for
+  // them earn none; set by an admin, always with a reason.
+  loyalty_blocked?: number;
+  loyalty_block_reason?: string | null;
   balance_due: number;
+  // COD the courier delivered and collected but hasn't paid over yet — not owed by the customer.
+  with_courier?: number;
+  // COD on orders still on their way — collected at the door, not owed on account.
+  on_delivery?: number;
   store_credit_balance: number;
   last_order_date: string | null;
   is_suspended: number;
@@ -206,6 +214,59 @@ export interface SaleItem {
   brand?: string;
 }
 
+// An online exchange: this order replaces an item the customer already has from a
+// delivered order, and the courier collects the old item with the delivery.
+export interface SaleExchangeItem {
+  id: number;
+  old_sale_item_id: number;
+  old_invoice: string;
+  title: string | null;
+  size: string | null;
+  color: string | null;
+  // This item's value, and the part of it that comes off the replacement order.
+  credit_amount: number;
+  applied_share: number;
+  status: "awaiting" | "received" | "not_returned" | "cancelled";
+  item_condition: "clean" | "damaged" | null;
+}
+
+export interface SaleExchange {
+  id: number;
+  new_sale_id: number;
+  // The old items being collected (an exchange can cover several, and the
+  // replacement order can hold more pieces than were returned).
+  items: SaleExchangeItem[];
+  // All the old items' value together, and how much of it comes off the replacement's total.
+  credit_amount: number;
+  applied_amount: number;
+  // The courier's pickup charge, the share the customer pays (0 / 50 / 100) and what that was.
+  pickup_charge: number;
+  customer_share_pct: number;
+  pickup_collected: number;
+  status: "awaiting_pickup" | "received" | "not_returned" | "cancelled";
+  item_condition: "clean" | "damaged" | null;
+  note: string | null;
+  closed_at: string | null;
+}
+
+// An exchange that took items out of an invoice — shown on that (old) invoice.
+export interface SaleExchangeOut {
+  exchange_id: number;
+  new_sale_id: number;
+  new_invoice: string;
+  status: SaleExchange["status"];
+  items: {
+    id: number;
+    old_sale_item_id: number;
+    status: SaleExchangeItem["status"];
+    item_condition: "clean" | "damaged" | null;
+    credit_amount: number;
+    title: string | null;
+    size: string | null;
+    color: string | null;
+  }[];
+}
+
 export interface Sale {
   id: number;
   invoice: string;
@@ -227,6 +288,8 @@ export interface Sale {
   payment_method: string | null;
   sale_type: SaleType;
   loyalty_points_earned: number;
+  // A wholesale order earns no loyalty points.
+  is_wholesale?: number;
   amount_received: number | null;
   change_due: number;
   overpaid_amount: number;
@@ -253,14 +316,31 @@ export interface Sale {
   delivery_partner_name?: string | null;
   delivery_partner_waybill_code?: string | null;
   delivery_partner_kind?: "courier" | "on_demand" | null;
+  // The courier's own waybill / tracking number, once there is one (for an
+  // on-demand app it's just the invoice number again).
+  delivery_tracking_number?: string | null;
   // What the customer is charged for delivery on this order, and how.
   delivery_fee?: number | null;
   delivery_is_free?: number | null;
-  delivery_paid_by?: "customer" | "shop" | "shop_upfront" | null;
+  delivery_paid_by?: "customer" | "shop" | null;
+  // Set when the customer pays the rider directly, so there's no fare to charge.
+  delivery_rider_direct?: number | null;
+  // The on-demand fare, when known — null/absent while the order is on hold waiting for it.
+  delivery_actual_fare?: number | null;
   delivery_cod_amount?: number | null;
   // How much of that delivery fee was already paid at checkout.
   delivery_fee_paid?: number | null;
   delivery_status?: DeliveryStatus | null;
+  exchange?: SaleExchange | null;
+  // How this invoice figures in an exchange (set on sales lists and searches):
+  // its own items are being / were swapped (out), or it is the replacement order (in).
+  exchange_out_status?: "awaiting" | "received" | "not_returned" | null;
+  exchange_out_invoice?: string | null;
+  exchange_out_sale_id?: number | null;
+  exchange_in_status?: SaleExchange["status"] | null;
+  exchange_in_from?: string | null;
+  // On one invoice's own page: the exchanges that took items out of it.
+  exchanged_out?: SaleExchangeOut[];
 }
 
 export interface Coupon {
@@ -374,13 +454,18 @@ export interface Delivery {
   // On-demand partners only (Uber, PickMe Flash...): who bears the fare,
   // and what the ride actually costs (kept even when we pay it and the
   // customer's delivery_fee is 0).
-  delivery_paid_by?: "customer" | "shop" | "shop_upfront" | null;
+  delivery_paid_by?: "customer" | "shop" | null;
+  // 1 when the customer pays the rider themselves — there is no fare to record.
+  rider_direct?: number | null;
+  // null for an on-demand order that is on hold, waiting for its fare to be entered.
   actual_fare?: number | null;
   // The courier's own latest status wording and when they reported it —
   // shown as-is next to our delivery_status.
   courier_status?: string | null;
   courier_status_at?: string | null;
   notes: string | null;
+  // Set when this delivery is also collecting an old item (an online exchange).
+  exchange?: SaleExchange | null;
   invoice?: string;
   sale_date?: string;
   sale_total?: number;
@@ -565,6 +650,17 @@ export interface CourierReconciliationOrder {
   // (the courier had it) and then came back.
   return_charge: number;
   notes: string | null;
+  // The charge starts as the tariff's ESTIMATE; 1 once someone has checked it
+  // against the courier's real bill (or typed the real figure in).
+  charge_confirmed: number;
+  // The system's original estimate, kept for comparison after the real charge is entered.
+  estimated_charge: number | null;
+  // The weight the courier actually billed on, if it differed from what was entered at dispatch.
+  actual_weight_kg: number | null;
+  // The weight entered at dispatch.
+  package_weight_kg: number | null;
+  // What the courier's tariff says for the weight on record.
+  tariff_charge: number;
   created_at: string;
   updated_at: string;
   delivery_status: DeliveryStatus;
@@ -574,6 +670,40 @@ export interface CourierReconciliationOrder {
   invoice: string;
   sale_date: string;
   customer_name: string | null;
+}
+
+// One courier's figures. balance = expected_net − settled_total + adjustments_total:
+// positive = they owe the shop, negative = the shop owes them.
+export interface CourierSummary {
+  courier_partner: string;
+  cod_collected: number;
+  courier_charges: number;
+  expected_net: number;
+  delivered_orders: number;
+  // Delivered/returned orders whose charge is still an estimate.
+  estimated_orders: number;
+  settled_total: number;
+  adjustments_total: number;
+  balance: number;
+}
+
+// A recorded correction to a courier's balance, with the reason. No money moves.
+export interface CourierAdjustment {
+  id: number;
+  courier_partner: string;
+  amount: number;
+  reason: string;
+  balance_before: number;
+  balance_after: number;
+  staff_name: string | null;
+  created_at: string;
+}
+
+export interface CourierReconciliationData {
+  summary: CourierSummary[];
+  settlements: CourierSettlement[];
+  adjustments: CourierAdjustment[];
+  orders: CourierReconciliationOrder[];
 }
 
 export interface CourierSettlement {

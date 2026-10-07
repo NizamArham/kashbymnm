@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { Truck, ChevronDown, ChevronRight, ChevronUp, Pencil, Plus, X } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Supplier, BankAccount } from "../lib/types";
-import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Table, Th, Td, SortHeader, EmptyState, HelpHint } from "../components/ui";
+import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Table, Th, Td, SortHeader, EmptyState, HelpHint, Modal } from "../components/ui";
 import { CityPicker } from "../components/CityPicker";
 import { useSortableData } from "../lib/useSortableData";
 
@@ -303,15 +303,22 @@ export default function SuppliersPage() {
       />
 
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl">
-            <div className="p-5 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-base font-semibold text-gray-900">Add supplier</h2>
-              <button onClick={() => setShowAddModal(false)} className="text-gray-400 hover:text-gray-600">
-                <X size={18} />
-              </button>
-            </div>
-            <form onSubmit={handleAdd} className="p-5">
+        <form onSubmit={handleAdd}>
+          <Modal
+            size="md"
+            onClose={() => setShowAddModal(false)}
+            title="Add supplier"
+            footer={
+              <>
+                <Button type="button" onClick={() => setShowAddModal(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" variant="primary" disabled={submitting}>
+                  {submitting ? "Adding..." : "Add supplier"}
+                </Button>
+              </>
+            }
+          >
               <FormGroup>
                 <Label>Name</Label>
                 <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
@@ -326,17 +333,8 @@ export default function SuppliersPage() {
               </FormGroup>
               {formError && <ErrorText>{formError}</ErrorText>}
               {formSuccess && <SuccessText>{formSuccess}</SuccessText>}
-              <div className="flex justify-end gap-3 mt-2">
-                <Button type="button" onClick={() => setShowAddModal(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit" variant="primary" disabled={submitting}>
-                  {submitting ? "Adding..." : "Add supplier"}
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
+          </Modal>
+        </form>
       )}
 
       {error && <ErrorText>{error}</ErrorText>}

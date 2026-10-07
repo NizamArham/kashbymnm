@@ -1,6 +1,6 @@
 import { useState, useEffect, FormEvent, Fragment, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Pencil, Plus, Search, KeyRound, X } from "lucide-react";
+import { Pencil, Plus, Search, KeyRound } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { api, ApiRequestError } from "../lib/api";
 import { StaffMember } from "../lib/types";
@@ -22,6 +22,7 @@ import {
   Dropdown,
   DatePicker,
   HelpHint,
+  Modal,
 } from "../components/ui";
 
 type StaffSortKey = "username" | "name" | "job_title" | "role" | "reports_to";
@@ -198,7 +199,7 @@ export default function StaffPage() {
               ref={searchInputRef}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search staff... (/)"
+              placeholder="Search staff..."
               className="pl-9 py-2 text-sm"
             />
           </div>
@@ -395,15 +396,19 @@ export default function StaffPage() {
       </Card>
 
       {resettingUser && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl">
-            <div className="p-5 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-base font-semibold text-gray-900">Reset password</h2>
-              <button onClick={() => setResettingUser(null)} className="text-gray-400 hover:text-gray-600">
-                <X size={18} />
-              </button>
-            </div>
-            <div className="p-5">
+        <Modal
+          size="md"
+          onClose={() => setResettingUser(null)}
+          title="Reset password"
+          footer={
+            <>
+              <Button onClick={() => setResettingUser(null)}>Cancel</Button>
+              <Button variant="primary" onClick={submitResetPassword} disabled={resetSubmitting}>
+                {resetSubmitting ? "Saving..." : "Set new password"}
+              </Button>
+            </>
+          }
+        >
               <p className="text-xs text-gray-500 mb-3">
                 Sets a new password for <span className="font-medium text-gray-700">{resettingUser.name ?? resettingUser.username}</span> —
                 no need for their old one.
@@ -419,15 +424,7 @@ export default function StaffPage() {
                 />
               </FormGroup>
               {resetError && <ErrorText>{resetError}</ErrorText>}
-              <div className="flex gap-2 mt-2">
-                <Button variant="primary" onClick={submitResetPassword} disabled={resetSubmitting}>
-                  {resetSubmitting ? "Saving..." : "Set new password"}
-                </Button>
-                <Button onClick={() => setResettingUser(null)}>Cancel</Button>
-              </div>
-            </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

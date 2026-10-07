@@ -1,5 +1,6 @@
 import { ReactNode } from "react";
-import { X, AlertTriangle } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
+import { Button, Modal } from "./ui";
 
 export interface ModalOption {
   key: string;
@@ -24,22 +25,14 @@ export default function OptionsModal({
   onClose: () => void;
 }) {
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div
-        className="bg-white rounded-2xl max-w-sm w-full shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="p-5 border-b border-gray-100 flex items-center justify-between">
-          <div className="min-w-0">
-            <h3 className="text-base font-semibold text-gray-900">{heading}</h3>
-            {subtitle && <p className="text-xs text-gray-400 truncate">{subtitle}</p>}
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 flex-shrink-0">
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="p-5 space-y-2.5">
+    <Modal
+      size="sm"
+      onClose={onClose}
+      title={heading}
+      subtitle={subtitle}
+      footer={<Button onClick={onClose}>Close</Button>}
+    >
+      <div className="space-y-2.5">
           {options.map((opt) => (
             <button
               key={opt.key}
@@ -66,8 +59,7 @@ export default function OptionsModal({
               <p className="text-xs text-amber-800">{error}</p>
             </div>
           )}
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 }

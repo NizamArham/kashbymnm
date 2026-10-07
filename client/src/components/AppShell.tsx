@@ -228,6 +228,9 @@ export default function AppShell() {
 
   const isOnProfile = location.pathname === "/profile";
   const isPosScreen = location.pathname === "/pos";
+  // The cash book, like the till, fits the screen on desktop: its entries
+  // scroll inside the page instead of the whole page scrolling.
+  const isCashBook = location.pathname === "/cash-book";
 
   return (
     <div className="min-h-screen flex bg-gray-50 text-black">
@@ -350,7 +353,13 @@ export default function AppShell() {
       {/* The POS is a till, not a document: it takes exactly the screen's
           height (its cart scrolls inside, its buttons stay put) instead of
           sitting in the padded, scrolling page card the other screens use. */}
-      <div className={`flex-1 min-w-0 lg:ml-64 bg-gray-50 ${isPosScreen ? "h-[100dvh] flex flex-col overflow-hidden" : "min-h-screen"}`}>
+      <div className={`flex-1 min-w-0 lg:ml-64 bg-gray-50 ${
+        isPosScreen
+          ? "h-[100dvh] flex flex-col overflow-hidden"
+          : isCashBook
+          ? "min-h-screen lg:h-[100dvh] lg:flex lg:flex-col lg:overflow-hidden"
+          : "min-h-screen"
+      }`}>
         <div className="sticky top-0 z-30 bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-3 lg:hidden flex-shrink-0">
           <button
             onClick={() => setSidebarOpen(true)}
@@ -369,6 +378,12 @@ export default function AppShell() {
         {isPosScreen ? (
           <div className="flex-1 min-h-0 flex flex-col">
             <Outlet />
+          </div>
+        ) : isCashBook ? (
+          <div className="p-4 lg:p-6 lg:flex-1 lg:min-h-0 lg:flex lg:flex-col">
+            <div className="bg-white border border-gray-200 rounded-2xl p-4 lg:p-6 shadow-sm lg:flex-1 lg:min-h-0 lg:flex lg:flex-col">
+              <Outlet />
+            </div>
           </div>
         ) : (
           <div className="p-4 lg:p-6">

@@ -125,6 +125,11 @@ CREATE TABLE IF NOT EXISTS customers (
   suspended_at TEXT,
   reactivated_reason TEXT,
   reactivated_at TEXT,
+  -- A customer who never earns loyalty points (a wholesale buyer): new
+  -- sales for them earn none. Admin-only, always with a reason.
+  loyalty_blocked INTEGER NOT NULL DEFAULT 0,
+  loyalty_block_reason TEXT,
+  loyalty_blocked_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes'))
 );
 
@@ -502,6 +507,8 @@ CREATE TABLE IF NOT EXISTS sales (
   payment_method TEXT,
   sale_type TEXT NOT NULL DEFAULT 'in_store' CHECK (sale_type IN ('in_store','online')),
   loyalty_points_earned INTEGER NOT NULL DEFAULT 0,
+  -- A wholesale order earns no loyalty points.
+  is_wholesale INTEGER NOT NULL DEFAULT 0,
   -- Cash-payment specifics, needed to show change due in Sale History
   -- rather than just the net amount_paid.
   amount_received REAL,
@@ -865,7 +872,12 @@ CREATE TABLE IF NOT EXISTS deliveries (
   -- actual_fare is what the ride really costs — kept even when
   -- delivery_fee (what the customer is charged) is 0 because we pay.
   delivery_paid_by TEXT CHECK (delivery_paid_by IN ('customer','shop','shop_upfront')),
+  -- actual_fare stays NULL while the ride isn't booked yet (billed or
+  -- credited first, Flash later) — the order is "awaiting fare" and can't
+  -- be packed. rider_direct = 1 means the customer pays the rider
+  -- themselves, so there is no fare to wait for.
   actual_fare REAL,
+  rider_direct INTEGER NOT NULL DEFAULT 0,
   -- How much of delivery_fee the customer already paid at checkout (a
   -- prepaid online order that included delivery). sales.amount_paid only
   -- ever counts payment toward the PRODUCT total — the delivery fee is

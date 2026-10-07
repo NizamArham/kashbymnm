@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Banknote, Check, Plus, Pencil, Trash2, X, Download } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Supplier } from "../lib/types";
-import { downloadTabularReport, buildReportFilename, todayLongDate } from "../lib/reportPdf";
-import { PageHeader, Card, Table, Th, Td, SortHeader, Button, EmptyState, ErrorText, Badge, RowActions, TabToggle, Input, Label, FormGroup, Dropdown, DatePicker, HelpHint } from "../components/ui";
+import { downloadTabularReport, buildReportFilename, todayLongDate, rangeLabelFor } from "../lib/reportPdf";
+import { PageHeader, Card, Table, Th, Td, SortHeader, Button, EmptyState, ErrorText, Badge, RowActions, TabToggle, Input, Label, FormGroup, Dropdown, DatePicker, DateRangePicker, Modal } from "../components/ui";
 import { useSortableData } from "../lib/useSortableData";
 
 interface ChequeRow {
@@ -65,6 +65,17 @@ function shortDate(iso: string): string {
 
 type Tab = "in_hand" | "all" | "issued";
 
+type StatusFilter = "pending" | "all" | "cleared" | "bounced";
+
+// "Pending" = still waiting to clear. For a cheque we wrote that's simply
+// 'pending'; for one we received it's anything not yet cleared or bounced
+// (in hand, given to a supplier, or deposited).
+function matchesStatusFilter(status: string, filter: StatusFilter, issued: boolean): boolean {
+  if (filter === "all") return true;
+  if (filter === "cleared" || filter === "bounced") return status === filter;
+  return issued ? status === "pending" : status !== "cleared" && status !== "bounced";
+}
+
 export default function ChequesPage() {
   const [activeTab, setActiveTab] = useState<Tab>("in_hand");
   const [cheques, setCheques] = useState<ChequeRow[]>([]);
@@ -73,8 +84,35 @@ export default function ChequesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // What the lists show. Open with only the cheques still waiting to clear
+  // (the ones that need action); "All", "Cleared" and "Bounced" are one click
+  // away, and the period narrows by the date written on the cheque.
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("pending");
+  const [periodStart, setPeriodStart] = useState<string | null>(null);
+  const [periodEnd, setPeriodEnd] = useState<string | null>(null);
+  // The "In Hand" tab is already just the cheques being held, so a status
+  // filter has nothing to add there.
+  const statusApplies = activeTab !== "in_hand";
+  const periodActive = !!(periodStart || periodEnd);
+  const filtersActive = periodActive || (statusApplies && statusFilter !== "pending");
+
+  function inPeriod(chequeDate: string): boolean {
+    const day = chequeDate.slice(0, 10);
+    return (!periodStart || day >= periodStart) && (!periodEnd || day <= periodEnd);
+  }
+  const shownCheques = useMemo(
+    () => cheques.filter((c) => inPeriod(c.cheque_date) && (!statusApplies || matchesStatusFilter(c.status, statusFilter, false))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [cheques, statusFilter, periodStart, periodEnd, statusApplies]
+  );
+  const shownIssued = useMemo(
+    () => issuedCheques.filter((c) => inPeriod(c.cheque_date) && matchesStatusFilter(c.status, statusFilter, true)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [issuedCheques, statusFilter, periodStart, periodEnd]
+  );
+
   const { sorted: sortedCheques, sortKey: receivedSortKey, sortDir: receivedSortDir, toggleSort: toggleReceivedSort } = useSortableData<ChequeRow, ReceivedChequeSortKey>(
-    cheques,
+    shownCheques,
     (c, key) => {
       switch (key) {
         case "received":
@@ -93,12 +131,14 @@ export default function ChequesPage() {
           return c.status;
       }
     },
-    "received",
-    "desc"
+    // The cheque's own date is what matters (when it can be banked / falls
+    // due), so the list opens soonest-first by that — not by when it was received.
+    "cheque_date",
+    "asc"
   );
 
   const { sorted: sortedIssuedCheques, sortKey: issuedSortKey, sortDir: issuedSortDir, toggleSort: toggleIssuedSort } = useSortableData<IssuedChequeRow, IssuedChequeSortKey>(
-    issuedCheques,
+    shownIssued,
     (c, key) => {
       switch (key) {
         case "issued":
@@ -117,8 +157,8 @@ export default function ChequesPage() {
           return c.status;
       }
     },
-    "issued",
-    "desc"
+    "cheque_date",
+    "asc"
   );
 
   const [clearingId, setClearingId] = useState<number | null>(null);
@@ -330,64 +370,65 @@ export default function ChequesPage() {
 
   const tabLabel: Record<Tab, string> = { in_hand: "In Hand", all: "All Cheques", issued: "Written by Me" };
 
-  // Exports exactly the active tab's currently-loaded rows — there's no
-  // date filter on this page (cheque volumes here are small enough that
-  // one hasn't been needed), so this is "what's on screen", same rule
-  // as everywhere else this report pattern is used.
+  // Exports exactly what's on screen — the active tab with its status and
+  // period filters applied, in the order shown.
+  const statusLabel: Record<StatusFilter, string> = { pending: "Pending only", all: "All statuses", cleared: "Cleared only", bounced: "Bounced only" };
+  const reportPeriod = rangeLabelFor(periodStart, periodEnd);
+  const reportScope = statusApplies ? ` · ${statusLabel[statusFilter]}` : "";
   function downloadChequesPdf() {
     if (activeTab === "issued") {
-      const total = issuedCheques.reduce((sum, c) => sum + c.amount, 0);
+      const total = sortedIssuedCheques.reduce((sum, c) => sum + c.amount, 0);
       downloadTabularReport({
         headerLabel: "M&M Clothing — Cheque Register",
         headerFields: [
-          { label: "Report", value: "Cheques Written by Me" },
-          { label: "Period", value: "All records" },
+          { label: "Report", value: `Cheques Written by Me${reportScope}` },
+          { label: "Cheque date", value: reportPeriod },
           { label: "Generated", value: todayLongDate() },
         ],
-        rangeLabel: "All records",
+        rangeLabel: reportPeriod,
         columns: [
-          { label: "Issued", width: 75 },
+          { label: "Cheque date", width: 75 },
           { label: "Cheque #", width: 90 },
           { label: "Bank", width: 90 },
-          { label: "Cheque date", width: 75 },
+          { label: "Issued", width: 75 },
           { label: "Amount", width: 80, align: "right" },
           { label: "To supplier", width: 105 },
         ],
-        rows: issuedCheques.map((c) => ({
-          cells: [c.date_issued.slice(0, 10), c.cheque_number, c.bank_name, c.cheque_date.slice(0, 10), `Rs. ${c.amount.toLocaleString()}`, c.supplier_name],
+        rows: sortedIssuedCheques.map((c) => ({
+          cells: [c.cheque_date.slice(0, 10), c.cheque_number, c.bank_name, c.date_issued.slice(0, 10), `Rs. ${c.amount.toLocaleString()}`, c.supplier_name],
         })),
         totalSummary: {
           label: "Total",
           amount: `Rs. ${total.toLocaleString()}`,
-          note: `${issuedCheques.length} cheque${issuedCheques.length !== 1 ? "s" : ""}`,
+          note: `${sortedIssuedCheques.length} cheque${sortedIssuedCheques.length !== 1 ? "s" : ""}`,
         },
         filename: buildReportFilename("Cheques Written By Me", new Date().toISOString().slice(0, 10)),
       });
     } else {
-      const total = cheques.reduce((sum, c) => sum + c.amount, 0);
+      const total = sortedCheques.reduce((sum, c) => sum + c.amount, 0);
       downloadTabularReport({
         headerLabel: "M&M Clothing — Cheque Register",
         headerFields: [
-          { label: "Report", value: `Cheques — ${tabLabel[activeTab]}` },
-          { label: "Period", value: "All records" },
+          { label: "Report", value: `Cheques — ${tabLabel[activeTab]}${reportScope}` },
+          { label: "Cheque date", value: reportPeriod },
           { label: "Generated", value: todayLongDate() },
         ],
-        rangeLabel: "All records",
+        rangeLabel: reportPeriod,
         columns: [
-          { label: "Received", width: 75 },
+          { label: "Cheque date", width: 75 },
           { label: "Cheque #", width: 90 },
           { label: "Bank", width: 90 },
-          { label: "Cheque date", width: 75 },
+          { label: "Received", width: 75 },
           { label: "Amount", width: 80, align: "right" },
           { label: "From", width: 105 },
         ],
-        rows: cheques.map((c) => ({
-          cells: [c.date_received.slice(0, 10), c.cheque_number, c.bank_name, c.cheque_date.slice(0, 10), `Rs. ${c.amount.toLocaleString()}`, `${c.customer_name} (${c.customer_code})`],
+        rows: sortedCheques.map((c) => ({
+          cells: [c.cheque_date.slice(0, 10), c.cheque_number, c.bank_name, c.date_received.slice(0, 10), `Rs. ${c.amount.toLocaleString()}`, `${c.customer_name} (${c.customer_code})`],
         })),
         totalSummary: {
           label: "Total",
           amount: `Rs. ${total.toLocaleString()}`,
-          note: `${cheques.length} cheque${cheques.length !== 1 ? "s" : ""}`,
+          note: `${sortedCheques.length} cheque${sortedCheques.length !== 1 ? "s" : ""}`,
         },
         filename: buildReportFilename(`Cheques ${tabLabel[activeTab]}`, new Date().toISOString().slice(0, 10)),
       });
@@ -412,7 +453,7 @@ export default function ChequesPage() {
             />
             <Button
               onClick={downloadChequesPdf}
-              disabled={activeTab === "issued" ? issuedCheques.length === 0 : cheques.length === 0}
+              disabled={activeTab === "issued" ? sortedIssuedCheques.length === 0 : sortedCheques.length === 0}
               className="inline-flex items-center gap-1.5"
             >
               <Download size={14} />
@@ -428,6 +469,50 @@ export default function ChequesPage() {
         }
       />
 
+      <div className="flex items-center gap-3 flex-wrap mb-4">
+        {statusApplies && (
+          <TabToggle
+            value={statusFilter}
+            onChange={setStatusFilter}
+            options={[
+              { value: "pending", label: "Pending" },
+              { value: "all", label: "All" },
+              { value: "cleared", label: "Cleared" },
+              { value: "bounced", label: "Bounced" },
+            ]}
+          />
+        )}
+        <DateRangePicker
+          startDate={periodStart}
+          endDate={periodEnd}
+          onChange={(s, e) => {
+            setPeriodStart(s);
+            setPeriodEnd(e);
+          }}
+        />
+        {filtersActive && (
+          <button
+            type="button"
+            onClick={() => {
+              setStatusFilter("pending");
+              setPeriodStart(null);
+              setPeriodEnd(null);
+            }}
+            className="text-xs text-gray-500 hover:text-gray-800 underline"
+          >
+            Reset filters
+          </button>
+        )}
+        {!loading && (
+          <span className="ml-auto text-xs text-gray-500 tabular-nums">
+            {(activeTab === "issued" ? sortedIssuedCheques : sortedCheques).length} cheque
+            {(activeTab === "issued" ? sortedIssuedCheques : sortedCheques).length !== 1 ? "s" : ""} · Rs.{" "}
+            {(activeTab === "issued" ? sortedIssuedCheques : sortedCheques).reduce((sum, c) => sum + c.amount, 0).toLocaleString()}
+            <span className="text-gray-400"> · by cheque date</span>
+          </span>
+        )}
+      </div>
+
       {error && <ErrorText>{error}</ErrorText>}
       {actionError && <ErrorText>{actionError}</ErrorText>}
 
@@ -436,15 +521,17 @@ export default function ChequesPage() {
       ) : activeTab === "issued" ? (
         issuedCheques.length === 0 ? (
           <EmptyState icon={Banknote} title="No self-written cheques recorded" subtitle="Cheques you write directly to a supplier will show here." />
+        ) : sortedIssuedCheques.length === 0 ? (
+          <EmptyState icon={Banknote} title="No cheques match these filters" subtitle="Try “All” under status, or a wider period." />
         ) : (
           <Card className="p-0 overflow-hidden">
             <Table>
               <thead>
                 <tr>
-                  <SortHeader<IssuedChequeSortKey> label="Issued" sortKey="issued" activeKey={issuedSortKey} dir={issuedSortDir} onClick={toggleIssuedSort} />
+                  <SortHeader<IssuedChequeSortKey> label="Cheque date" sortKey="cheque_date" activeKey={issuedSortKey} dir={issuedSortDir} onClick={toggleIssuedSort} />
                   <SortHeader<IssuedChequeSortKey> label="Cheque #" sortKey="number" activeKey={issuedSortKey} dir={issuedSortDir} onClick={toggleIssuedSort} />
                   <SortHeader<IssuedChequeSortKey> label="Bank" sortKey="bank" activeKey={issuedSortKey} dir={issuedSortDir} onClick={toggleIssuedSort} />
-                  <SortHeader<IssuedChequeSortKey> label="Cheque date" sortKey="cheque_date" activeKey={issuedSortKey} dir={issuedSortDir} onClick={toggleIssuedSort} />
+                  <SortHeader<IssuedChequeSortKey> label="Issued" sortKey="issued" activeKey={issuedSortKey} dir={issuedSortDir} onClick={toggleIssuedSort} />
                   <SortHeader<IssuedChequeSortKey> label="Amount" sortKey="amount" activeKey={issuedSortKey} dir={issuedSortDir} onClick={toggleIssuedSort} />
                   <SortHeader<IssuedChequeSortKey> label="To supplier" sortKey="to" activeKey={issuedSortKey} dir={issuedSortDir} onClick={toggleIssuedSort} />
                   <SortHeader<IssuedChequeSortKey> label="Status" sortKey="status" activeKey={issuedSortKey} dir={issuedSortDir} onClick={toggleIssuedSort} />
@@ -454,10 +541,10 @@ export default function ChequesPage() {
               <tbody>
                 {sortedIssuedCheques.map((c) => (
                   <tr key={c.id}>
-                    <Td>{c.date_issued.slice(0, 10)}</Td>
+                    <Td className="font-medium">{shortDate(c.cheque_date)}</Td>
                     <Td>{c.cheque_number}</Td>
                     <Td>{c.bank_name}</Td>
-                    <Td className="font-medium">{shortDate(c.cheque_date)}</Td>
+                    <Td>{c.date_issued.slice(0, 10)}</Td>
                     <Td>Rs. {c.amount.toLocaleString()}</Td>
                     <Td>{c.supplier_name}</Td>
                     <Td>
@@ -510,15 +597,17 @@ export default function ChequesPage() {
             activeTab === "in_hand" ? "Cheques received from customers, not yet deposited or passed on, will show here." : undefined
           }
         />
+      ) : sortedCheques.length === 0 ? (
+        <EmptyState icon={Banknote} title="No cheques match these filters" subtitle="Try “All” under status, or a wider period." />
       ) : (
         <Card className="p-0 overflow-hidden">
           <Table>
             <thead>
               <tr>
-                <SortHeader<ReceivedChequeSortKey> label="Received" sortKey="received" activeKey={receivedSortKey} dir={receivedSortDir} onClick={toggleReceivedSort} />
+                <SortHeader<ReceivedChequeSortKey> label="Cheque date" sortKey="cheque_date" activeKey={receivedSortKey} dir={receivedSortDir} onClick={toggleReceivedSort} />
                 <SortHeader<ReceivedChequeSortKey> label="Cheque #" sortKey="number" activeKey={receivedSortKey} dir={receivedSortDir} onClick={toggleReceivedSort} />
                 <SortHeader<ReceivedChequeSortKey> label="Bank" sortKey="bank" activeKey={receivedSortKey} dir={receivedSortDir} onClick={toggleReceivedSort} />
-                <SortHeader<ReceivedChequeSortKey> label="Cheque date" sortKey="cheque_date" activeKey={receivedSortKey} dir={receivedSortDir} onClick={toggleReceivedSort} />
+                <SortHeader<ReceivedChequeSortKey> label="Received" sortKey="received" activeKey={receivedSortKey} dir={receivedSortDir} onClick={toggleReceivedSort} />
                 <SortHeader<ReceivedChequeSortKey> label="Amount" sortKey="amount" activeKey={receivedSortKey} dir={receivedSortDir} onClick={toggleReceivedSort} />
                 <SortHeader<ReceivedChequeSortKey> label="From" sortKey="from" activeKey={receivedSortKey} dir={receivedSortDir} onClick={toggleReceivedSort} />
                 <SortHeader<ReceivedChequeSortKey> label="Status" sortKey="status" activeKey={receivedSortKey} dir={receivedSortDir} onClick={toggleReceivedSort} />
@@ -528,10 +617,10 @@ export default function ChequesPage() {
             <tbody>
               {sortedCheques.map((c) => (
                 <tr key={c.id}>
-                  <Td>{c.date_received.slice(0, 10)}</Td>
+                  <Td className="font-medium">{shortDate(c.cheque_date)}</Td>
                   <Td>{c.cheque_number}</Td>
                   <Td>{c.bank_name}</Td>
-                  <Td className="font-medium">{shortDate(c.cheque_date)}</Td>
+                  <Td>{c.date_received.slice(0, 10)}</Td>
                   <Td>Rs. {c.amount.toLocaleString()}</Td>
                   <Td>
                     {c.customer_name} ({c.customer_code})
@@ -587,28 +676,28 @@ export default function ChequesPage() {
       )}
 
       {clearingId !== null && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl">
-            <div className="p-5 border-b border-gray-100">
-              <h2 className="text-base font-semibold text-gray-900">
-                Mark cheque cleared
-                {(() => {
-                  const cheque = cheques.find((c) => c.id === clearingId);
-                  const wasTransferred = clearingIsIssued || !!cheque?.transferred_to_supplier_name;
-                  return (
-                    <HelpHint
-                      text={
-                        wasTransferred
-                          ? "This records the cash book expense for paying the supplier with this cheque."
-                          : "This records the cash book income for this cheque, since the money is now real."
-                      }
-                    />
-                  );
-                })()}
-              </h2>
-            </div>
-            <div className="p-5">
-              {(() => {
+        <Modal
+          size="sm"
+          onClose={() => setClearingId(null)}
+          title="Mark cheque cleared"
+          subtitle={(() => {
+            const cheque = cheques.find((c) => c.id === clearingId);
+            const wasTransferred = clearingIsIssued || !!cheque?.transferred_to_supplier_name;
+            return wasTransferred
+              ? "This records the cash book expense for paying the supplier with this cheque."
+              : "This records the cash book income for this cheque, since the money is now real.";
+          })()}
+          footer={
+            <>
+              <Button onClick={() => setClearingId(null)}>Cancel</Button>
+              <Button variant="primary" onClick={() => handleClear(clearingId, clearingIsIssued)} disabled={clearSubmitting}>
+                {clearSubmitting ? "Saving..." : "Confirm cleared"}
+              </Button>
+            </>
+          }
+        >
+          <p className="text-sm text-gray-600 mb-3">Confirm this cheque has cleared.</p>
+{(() => {
                 const cheque = cheques.find((c) => c.id === clearingId);
                 const wasTransferred = clearingIsIssued || !!cheque?.transferred_to_supplier_name;
                 return (
@@ -629,58 +718,46 @@ export default function ChequesPage() {
                   </>
                 );
               })()}
-              <div className="flex gap-2 mt-2">
-                <Button variant="primary" onClick={() => handleClear(clearingId, clearingIsIssued)} disabled={clearSubmitting}>
-                  {clearSubmitting ? "Saving..." : "Confirm cleared"}
-                </Button>
-                <Button onClick={() => setClearingId(null)}>Cancel</Button>
-              </div>
-            </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {bouncingId !== null && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl">
-            <div className="p-5 border-b border-gray-100">
-              <h2 className="text-base font-semibold text-gray-900">
-                Mark cheque bounced
-                <HelpHint text="The originating customer's sales revert to unpaid. If this cheque was already given to a supplier, their balance is reinstated too." />
-              </h2>
-            </div>
-            <div className="p-5">
+        <Modal
+          size="sm"
+          onClose={() => setBouncingId(null)}
+          title="Mark cheque bounced"
+          subtitle="The originating customer's sales revert to unpaid. If this cheque was already given to a supplier, their balance is reinstated too."
+          footer={
+            <>
+              <Button onClick={() => setBouncingId(null)}>Cancel</Button>
+              <Button variant="danger" onClick={() => handleBounce(bouncingId, bouncingIsIssued)} disabled={bounceSubmitting}>
+                {bounceSubmitting ? "Saving..." : "Confirm bounced"}
+              </Button>
+            </>
+          }
+        >
               <FormGroup>
                 <Label>Reason</Label>
                 <Input value={bounceReason} onChange={(e) => setBounceReason(e.target.value)} />
               </FormGroup>
-              <div className="flex gap-2 mt-2">
-                <Button variant="danger" onClick={() => handleBounce(bouncingId, bouncingIsIssued)} disabled={bounceSubmitting}>
-                  {bounceSubmitting ? "Saving..." : "Confirm bounced"}
-                </Button>
-                <Button onClick={() => setBouncingId(null)}>Cancel</Button>
-              </div>
-            </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {showIssueForm && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-xl w-full shadow-2xl">
-            <div className="p-5 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-base font-semibold text-gray-900">
-                Issue a cheque
-                <HelpHint text="A cheque written from your own account, straight to a supplier. Their balance reduces now; the Cash Book updates once it clears." />
-              </h2>
-              <button onClick={() => setShowIssueForm(false)} className="text-gray-400 hover:text-gray-600">
-                <X size={18} />
-              </button>
-            </div>
-            {/* Laid out like the cheque itself reads — bank details up
-                top, payee and amount in the middle, terms last — instead
-                of one long stacked column. */}
-            <div className="p-5">
+        <Modal
+          size="xl"
+          onClose={() => setShowIssueForm(false)}
+          title="Issue a cheque"
+          subtitle="A cheque written from your own account, straight to a supplier. Their balance reduces now; the Cash Book updates once it clears."
+          footer={
+            <>
+              <Button onClick={() => setShowIssueForm(false)}>Cancel</Button>
+              <Button variant="primary" onClick={handleIssueCheque} disabled={issueSubmitting}>
+                {issueSubmitting ? "Saving..." : "Record cheque"}
+              </Button>
+            </>
+          }
+        >
               <FormGroup>
                 <Label>Supplier</Label>
                 <Dropdown
@@ -745,36 +822,28 @@ export default function ChequesPage() {
                 Crossed cheque
               </label>
               {issueError && <ErrorText>{issueError}</ErrorText>}
-              <div className="flex gap-2 mt-2">
-                <Button variant="primary" onClick={handleIssueCheque} disabled={issueSubmitting}>
-                  {issueSubmitting ? "Saving..." : "Record cheque"}
-                </Button>
-                <Button onClick={() => setShowIssueForm(false)}>Cancel</Button>
-              </div>
-            </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {editingCheque && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl">
-            <div className="p-5 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-base font-semibold text-gray-900">
-                Edit cheque
-                <HelpHint
-                  text={
-                    editingCheque.isIssued
-                      ? "Changing the amount adjusts the supplier's balance to match."
-                      : "Changing the amount re-applies it against the customer's outstanding sales."
-                  }
-                />
-              </h2>
-              <button onClick={() => setEditingCheque(null)} className="text-gray-400 hover:text-gray-600">
-                <X size={18} />
-              </button>
-            </div>
-            <div className="p-5">
+        <Modal
+          size="sm"
+          onClose={() => setEditingCheque(null)}
+          title="Edit cheque"
+          subtitle={
+            editingCheque.isIssued
+              ? "Changing the amount adjusts the supplier's balance to match."
+              : "Changing the amount re-applies it against the customer's outstanding sales."
+          }
+          footer={
+            <>
+              <Button onClick={() => setEditingCheque(null)}>Cancel</Button>
+              <Button variant="primary" onClick={saveEdit} disabled={editSubmitting}>
+                {editSubmitting ? "Saving..." : "Save changes"}
+              </Button>
+            </>
+          }
+        >
               <FormGroup>
                 <Label>Cheque number</Label>
                 <Input value={editChequeNumber} onChange={(e) => setEditChequeNumber(e.target.value)} />
@@ -792,15 +861,7 @@ export default function ChequesPage() {
                 <DatePicker value={editChequeDate || null} onChange={setEditChequeDate} />
               </FormGroup>
               {editError && <ErrorText>{editError}</ErrorText>}
-              <div className="flex gap-2 mt-2">
-                <Button variant="primary" onClick={saveEdit} disabled={editSubmitting}>
-                  {editSubmitting ? "Saving..." : "Save changes"}
-                </Button>
-                <Button onClick={() => setEditingCheque(null)}>Cancel</Button>
-              </div>
-            </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

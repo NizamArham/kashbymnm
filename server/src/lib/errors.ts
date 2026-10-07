@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from "express";
+import { ZodError } from "zod";
 
 export class ApiError extends Error {
   statusCode: number;
@@ -26,6 +27,14 @@ export function errorHandler(
 ) {
   if (err instanceof ApiError) {
     return res.status(err.statusCode).json({ error: err.message });
+  }
+
+  // A request that failed validation (a missing or badly-formed field) is the
+  // caller's mistake, not a crash — say what was wrong instead of a vague 500.
+  if (err instanceof ZodError) {
+    const first = err.issues[0];
+    const field = first?.path.length ? `${first.path.join(".")}: ` : "";
+    return res.status(400).json({ error: `${field}${first?.message ?? "Invalid request"}` });
   }
 
   // SQLite constraint errors (e.g. UNIQUE, FOREIGN KEY) — surface a
