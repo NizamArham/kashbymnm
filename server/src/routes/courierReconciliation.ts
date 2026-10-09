@@ -361,6 +361,9 @@ courierReconciliationRouter.post("/settlements", asyncHandler(async (req, res) =
     week_start: z.string().min(1),
     week_end: z.string().min(1),
     amount_received: z.number().nonnegative(),
+    // Where the money landed — without it the Cash Book can't say whether it's in
+    // the till or in the bank, so a settlement can't be saved without one.
+    payment_method: z.enum(["cash", "bank_transfer"], { errorMap: () => ({ message: "Choose how the settlement was received — cash or bank transfer." }) }),
     received_date: z.string().optional(),
     notes: z.string().optional(),
   }).parse(req.body);
@@ -376,9 +379,9 @@ courierReconciliationRouter.post("/settlements", asyncHandler(async (req, res) =
     // this, Cash Book's current balance never reflects it even though
     // Courier Reconciliation's own balance does.
     db.prepare(
-      `INSERT INTO cash_book (transaction_code, type, category, reference_id, amount, notes)
-       VALUES (?, 'income', 'courier_settlement', ?, ?, ?)`
-    ).run(nextTransactionCode(), result.lastInsertRowid, data.amount_received, data.notes ?? `Settlement from ${data.courier_partner}`);
+      `INSERT INTO cash_book (transaction_code, type, category, payment_method, reference_id, amount, notes)
+       VALUES (?, 'income', 'courier_settlement', ?, ?, ?, ?)`
+    ).run(nextTransactionCode(), data.payment_method, result.lastInsertRowid, data.amount_received, data.notes ?? `Settlement from ${data.courier_partner}`);
 
     // A settlement means the courier has now actually paid the shop back
     // for everything they've delivered for this partner so far — so the

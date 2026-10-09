@@ -25,6 +25,15 @@ function addDaysIso(iso: string, days: number): string {
 const countsTowardBalance = (order: CourierReconciliationOrder) => order.delivery_status === "delivered" || order.delivery_status === "returned";
 
 type View = "week" | "check";
+type ReceivedAs = "" | "cash" | "bank_transfer";
+
+// CityPak and Fardar pay into the bank; our own rider hands the cash over. Any other
+// courier has no habit to assume, so it starts empty and has to be chosen.
+function defaultReceivedAs(partnerCode: string): ReceivedAs {
+  if (partnerCode === "CPAK" || partnerCode === "FDR") return "bank_transfer";
+  if (partnerCode === "D2D") return "cash";
+  return "";
+}
 
 export default function CourierReconciliationPage() {
   const navigate = useNavigate();
@@ -34,6 +43,7 @@ export default function CourierReconciliationPage() {
   const [weekStart, setWeekStart] = useState("");
   const [weekEnd, setWeekEnd] = useState("");
   const [amount, setAmount] = useState("");
+  const [receivedAs, setReceivedAs] = useState<ReceivedAs>(defaultReceivedAs("CPAK"));
   const [notes, setNotes] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -64,6 +74,12 @@ export default function CourierReconciliationPage() {
     setWeekEnd(todayIso());
   }, [partner, data.settlements]);
 
+  // Picking another courier resets how it's usually paid — only on a change of
+  // courier, so a choice made by hand isn't undone when the history reloads.
+  useEffect(() => {
+    setReceivedAs(defaultReceivedAs(partner));
+  }, [partner]);
+
   // A fixed last-7-days glance — no date picker or download here, that's what
   // the full history page is for.
   const recentOrders = useMemo(() => {
@@ -83,6 +99,10 @@ export default function CourierReconciliationPage() {
       setError("Week dates and amount received are required.");
       return;
     }
+    if (!receivedAs) {
+      setError("Choose how it was received — bank transfer or cash.");
+      return;
+    }
     setSaving(true);
     try {
       await api.post("/courier-reconciliation/settlements", {
@@ -90,6 +110,7 @@ export default function CourierReconciliationPage() {
         week_start: weekStart,
         week_end: weekEnd,
         amount_received: Number(amount),
+        payment_method: receivedAs,
         notes: notes.trim() || undefined,
       });
       setAmount("");
@@ -359,6 +380,20 @@ export default function CourierReconciliationPage() {
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="0"
                 className="text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              />
+            </FormGroup>
+            <FormGroup>
+              <Label>
+                Received as
+                <HelpHint text="Where the money landed. The Cash Book uses it to tell the bank balance from cash in hand, so it has to be set." />
+              </Label>
+              <TabToggle<ReceivedAs>
+                value={receivedAs}
+                onChange={setReceivedAs}
+                options={[
+                  { value: "bank_transfer", label: "Bank transfer" },
+                  { value: "cash", label: "Cash" },
+                ]}
               />
             </FormGroup>
             <FormGroup>
