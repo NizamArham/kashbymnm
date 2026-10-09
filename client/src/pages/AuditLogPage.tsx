@@ -44,6 +44,7 @@ const ACTION_META: Record<string, { label: string; icon: typeof AlertTriangle; t
   delivery_fee_change: { label: "Changed delivery fee", icon: Pencil, tone: "neutral" },
   exchange_received: { label: "Received exchange item", icon: Pencil, tone: "neutral" },
   exchange_not_returned: { label: "Exchange item not returned", icon: Pencil, tone: "warning" },
+  exchange_cancelled: { label: "Exchange cancelled", icon: Pencil, tone: "warning" },
   store_credit_refund: { label: "Refunded store credit", icon: Pencil, tone: "neutral" },
   delivery_status_sync: { label: "Courier updated delivery", icon: Pencil, tone: "neutral" },
   courier_charge_edit: { label: "Edited courier charge", icon: Pencil, tone: "neutral" },

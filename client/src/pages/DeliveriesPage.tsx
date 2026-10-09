@@ -446,7 +446,11 @@ export default function DeliveriesPage() {
   }
 
   async function markReturned(id: number) {
-    if (!confirm("Mark this order as returned? This removes it from the normal pipeline.")) return;
+    const isExchangeParcel = deliveries.find((x) => x.id === id)?.exchange?.status === "awaiting_pickup";
+    const message = isExchangeParcel
+      ? "Mark this exchange parcel as returned? The exchange is cancelled (the customer keeps their old items) and the replacement pieces go back into stock."
+      : "Mark this order as returned? This removes it from the normal pipeline.";
+    if (!confirm(message)) return;
     setActionError(null);
     try {
       await api.put(`/deliveries/${id}/return`, {});

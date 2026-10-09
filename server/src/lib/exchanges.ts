@@ -209,15 +209,28 @@ export function itemInActiveExchange(saleItemId: number): boolean {
 
 // Ends an exchange that will never happen (the parcel came back, or the replacement
 // invoice was voided): the customer keeps the old items, nothing comes off anything.
-export function cancelExchangeForSale(saleId: number, note: string) {
+export function cancelExchangeForSale(saleId: number, note: string): boolean {
   const open = db.prepare(`SELECT id FROM online_exchanges WHERE new_sale_id = ? AND status = 'awaiting_pickup'`).get(saleId) as
     | { id: number }
     | undefined;
-  if (!open) return;
+  if (!open) return false;
   db.prepare(`UPDATE online_exchange_items SET status = 'cancelled' WHERE exchange_id = ? AND status = 'awaiting'`).run(open.id);
   db.prepare(
     `UPDATE online_exchanges SET status = 'cancelled', closed_at = datetime('now', '+330 minutes'), note = COALESCE(note, ?) WHERE id = ?`
   ).run(note, open.id);
+  return true;
+}
+
+// The replacement parcel came back to the shop, so its pieces are on the shelf
+// again. Only pieces this order still holds as sold are touched. Returns how many
+// went back.
+export function restockSaleUnits(saleId: number): number {
+  return db
+    .prepare(
+      `UPDATE inventory SET status = 'available'
+       WHERE status = 'sold' AND id IN (SELECT inventory_id FROM sale_items WHERE sale_id = ? AND inventory_id IS NOT NULL)`
+    )
+    .run(saleId).changes;
 }
 
 // The delivered, not-yet-returned items of a customer's online orders — what an

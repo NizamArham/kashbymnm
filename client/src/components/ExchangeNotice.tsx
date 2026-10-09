@@ -123,7 +123,10 @@ export default function ExchangeNotice({
       )}
       {exchange.status === "cancelled" && (
         <p className="mt-0.5 text-xs text-gray-500">
-          {exchange.note ?? "Cancelled"} — the customer keeps the old items. If the new items came back, void this invoice to put them back in stock.
+          {exchange.note ?? "Cancelled"} — the customer keeps the old items.
+          {exchange.note?.startsWith("Parcel returned")
+            ? " The new items are back in stock. Void this invoice to clear what's owed on it."
+            : ""}
         </p>
       )}
 

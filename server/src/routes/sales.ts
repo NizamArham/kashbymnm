@@ -1115,9 +1115,18 @@ salesRouter.put(
       // the customer, nothing was taken off anything.
       cancelExchangeForSale(sale.id, "The replacement invoice was voided");
 
-      // Return each physical unit to sellable stock.
+      // Return each physical unit to sellable stock — unless a newer sale has
+      // since sold that very piece (e.g. a refused exchange parcel was put back on
+      // the shelf when it came back, then sold again), which must stay sold.
       for (const item of items) {
-        db.prepare(`UPDATE inventory SET status = 'available' WHERE id = ?`).run(item.inventory_id);
+        db.prepare(
+          `UPDATE inventory SET status = 'available'
+           WHERE id = ?
+             AND NOT EXISTS (
+               SELECT 1 FROM sale_items later JOIN sales ls ON ls.id = later.sale_id
+               WHERE later.inventory_id = inventory.id AND ls.id > ? AND ls.is_voided = 0 AND ls.status = 'completed'
+             )`
+        ).run(item.inventory_id, sale.id);
       }
 
       // Reverse the income entry, so cash-on-hand and reports reflect

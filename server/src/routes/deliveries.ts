@@ -9,7 +9,7 @@ import { fardarCreateParcel, fardarCityName, postalCodeOf } from "../lib/fardar"
 import { syncCitypak } from "../lib/courierSync";
 import { getPartner, planDelivery, OnDemandPaidBy } from "../lib/deliveryPartners";
 import { logAudit } from "../lib/auditLog";
-import { cancelExchangeForSale, exchangeForSale, recentExchangesBySale } from "../lib/exchanges";
+import { cancelExchangeForSale, exchangeForSale, recentExchangesBySale, restockSaleUnits } from "../lib/exchanges";
 
 export const deliveriesRouter = Router();
 
@@ -583,15 +583,30 @@ deliveriesRouter.put(
       throw new ApiError(409, "Only packed or dispatched orders can be marked returned.");
     }
 
-    db.prepare(`UPDATE deliveries SET delivery_status = 'returned', notes = COALESCE(?, notes) WHERE id = ?`).run(
-      data.notes ?? null,
-      req.params.id
-    );
-
     // The customer refused the parcel, so the whole thing goes back — the
-    // exchange never happened: their old item stays with them, and the courier's
-    // return trip (below) is ours in full.
-    cancelExchangeForSale(existing.sale_id, "Parcel returned — the customer refused it");
+    // exchange never happened: their old item stays with them, the replacement's
+    // pieces are back on the shelf, and the courier's return trip (below) is ours
+    // in full.
+    let restocked = 0;
+    db.transaction(() => {
+      db.prepare(`UPDATE deliveries SET delivery_status = 'returned', notes = COALESCE(?, notes) WHERE id = ?`).run(
+        data.notes ?? null,
+        req.params.id
+      );
+      if (cancelExchangeForSale(existing.sale_id, "Parcel returned — the customer refused it")) {
+        restocked = restockSaleUnits(existing.sale_id);
+      }
+    })();
+    if (restocked > 0) {
+      const sale = db.prepare(`SELECT invoice FROM sales WHERE id = ?`).get(existing.sale_id) as { invoice: string };
+      logAudit(
+        req.user!,
+        "exchange_cancelled",
+        "sale",
+        existing.sale_id,
+        `${sale.invoice}: replacement parcel came back — exchange cancelled, ${restocked} piece${restocked === 1 ? "" : "s"} back in stock`
+      );
+    }
 
     // Only a delivery the courier actually had (dispatched) incurs a
     // return-trip fee — one that never left "packed" was never picked up,

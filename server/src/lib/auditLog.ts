@@ -38,6 +38,7 @@ export type AuditAction =
   | "delivery_fee_change"
   | "exchange_received"
   | "exchange_not_returned"
+  | "exchange_cancelled"
   | "store_credit_refund"
   | "delivery_status_sync"
   | "courier_charge_edit"
