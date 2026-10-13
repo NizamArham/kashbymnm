@@ -571,6 +571,71 @@ deliveriesRouter.put(
   })
 );
 
+// PUT /api/deliveries/:id/undeliver — Delivered -> Dispatched, for a parcel marked
+// delivered by mistake (the courier still has it, or it's been rescheduled). Marking it
+// delivered counted its COD as collected and let a courier settlement mark the order paid,
+// so putting it back also takes that payment back off the order — otherwise the customer
+// would look settled for money that was never collected.
+deliveriesRouter.put(
+  "/:id/undeliver",
+  asyncHandler(async (req, res) => {
+    const existing = db.prepare(`SELECT * FROM deliveries WHERE id = ?`).get(req.params.id) as any;
+    if (!existing) throw new ApiError(404, "Delivery not found");
+    if (existing.delivery_status !== "delivered") {
+      throw new ApiError(409, "Only a parcel marked delivered can be put back to dispatched.");
+    }
+    const sale = db.prepare(`SELECT * FROM sales WHERE id = ?`).get(existing.sale_id) as any;
+    if (!sale) throw new ApiError(404, "Sale not found");
+
+    // Once something has come back from this order, it has really been delivered.
+    const returned = db
+      .prepare(`SELECT 1 FROM returns r JOIN sale_items si ON si.id = r.sale_item_id WHERE si.sale_id = ? LIMIT 1`)
+      .get(sale.id);
+    if (returned) throw new ApiError(409, "Items from this order have already been returned, so it can't be put back to dispatched.");
+    const exchange = exchangeForSale(sale.id) as any;
+    if (exchange && exchange.status !== "awaiting_pickup") {
+      throw new ApiError(409, "The old items of this exchange have already been dealt with, so it can't be put back to dispatched.");
+    }
+
+    // A courier settlement recorded after the delivery marks the order paid for the COD that was
+    // collected on it — that's the part to take back. (Prepaid and credit orders collect no COD
+    // for the order itself, so nothing was ever paid that way.)
+    let takenBack = 0;
+    const partner = existing.delivery_partner
+      ? (db.prepare(`SELECT kind FROM delivery_partners WHERE code = ?`).get(existing.delivery_partner) as { kind: string } | undefined)
+      : undefined;
+    const courierHoldsCod = !!existing.delivery_partner && partner?.kind !== "on_demand";
+    if (courierHoldsCod && sale.sale_type === "online" && sale.payment_method !== "credit" && sale.amount_paid > 0 && existing.delivery_date) {
+      const recon = db.prepare(`SELECT cod_amount FROM courier_reconciliations WHERE delivery_id = ?`).get(existing.id) as { cod_amount: number } | undefined;
+      const towardSale = Math.max(0, (recon?.cod_amount ?? existing.cod_amount) - existing.delivery_fee - (existing.pickup_collected ?? 0));
+      const settledAfter = db
+        .prepare(`SELECT 1 FROM courier_settlements WHERE courier_partner = ? AND received_date >= date(?) LIMIT 1`)
+        .get(existing.delivery_partner, existing.delivery_date);
+      if (towardSale > 0 && settledAfter) takenBack = Math.min(sale.amount_paid, towardSale);
+    }
+
+    db.transaction(() => {
+      db.prepare(`UPDATE deliveries SET delivery_status = 'dispatched', delivery_date = NULL WHERE id = ?`).run(existing.id);
+      if (takenBack > 0) {
+        const newPaid = sale.amount_paid - takenBack;
+        const status = newPaid >= sale.total && sale.total > 0 ? "paid" : newPaid > 0 ? "partial" : "unpaid";
+        db.prepare(`UPDATE sales SET amount_paid = ?, payment_status = ? WHERE id = ?`).run(newPaid, status, sale.id);
+      }
+    })();
+
+    logAudit(
+      req.user!,
+      "delivery_undelivered",
+      "sale",
+      sale.id,
+      `${sale.invoice}: put back to dispatched (it had been marked delivered)${
+        takenBack > 0 ? `; Rs. ${takenBack.toLocaleString()} taken back off the order, which a courier settlement had counted as paid` : ""
+      }`
+    );
+    res.json({ delivery: db.prepare(`SELECT * FROM deliveries WHERE id = ?`).get(existing.id), taken_back: takenBack });
+  })
+);
+
 // PUT /api/deliveries/:id/return — reachable from packed or dispatched;
 // a separate terminal state rather than a step in the forward pipeline.
 deliveriesRouter.put(

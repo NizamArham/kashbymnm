@@ -174,7 +174,7 @@ function ExchangeFlag({ d }: { d: Delivery }) {
   );
 }
 
-function ExpandedDetail({ d, onReload }: { d: Delivery; onReload: () => void }) {
+function ExpandedDetail({ d, onReload, onNotDelivered }: { d: Delivery; onReload: () => void; onNotDelivered: (id: number) => void }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -197,7 +197,7 @@ function ExpandedDetail({ d, onReload }: { d: Delivery; onReload: () => void }) 
       {d.exchange && (
         <ExchangeNotice exchange={d.exchange} delivered={d.delivery_status === "delivered"} canAct onChanged={onReload} className="mb-5 lg:mr-10" />
       )}
-      {hasWaybill && (
+      {(hasWaybill || d.delivery_status === "delivered") && (
         <div className="absolute top-0 right-0" ref={menuRef}>
           <button
             onClick={(e) => {
@@ -213,17 +213,19 @@ function ExpandedDetail({ d, onReload }: { d: Delivery; onReload: () => void }) 
               onClick={(e) => e.stopPropagation()}
               className="absolute right-0 mt-1 w-56 bg-white border border-gray-200 rounded-xl shadow-lg z-10 overflow-hidden"
             >
-              <button
-                onClick={() => {
-                  redownloadWaybill(d);
-                  setMenuOpen(false);
-                }}
-                className="w-full flex items-center gap-2 px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition"
-              >
-                <Download size={14} />
-                Download waybill
-              </button>
-              {d.customer_phone && (
+              {hasWaybill && (
+                <button
+                  onClick={() => {
+                    redownloadWaybill(d);
+                    setMenuOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2 px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition"
+                >
+                  <Download size={14} />
+                  Download waybill
+                </button>
+              )}
+              {hasWaybill && d.customer_phone && (
                 <button
                   onClick={() => {
                     contactViaWhatsApp(d);
@@ -233,6 +235,21 @@ function ExpandedDetail({ d, onReload }: { d: Delivery; onReload: () => void }) 
                 >
                   <MessageCircle size={14} className="text-green-600" />
                   Contact via WhatsApp
+                </button>
+              )}
+              {d.delivery_status === "delivered" && (
+                <button
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onNotDelivered(d.id);
+                  }}
+                  title="Marked delivered by mistake? Put it back to Dispatched"
+                  className={`w-full flex items-center gap-2 px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition ${
+                    hasWaybill ? "border-t border-gray-100" : ""
+                  }`}
+                >
+                  <RotateCcw size={14} />
+                  Not delivered yet
                 </button>
               )}
             </div>
@@ -436,12 +453,38 @@ export default function DeliveriesPage() {
   }
 
   async function markDelivered(id: number) {
+    // Delivered means the COD is collected and the courier owes it to you — the order gets settled
+    // on their next payout. So it's worth a second look at their portal before saying so.
+    const d = deliveries.find((x) => x.id === id);
+    const courier = d?.delivery_partner ? partnerName(d.delivery_partner) : null;
+    const message = courier
+      ? `Has ${courier} delivered ${d?.invoice ?? "this parcel"}?\n\nOnly mark it delivered once ${courier} shows it as Delivered. A delivered parcel counts as COD collected, and its order is marked paid when you record ${courier}'s next settlement.`
+      : `Mark ${d?.invoice ?? "this order"} as delivered?`;
+    if (!confirm(message)) return;
     setActionError(null);
     try {
       await api.put(`/deliveries/${id}/deliver`, {});
       load();
     } catch (err) {
       setActionError(err instanceof ApiRequestError ? err.message : "Failed to mark delivered");
+    }
+  }
+
+  // The way back from a delivered parcel that wasn't really delivered (rescheduled, still with the rider).
+  async function markNotDelivered(id: number) {
+    const d = deliveries.find((x) => x.id === id);
+    if (
+      !confirm(
+        `Put ${d?.invoice ?? "this parcel"} back to Dispatched?\n\nUse this if it was marked delivered by mistake. It stops counting as delivered, and if a courier settlement had already marked the order paid, that payment is taken back off the order.`
+      )
+    )
+      return;
+    setActionError(null);
+    try {
+      await api.put<{ taken_back: number }>(`/deliveries/${id}/undeliver`, {});
+      load();
+    } catch (err) {
+      setActionError(err instanceof ApiRequestError ? err.message : "Couldn't put it back to dispatched");
     }
   }
 
@@ -719,7 +762,7 @@ export default function DeliveriesPage() {
                         <tr className="bg-gray-50">
                           <Td colSpan={7} className="!py-0 !px-0">
                             <div className="px-5 pb-4 pt-3 border-t border-gray-100">
-                              <ExpandedDetail d={d} onReload={load} />
+                              <ExpandedDetail d={d} onReload={load} onNotDelivered={markNotDelivered} />
                             </div>
                           </Td>
                         </tr>
@@ -803,7 +846,7 @@ export default function DeliveriesPage() {
                       className="mt-2 pt-2 border-t border-gray-100 -mx-4 px-4"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <ExpandedDetail d={d} onReload={load} />
+                      <ExpandedDetail d={d} onReload={load} onNotDelivered={markNotDelivered} />
                     </div>
                   )}
                 </RowCard>
