@@ -208,8 +208,10 @@ export default function CourierReconciliationPage() {
 
       {error && <ErrorText>{error}</ErrorText>}
 
-      <div className="grid grid-cols-1 xl:grid-cols-[1.5fr_1fr] gap-5">
-        <Card className="p-0 overflow-hidden">
+      {/* minmax(0, …) so neither column can grow past its share because of what's inside it — a wide table or a form row
+          used to push the other column off the screen. */}
+      <div className="grid grid-cols-1 min-[1400px]:grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)] gap-5">
+        <Card className="p-0 overflow-hidden min-w-0">
           <div className="p-4 border-b border-gray-100 flex items-center justify-between gap-3 flex-wrap">
             <h2 className="font-semibold text-gray-900">
               Courier orders
@@ -251,7 +253,7 @@ export default function CourierReconciliationPage() {
           {shownOrders.length === 0 ? (
             <p className="p-5 text-sm text-gray-400">{view === "check" ? "Every charge has been checked." : "No courier orders in the last 7 days."}</p>
           ) : (
-            <Table>
+            <Table className="[&_th]:px-2 [&_td]:px-2">
               <thead>
                 <tr>
                   <Th>Order</Th>
@@ -341,7 +343,8 @@ export default function CourierReconciliationPage() {
           )}
         </Card>
 
-        <Card>
+        {/* Stacked under the orders on a narrower screen, so it keeps a form-like width instead of stretching across the page. */}
+        <Card className="min-w-0 max-w-2xl min-[1400px]:max-w-none">
           <div className="flex items-center gap-2 mb-4">
             <Banknote size={18} className="text-gray-600" />
             <div>
@@ -406,10 +409,15 @@ export default function CourierReconciliationPage() {
           </form>
 
           <div className="mt-5 pt-4 border-t border-gray-100">
-            <h3 className="text-sm font-semibold text-gray-900 mb-2">
-              <FileText size={14} className="inline mr-1" /> Settlement history
-            </h3>
-            {data.settlements.slice(0, 6).map((settlement) => (
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <h3 className="text-sm font-semibold text-gray-900">
+                <FileText size={14} className="inline mr-1" /> Last settlement
+              </h3>
+              <button onClick={() => navigate("/couriers/payments")} className="text-xs text-gray-500 hover:text-gray-900 underline decoration-dotted">
+                View all
+              </button>
+            </div>
+            {data.settlements.slice(0, 1).map((settlement) => (
               <div key={settlement.id} className="flex justify-between py-2 text-xs border-b border-gray-50">
                 <span>
                   {partnerLabel(settlement.courier_partner)}
@@ -420,12 +428,18 @@ export default function CourierReconciliationPage() {
                 <span className="font-medium">{money(settlement.amount_received)}</span>
               </div>
             ))}
+            {data.settlements.length === 0 && <p className="text-xs text-gray-400">No settlements recorded yet.</p>}
           </div>
 
           {data.adjustments.length > 0 && (
             <div className="mt-5 pt-4 border-t border-gray-100">
-              <h3 className="text-sm font-semibold text-gray-900 mb-2">Balance corrections</h3>
-              {data.adjustments.slice(0, 6).map((adjustment) => (
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <h3 className="text-sm font-semibold text-gray-900">Last balance correction</h3>
+                <button onClick={() => navigate("/couriers/payments?show=corrections")} className="text-xs text-gray-500 hover:text-gray-900 underline decoration-dotted">
+                  View all
+                </button>
+              </div>
+              {data.adjustments.slice(0, 1).map((adjustment) => (
                 <div key={adjustment.id} className="flex items-start justify-between gap-3 py-2 text-xs border-b border-gray-50">
                   <span className="min-w-0">
                     {partnerLabel(adjustment.courier_partner)}

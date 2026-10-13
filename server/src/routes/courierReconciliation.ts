@@ -262,6 +262,20 @@ courierReconciliationRouter.get("/", asyncHandler(async (_req, res) => {
   res.json({ summary, settlements, adjustments, orders });
 }));
 
+// Everything couriers have paid over and every balance correction, for the Payment
+// records page — each settlement with how it was received (from its cash book entry).
+courierReconciliationRouter.get("/payments", asyncHandler(async (_req, res) => {
+  ensureTable();
+  const settlements = db.prepare(`
+    SELECT cs.*, cb.payment_method, cb.transaction_code
+    FROM courier_settlements cs
+    LEFT JOIN cash_book cb ON cb.category = 'courier_settlement' AND cb.reference_id = cs.id
+    ORDER BY cs.received_date DESC, cs.id DESC
+  `).all();
+  const adjustments = db.prepare(`SELECT * FROM courier_adjustments ORDER BY id DESC`).all();
+  res.json({ settlements, adjustments });
+}));
+
 // Tick several orders' charges as checked in one go ("the estimates were right").
 // Must be declared before "/orders/:id", which would otherwise swallow "confirm".
 courierReconciliationRouter.post("/orders/confirm", asyncHandler(async (req, res) => {
@@ -415,7 +429,12 @@ courierReconciliationRouter.post("/settlements", asyncHandler(async (req, res) =
     for (const sale of unpaidDelivered) {
       // (An exchange's pickup-charge share is collected in the COD too, but it
       // isn't payment for the order.)
-      const towardSale = Math.max(0, sale.cod_amount - sale.delivery_fee - sale.pickup_collected);
+      // (Never more than the order still owes: if the courier collected a little over
+      // — the customer rounded up — the extra is the customer's, not part of the sale.)
+      const towardSale = Math.min(
+        Math.max(0, sale.cod_amount - sale.delivery_fee - sale.pickup_collected),
+        Math.max(0, sale.total - sale.amount_paid)
+      );
       const newAmountPaid = sale.amount_paid + towardSale;
       const newStatus: "paid" | "partial" | "unpaid" =
         newAmountPaid >= sale.total && sale.total > 0 ? "paid" : newAmountPaid > 0 ? "partial" : "unpaid";

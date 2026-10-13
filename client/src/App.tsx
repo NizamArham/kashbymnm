@@ -34,6 +34,7 @@ import SupplierPaymentsPage from "./pages/SupplierPaymentsPage";
 import ChequesPage from "./pages/ChequesPage";
 import CouriersPage from "./pages/CourierReconciliationPage";
 import CourierOrderHistoryPage from "./pages/CourierOrderHistoryPage";
+import CourierPaymentRecordsPage from "./pages/CourierPaymentRecordsPage";
 import GeneralSettingsPage from "./pages/GeneralSettingsPage";
 import FindPage from "./pages/FindPage";
 import AnalyticsPage from "./pages/AnalyticsPage";
@@ -167,6 +168,14 @@ export default function App() {
           element={
             <ProtectedRoute adminOnly>
               <CourierOrderHistoryPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/couriers/payments"
+          element={
+            <ProtectedRoute adminOnly>
+              <CourierPaymentRecordsPage />
             </ProtectedRoute>
           }
         />

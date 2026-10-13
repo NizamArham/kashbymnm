@@ -715,3 +715,14 @@ export interface CourierSettlement {
   received_date: string;
   notes: string | null;
 }
+
+// A settlement plus how it was received, as listed on the Payment records page.
+export interface CourierSettlementRecord extends CourierSettlement {
+  payment_method: string | null;
+  transaction_code: string | null;
+}
+
+export interface CourierPaymentRecords {
+  settlements: CourierSettlementRecord[];
+  adjustments: CourierAdjustment[];
+}
