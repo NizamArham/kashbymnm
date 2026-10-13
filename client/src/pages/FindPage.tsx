@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState, FormEvent, KeyboardEvent } from "react";
+import { useEffect, useRef, useState, FormEvent, KeyboardEvent, ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search, Package, Receipt, User, Truck, ShoppingBag, UserCog, ArrowRight, Loader2, Landmark, Ticket, Gift } from "lucide-react";
+import { Search, Package, Receipt, User, Truck, ShoppingBag, UserCog, ArrowRight, Loader2, Landmark, Ticket, Gift, Copy, Check, History, CornerDownLeft } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
-import { PageHeader, Card, Input, Button, Badge, ErrorText } from "../components/ui";
+import { PageHeader, Card, Input, Button, Badge, RefLink } from "../components/ui";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import ExchangeTag from "../components/ExchangeTag";
 
@@ -28,6 +28,10 @@ interface InventoryResult {
   product_title: string;
   brand: string | null;
   category: string | null;
+  selling_price: number | null;
+  cost_price: number | null;
+  sold_sale_id: number | null;
+  sold_invoice: string | null;
 }
 interface SaleResult {
   id: number;
@@ -37,7 +41,12 @@ interface SaleResult {
   amount_paid: number;
   payment_status: string;
   sale_type: string;
+  payment_method: string | null;
   is_voided: number;
+  customer_id: number | null;
+  delivery_status: string | null;
+  delivery_partner_name: string | null;
+  items: { title: string; size: string | null; color: string | null; unit_price: number }[];
   customer_name: string | null;
   deleted_customer_snapshot: string | null;
   exchange_out_status: "awaiting" | "received" | "not_returned" | null;
@@ -54,6 +63,12 @@ interface CustomerResult {
   phone2: string | null;
   gender: string;
   is_suspended: number;
+  order_count: number;
+  balance_due: number;
+  with_courier: number;
+  store_credit_balance: number;
+  loyalty_points: number;
+  last_order_date: string | null;
 }
 interface SupplierResult {
   id: number;
@@ -87,6 +102,7 @@ interface TransactionResult {
   type: "income" | "expense";
   category: string;
   payment_method: string | null;
+  reference_id: number | null;
   amount: number;
   notes: string | null;
 }
@@ -142,16 +158,295 @@ const TYPE_META: Record<FindResult["type"], { label: string; icon: typeof Packag
   gift_voucher: { label: "Gift voucher", icon: Gift },
 };
 
-// Key-value row shared by every result card below — keeps the layout
-// identical across record types instead of each one inventing its own.
-function Row({ label, value }: { label: string; value: React.ReactNode }) {
+const money = (n: number) => `Rs. ${Math.round(n * 100) / 100 === Math.round(n) ? Math.round(n).toLocaleString() : n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const cap = (t: string | null | undefined) => (t ? t.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()) : "—");
+const when = (t: string) => t.slice(0, 16).replace("T", " ");
+
+// One small copy-to-clipboard button — codes, phone numbers and barcodes are what people
+// actually want to lift out of a lookup.
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
   return (
-    <div className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
-      <span className="text-xs text-gray-400">{label}</span>
-      <span className="text-sm text-gray-900 font-medium text-right">{value}</span>
-    </div>
+    <button
+      type="button"
+      onClick={() => {
+        navigator.clipboard?.writeText(text).then(
+          () => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1400);
+          },
+          () => {}
+        );
+      }}
+      className="ml-1.5 inline-flex h-5 w-5 items-center justify-center rounded-md text-gray-300 hover:bg-gray-100 hover:text-gray-700 transition"
+      title="Copy"
+      aria-label={`Copy ${text}`}
+    >
+      {copied ? <Check size={12} className="text-green-600" /> : <Copy size={12} />}
+    </button>
   );
 }
+
+type Tone = "default" | "good" | "bad" | "muted";
+const TONE_CLASS: Record<Tone, string> = {
+  default: "text-gray-900",
+  good: "text-green-700",
+  bad: "text-red-600",
+  muted: "text-gray-400",
+};
+
+interface Stat {
+  label: string;
+  value: ReactNode;
+  tone?: Tone;
+  hint?: ReactNode;
+}
+interface Action {
+  label: string;
+  to: string;
+  primary?: boolean;
+}
+// Everything a result needs to be drawn the same way whatever record it is.
+interface ResultView {
+  title: string;
+  chips?: ReactNode;
+  stats?: Stat[];
+  bar?: { used: number; label: string };
+  details: [string, ReactNode][];
+  items?: { title: string; sub: string; price: number }[];
+  actions: Action[];
+}
+
+function buildView(result: FindResult): ResultView {
+  switch (result.type) {
+    case "inventory": {
+      const d = result.data;
+      const margin = d.selling_price != null && d.cost_price != null ? d.selling_price - d.cost_price : null;
+      return {
+        title: d.product_title,
+        chips: (
+          <>
+            <Badge label={cap(d.status)} />
+            {d.size && <Badge label={`Size ${d.size}`} />}
+            {d.color && <Badge label={d.color} />}
+          </>
+        ),
+        stats: [
+          { label: "Selling price", value: d.selling_price != null ? money(d.selling_price) : "—" },
+          { label: "Cost", value: d.cost_price != null ? money(d.cost_price) : "—", tone: "muted" },
+          { label: "Margin", value: margin != null ? money(margin) : "—", tone: margin != null && margin < 0 ? "bad" : "good" },
+        ],
+        details: [
+          ["Brand", d.brand ?? "—"],
+          ["Category", d.category ?? "—"],
+          ["SKU", <>{d.sku}<CopyButton text={d.sku} /></>],
+          ["Barcode", d.barcode ? <>{d.barcode}<CopyButton text={d.barcode} /></> : "—"],
+          ...(d.sold_sale_id && d.sold_invoice ? ([["Sold on", <RefLink key="inv" to={`/sales/${d.sold_sale_id}`}>{d.sold_invoice}</RefLink>]] as [string, ReactNode][]) : []),
+        ],
+        actions: [{ label: "View product", to: `/products/${d.product_id}`, primary: true }],
+      };
+    }
+    case "sale": {
+      const d = result.data;
+      const owed = Math.max(0, d.total - d.amount_paid);
+      // An unpaid online COD order isn't "owed" by the customer while it's on its way or the
+      // courier is holding the cash — say what is actually going on.
+      const isCod = d.sale_type === "online" && d.payment_method !== "credit" && owed > 0;
+      const inTransit = !!d.delivery_status && ["pending", "packed", "dispatched"].includes(d.delivery_status);
+      const balanceStat: Stat = d.is_voided
+        ? { label: "Balance", value: "—", tone: "muted" }
+        : isCod && inTransit
+        ? { label: "COD to collect", value: money(owed), hint: "paid at the door" }
+        : isCod && d.delivery_status === "delivered" && d.delivery_partner_name
+        ? { label: `With ${d.delivery_partner_name}`, value: money(owed), hint: "settles with the courier" }
+        : owed > 0
+        ? { label: "Still owed", value: money(owed), tone: "bad" }
+        : { label: "Balance", value: "Settled", tone: "good" };
+      return {
+        title: d.invoice,
+        chips: (
+          <>
+            {d.is_voided ? <Badge label="Voided" /> : null}
+            <Badge label={d.sale_type === "online" ? "Online" : "In-store"} />
+            <Badge label={cap(d.payment_status)} />
+            {d.delivery_status && <Badge label={`Delivery: ${cap(d.delivery_status)}`} />}
+            <ExchangeTag sale={d} className="!mt-0" />
+          </>
+        ),
+        stats: [
+          { label: "Total", value: money(d.total) },
+          { label: "Paid", value: money(d.amount_paid) },
+          balanceStat,
+        ],
+        details: [
+          [
+            "Customer",
+            d.customer_id && d.customer_name ? <RefLink to={`/customers/${d.customer_id}/orders`}>{d.customer_name}</RefLink> : d.customer_name ?? d.deleted_customer_snapshot ?? "Walk-in",
+          ],
+          ["Date", when(d.date)],
+          ["Payment method", cap(d.payment_method)],
+          ...(d.delivery_partner_name ? ([["Delivery by", d.delivery_partner_name]] as [string, ReactNode][]) : []),
+        ],
+        items: d.items.map((i) => ({
+          title: i.title,
+          sub: [i.size, i.color].filter(Boolean).join(" · "),
+          price: i.unit_price,
+        })),
+        actions: [{ label: "View sale", to: `/sales/${d.id}`, primary: true }],
+      };
+    }
+    case "customer": {
+      const d = result.data;
+      return {
+        title: d.name,
+        chips: d.is_suspended ? <Badge label="Suspended" /> : undefined,
+        stats: [
+          d.balance_due > 0
+            ? { label: "Owes", value: money(d.balance_due), tone: "bad" }
+            : { label: "Owes", value: "Nothing", tone: "good", hint: d.with_courier > 0 ? `${money(d.with_courier)} with the courier` : undefined },
+          { label: "Store credit", value: d.store_credit_balance > 0 ? money(d.store_credit_balance) : "—", tone: d.store_credit_balance > 0 ? "default" : "muted" },
+          { label: "Loyalty points", value: d.loyalty_points.toLocaleString() },
+        ],
+        details: [
+          ["Customer code", <>{d.customer_code}<CopyButton text={d.customer_code} /></>],
+          ["Phone", d.phone ? <>{d.phone}<CopyButton text={d.phone} /></> : "—"],
+          ...(d.phone2 ? ([["Phone 2", <>{d.phone2}<CopyButton text={d.phone2} /></>]] as [string, ReactNode][]) : []),
+          ["Orders", d.order_count.toLocaleString()],
+          ["Last order", d.last_order_date ? d.last_order_date.slice(0, 10) : "No orders yet"],
+          ["Gender", cap(d.gender)],
+        ],
+        actions: [
+          { label: "View orders", to: `/customers/${d.id}/orders`, primary: true },
+          { label: "Payment history", to: `/customers/${d.id}/payment-history` },
+        ],
+      };
+    }
+    case "supplier": {
+      const d = result.data;
+      return {
+        title: d.name,
+        details: [
+          ["Supplier code", <>{d.supplier_code}<CopyButton text={d.supplier_code} /></>],
+          ["Phone", d.phone ? <>{d.phone}<CopyButton text={d.phone} /></> : "—"],
+          ["City", d.city ?? "—"],
+        ],
+        actions: [{ label: "Payment history", to: `/suppliers/${d.id}/payment-history`, primary: true }],
+      };
+    }
+    case "purchase": {
+      const d = result.data;
+      const toPay = Math.max(0, d.total_cost - d.amount_paid);
+      return {
+        title: d.purchase_code,
+        chips: (
+          <>
+            <Badge label={`Payment: ${cap(d.payment_status)}`} />
+            <Badge label={cap(d.fulfillment_status)} />
+          </>
+        ),
+        stats: [
+          { label: "Total cost", value: money(d.total_cost) },
+          { label: "Paid", value: money(d.amount_paid) },
+          toPay > 0 ? { label: "Still to pay", value: money(toPay), tone: "bad" } : { label: "Balance", value: "Settled", tone: "good" },
+        ],
+        details: [
+          ["Supplier", d.supplier_name],
+          ["Date", when(d.purchase_date)],
+        ],
+        actions: [{ label: "Go to Purchases", to: "/purchases", primary: true }],
+      };
+    }
+    case "staff": {
+      const d = result.data;
+      return {
+        title: d.name ?? d.username,
+        chips: <Badge label={cap(d.role)} />,
+        details: [
+          ["Username", <>{d.username}<CopyButton text={d.username} /></>],
+          ["Job title", d.job_title ?? "—"],
+          ["Phone", d.phone ? <>{d.phone}<CopyButton text={d.phone} /></> : "—"],
+        ],
+        actions: [{ label: "Go to Staff", to: "/staff", primary: true }],
+      };
+    }
+    case "transaction": {
+      const d = result.data;
+      const isIncome = d.type === "income";
+      const saleLinked = (d.category === "sale" || d.category === "sale_void") && d.reference_id;
+      return {
+        title: d.transaction_code,
+        chips: (
+          <>
+            <Badge label={isIncome ? "Income" : "Expense"} />
+            <Badge label={cap(d.category)} />
+            {d.payment_method && <Badge label={cap(d.payment_method)} />}
+          </>
+        ),
+        stats: [{ label: isIncome ? "Money in" : "Money out", value: `${isIncome ? "+" : "−"} ${money(d.amount)}`, tone: isIncome ? "good" : "bad" }],
+        details: [
+          ["Date", when(d.entry_date)],
+          ["Category", cap(d.category)],
+          ["Method", cap(d.payment_method)],
+          ...(d.notes ? ([["Notes", d.notes]] as [string, ReactNode][]) : []),
+        ],
+        actions: [
+          { label: "Go to Cash Book", to: "/cash-book", primary: true },
+          ...(saleLinked ? [{ label: "Open the invoice", to: `/sales/${d.reference_id}` }] : []),
+        ],
+      };
+    }
+    case "coupon": {
+      const d = result.data;
+      const expired = !!d.expires_at && new Date(d.expires_at) < new Date();
+      return {
+        title: d.code,
+        chips: <Badge label={!d.is_active ? "Inactive" : expired ? "Expired" : "Active"} />,
+        stats: [
+          { label: "Reward", value: d.discount_type === "percent" ? `${d.discount_value}% off` : `${money(d.discount_value)} off` },
+          { label: "Expires", value: d.expires_at ? d.expires_at.slice(0, 10) : "Never", tone: expired ? "bad" : "default" },
+        ],
+        details: [],
+        actions: [{ label: "Go to Promotions", to: "/promotions", primary: true }],
+      };
+    }
+    case "gift_voucher": {
+      const d = result.data;
+      const expired = !!d.expires_at && new Date(d.expires_at) < new Date();
+      const status = !d.is_enabled ? "Disabled" : !d.activated_at ? "Not yet sold" : expired ? "Expired" : d.remaining_value <= 0 ? "Used up" : "Active";
+      const used = Math.max(0, d.initial_value - d.remaining_value);
+      return {
+        title: d.code,
+        chips: <Badge label={status} />,
+        stats: [
+          { label: "Balance left", value: money(d.remaining_value), tone: d.remaining_value > 0 && status === "Active" ? "good" : "muted" },
+          { label: "Face value", value: money(d.initial_value) },
+          { label: "Used", value: money(used) },
+        ],
+        bar: d.initial_value > 0 ? { used: Math.min(1, used / d.initial_value), label: `${Math.round((used / d.initial_value) * 100)}% used` } : undefined,
+        details: [
+          ["Validity", d.activated_at ? `${d.validity_days} days from sale` : `${d.validity_days} days, once sold`],
+          ...(d.activated_at ? ([["Sold", d.activated_at.slice(0, 10)]] as [string, ReactNode][]) : []),
+          ...(d.expires_at ? ([["Expires", d.expires_at.slice(0, 10)]] as [string, ReactNode][]) : []),
+          ...(d.notes ? ([["Notes", d.notes]] as [string, ReactNode][]) : []),
+        ],
+        actions: [{ label: "Go to Promotions", to: "/promotions", primary: true }],
+      };
+    }
+  }
+}
+
+// What can be looked up, shown before anything has been — so the empty page teaches itself.
+const LOOKUP_HINTS: { icon: typeof Package; label: string; example: string }[] = [
+  { icon: Package, label: "Product unit", example: "barcode or SKU" },
+  { icon: Receipt, label: "Invoice", example: "OCD283X0320" },
+  { icon: User, label: "Customer", example: "C3100035F" },
+  { icon: Truck, label: "Supplier", example: "supplier code" },
+  { icon: ShoppingBag, label: "Purchase", example: "P26100011" },
+  { icon: Landmark, label: "Cash Book entry", example: "TXN-0084" },
+  { icon: Ticket, label: "Coupon", example: "coupon code" },
+  { icon: Gift, label: "Gift voucher", example: "voucher code" },
+  { icon: UserCog, label: "Staff", example: "username" },
+];
 
 export default function FindPage() {
   const navigate = useNavigate();
@@ -186,15 +481,23 @@ export default function FindPage() {
       setSuggestions([]);
       return;
     }
+    // `stale` stops an answer that arrives after the person has moved on — a code scanned and
+    // looked up while a name search was still in flight — from popping the list back open.
+    let stale = false;
     const timer = setTimeout(() => {
       api
         .get<SearchSuggestion[]>(`/find/search?q=${encodeURIComponent(q)}`)
-        .then((found) => setSuggestions(found))
+        .then((found) => {
+          if (!stale) setSuggestions(found);
+        })
         .catch(() => {
           /* a failed suggestion fetch is silent — the exact-match Find button still works */
         });
     }, 250);
-    return () => clearTimeout(timer);
+    return () => {
+      stale = true;
+      clearTimeout(timer);
+    };
   }, [code, result]);
 
   function selectSuggestion(s: SearchSuggestion) {
@@ -204,13 +507,13 @@ export default function FindPage() {
     navigate(s.route);
   }
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    const trimmed = code.trim();
+  async function lookup(raw: string) {
+    const trimmed = raw.trim();
     if (!trimmed) return;
     setLoading(true);
     setError(null);
     setResult(null);
+    setSuggestions([]);
     try {
       const found = await api.get<FindResult>(`/find?code=${encodeURIComponent(trimmed)}`);
       setResult(found);
@@ -223,6 +526,11 @@ export default function FindPage() {
       setHistoryIndex(-1);
       inputRef.current?.focus();
     }
+  }
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    lookup(code);
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
@@ -259,193 +567,99 @@ export default function FindPage() {
     if (!result) return null;
     const meta = TYPE_META[result.type];
     const Icon = meta.icon;
+    const view = buildView(result);
+    const primary = view.actions.find((a) => a.primary);
+    const others = view.actions.filter((a) => !a.primary);
 
     return (
-      <Card>
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2.5">
-            <span className="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0">
-              <Icon size={16} className="text-gray-700" />
+      <Card className="p-0 overflow-hidden">
+        <div className="flex flex-wrap items-start justify-between gap-4 px-6 pt-6">
+          <div className="flex min-w-0 items-start gap-3.5">
+            <span className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl bg-gray-100">
+              <Icon size={19} className="text-gray-700" />
             </span>
-            <Badge label={meta.label} tone="neutral" />
+            <div className="min-w-0">
+              <p className="text-[11px] font-medium uppercase tracking-wider text-gray-400">{meta.label}</p>
+              <h2 className="break-words text-xl font-semibold leading-tight text-gray-900">{view.title}</h2>
+              {view.chips && <div className="mt-2 flex flex-wrap items-center gap-1.5">{view.chips}</div>}
+            </div>
+          </div>
+          <div className="flex flex-shrink-0 flex-wrap items-center gap-2">
+            {others.map((a) => (
+              <Button key={a.to + a.label} onClick={() => navigate(a.to)}>
+                {a.label}
+              </Button>
+            ))}
+            {primary && (
+              <Button variant="primary" onClick={() => navigate(primary.to)} className="inline-flex items-center gap-1.5">
+                {primary.label} <ArrowRight size={14} />
+              </Button>
+            )}
           </div>
         </div>
 
-        {result.type === "inventory" && (
-          <>
-            <h3 className="text-base font-semibold text-gray-900 mb-3">{result.data.product_title}</h3>
-            <Row label="Brand" value={result.data.brand ?? "—"} />
-            <Row label="Category" value={result.data.category ?? "—"} />
-            <Row label="Size / Color" value={`${result.data.size ?? "—"} / ${result.data.color ?? "—"}`} />
-            <Row label="SKU" value={result.data.sku} />
-            <Row label="Barcode" value={result.data.barcode ?? "—"} />
-            <Row label="Status" value={<span className="capitalize">{result.data.status}</span>} />
-            <Button variant="primary" className="w-full mt-4 justify-center" onClick={() => navigate(`/products/${result.data.product_id}`)}>
-              View product <ArrowRight size={14} className="ml-1.5" />
-            </Button>
-          </>
-        )}
-
-        {result.type === "sale" && (
-          <>
-            <h3 className="text-base font-semibold text-gray-900 mb-3">
-              {result.data.invoice}
-              {result.data.is_voided ? <span className="ml-2"><Badge label="voided" tone="danger" /></span> : null}
-            </h3>
-            <Row label="Customer" value={result.data.customer_name ?? result.data.deleted_customer_snapshot ?? "Walk-in"} />
-            <Row label="Date" value={result.data.date.slice(0, 16).replace("T", " ")} />
-            <Row label="Type" value={result.data.sale_type === "online" ? "Online" : "In-store"} />
-            <Row label="Total" value={`Rs. ${result.data.total.toLocaleString()}`} />
-            <Row label="Paid" value={`Rs. ${result.data.amount_paid.toLocaleString()}`} />
-            <Row label="Status" value={<span className="capitalize">{result.data.payment_status}</span>} />
-            {(result.data.exchange_out_status || result.data.exchange_in_status) && (
-              <Row label="Exchange" value={<ExchangeTag sale={result.data} className="!mt-0 justify-end" />} />
+        {view.stats && (
+          <div className="mx-6 mt-5 overflow-hidden rounded-xl bg-gray-100">
+            <div className={`grid gap-px ${view.stats.length >= 3 ? "grid-cols-1 sm:grid-cols-3" : view.stats.length === 2 ? "grid-cols-2" : "grid-cols-1"}`}>
+              {view.stats.map((st) => (
+                <div key={st.label} className="bg-gray-50 px-4 py-3">
+                  <p className="text-xs text-gray-400">{st.label}</p>
+                  <p className={`mt-0.5 text-lg font-semibold tabular-nums ${TONE_CLASS[st.tone ?? "default"]}`}>{st.value}</p>
+                  {st.hint && <p className="mt-0.5 text-xs text-gray-400">{st.hint}</p>}
+                </div>
+              ))}
+            </div>
+            {view.bar && (
+              <div className="bg-gray-50 px-4 pb-3">
+                <div className="h-1.5 overflow-hidden rounded-full bg-gray-200">
+                  <div className="h-full rounded-full bg-gray-900" style={{ width: `${Math.round(view.bar.used * 100)}%` }} />
+                </div>
+                <p className="mt-1 text-xs text-gray-400">{view.bar.label}</p>
+              </div>
             )}
-            <Button variant="primary" className="w-full mt-4 justify-center" onClick={() => navigate(`/sales/${result.data.id}`)}>
-              View sale <ArrowRight size={14} className="ml-1.5" />
-            </Button>
-          </>
+          </div>
         )}
 
-        {result.type === "customer" && (
-          <>
-            <h3 className="text-base font-semibold text-gray-900 mb-3">
-              {result.data.name}
-              {result.data.is_suspended ? <span className="ml-2"><Badge label="suspended" tone="danger" /></span> : null}
-            </h3>
-            <Row label="Customer code" value={result.data.customer_code} />
-            <Row label="Phone" value={result.data.phone ?? "—"} />
-            {result.data.phone2 && <Row label="Phone 2" value={result.data.phone2} />}
-            <Row label="Gender" value={<span className="capitalize">{result.data.gender}</span>} />
-            <Button variant="primary" className="w-full mt-4 justify-center" onClick={() => navigate(`/customers/${result.data.id}/orders`)}>
-              View orders <ArrowRight size={14} className="ml-1.5" />
-            </Button>
-          </>
+        {view.details.length > 0 && (
+          <dl className="grid grid-cols-1 gap-x-10 gap-y-3.5 px-6 py-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+            {view.details.map(([label, value]) => (
+              <div key={label} className="min-w-0">
+                <dt className="text-xs text-gray-400">{label}</dt>
+                <dd className="mt-0.5 break-words text-sm font-medium text-gray-900">{value}</dd>
+              </div>
+            ))}
+          </dl>
         )}
 
-        {result.type === "supplier" && (
-          <>
-            <h3 className="text-base font-semibold text-gray-900 mb-3">{result.data.name}</h3>
-            <Row label="Supplier code" value={result.data.supplier_code} />
-            <Row label="Phone" value={result.data.phone ?? "—"} />
-            <Row label="City" value={result.data.city ?? "—"} />
-            <Button
-              variant="primary"
-              className="w-full mt-4 justify-center"
-              onClick={() => navigate(`/suppliers/${result.data.id}/payment-history`)}
-            >
-              View payment history <ArrowRight size={14} className="ml-1.5" />
-            </Button>
-          </>
+        {view.items && view.items.length > 0 && (
+          <div className="border-t border-gray-100 px-6 py-4">
+            <p className="mb-2 text-xs font-medium text-gray-400">
+              {view.items.length} item{view.items.length === 1 ? "" : "s"}
+            </p>
+            <ul className="divide-y divide-gray-50">
+              {view.items.slice(0, 6).map((it, i) => (
+                <li key={i} className="flex items-baseline justify-between gap-3 py-1.5 text-sm">
+                  <span className="min-w-0 truncate text-gray-900">
+                    {it.title}
+                    {it.sub && <span className="ml-2 text-xs text-gray-400">{it.sub}</span>}
+                  </span>
+                  <span className="flex-shrink-0 tabular-nums text-gray-600">{money(it.price)}</span>
+                </li>
+              ))}
+            </ul>
+            {view.items.length > 6 && <p className="pt-1 text-xs text-gray-400">+ {view.items.length - 6} more on the sale page</p>}
+          </div>
         )}
-
-        {result.type === "purchase" && (
-          <>
-            <h3 className="text-base font-semibold text-gray-900 mb-3">{result.data.purchase_code}</h3>
-            <Row label="Supplier" value={result.data.supplier_name} />
-            <Row label="Date" value={result.data.purchase_date.slice(0, 16).replace("T", " ")} />
-            <Row label="Total cost" value={`Rs. ${result.data.total_cost.toLocaleString()}`} />
-            <Row label="Paid" value={`Rs. ${result.data.amount_paid.toLocaleString()}`} />
-            <Row label="Payment" value={<span className="capitalize">{result.data.payment_status}</span>} />
-            <Row label="Fulfillment" value={<span className="capitalize">{result.data.fulfillment_status}</span>} />
-            <Button variant="primary" className="w-full mt-4 justify-center" onClick={() => navigate(`/purchases`)}>
-              Go to Purchases <ArrowRight size={14} className="ml-1.5" />
-            </Button>
-          </>
-        )}
-
-        {result.type === "staff" && (
-          <>
-            <h3 className="text-base font-semibold text-gray-900 mb-3">{result.data.name ?? result.data.username}</h3>
-            <Row label="Username" value={result.data.username} />
-            <Row label="Role" value={<span className="capitalize">{result.data.role}</span>} />
-            <Row label="Job title" value={result.data.job_title ?? "—"} />
-            <Row label="Phone" value={result.data.phone ?? "—"} />
-            <Button variant="primary" className="w-full mt-4 justify-center" onClick={() => navigate(`/staff`)}>
-              Go to Staff <ArrowRight size={14} className="ml-1.5" />
-            </Button>
-          </>
-        )}
-
-        {result.type === "transaction" && (
-          <>
-            <h3 className="text-base font-semibold text-gray-900 mb-3">{result.data.transaction_code}</h3>
-            <Row label="Date" value={result.data.entry_date.slice(0, 16).replace("T", " ")} />
-            <Row
-              label="Type"
-              value={
-                <span className={result.data.type === "income" ? "text-green-600" : "text-red-500"}>
-                  {result.data.type === "income" ? "Income" : "Expense"}
-                </span>
-              }
-            />
-            <Row label="Category" value={<span className="capitalize">{result.data.category.replace(/_/g, " ")}</span>} />
-            <Row label="Method" value={result.data.payment_method ? <span className="capitalize">{result.data.payment_method.replace("_", " ")}</span> : "—"} />
-            <Row label="Amount" value={`Rs. ${result.data.amount.toLocaleString()}`} />
-            {result.data.notes && <Row label="Notes" value={result.data.notes} />}
-            <Button variant="primary" className="w-full mt-4 justify-center" onClick={() => navigate(`/cash-book`)}>
-              Go to Cash Book <ArrowRight size={14} className="ml-1.5" />
-            </Button>
-          </>
-        )}
-
-        {result.type === "coupon" && (
-          <>
-            <h3 className="text-base font-semibold text-gray-900 mb-3">
-              {result.data.code}
-              {!result.data.is_active ? (
-                <span className="ml-2"><Badge label="inactive" tone="danger" /></span>
-              ) : result.data.expires_at && new Date(result.data.expires_at) < new Date() ? (
-                <span className="ml-2"><Badge label="expired" tone="danger" /></span>
-              ) : null}
-            </h3>
-            <Row
-              label="Reward"
-              value={result.data.discount_type === "percent" ? `${result.data.discount_value}% off` : `Rs. ${result.data.discount_value.toLocaleString()} off`}
-            />
-            <Row label="Expires" value={result.data.expires_at ? result.data.expires_at.slice(0, 10) : "Never"} />
-            <Button variant="primary" className="w-full mt-4 justify-center" onClick={() => navigate(`/promotions`)}>
-              Go to Promotions <ArrowRight size={14} className="ml-1.5" />
-            </Button>
-          </>
-        )}
-
-        {result.type === "gift_voucher" && (
-          <>
-            <h3 className="text-base font-semibold text-gray-900 mb-3">
-              {result.data.code}
-              {!result.data.is_enabled ? (
-                <span className="ml-2"><Badge label="disabled" tone="danger" /></span>
-              ) : !result.data.activated_at ? (
-                <span className="ml-2"><Badge label="not yet sold" tone="warning" /></span>
-              ) : result.data.expires_at && new Date(result.data.expires_at) < new Date() ? (
-                <span className="ml-2"><Badge label="expired" tone="danger" /></span>
-              ) : result.data.remaining_value <= 0 ? (
-                <span className="ml-2"><Badge label="used up" tone="neutral" /></span>
-              ) : (
-                <span className="ml-2"><Badge label="active" tone="success" /></span>
-              )}
-            </h3>
-            <Row label="Balance" value={`Rs. ${result.data.remaining_value.toLocaleString()} / Rs. ${result.data.initial_value.toLocaleString()}`} />
-            <Row label="Validity" value={result.data.activated_at ? `${result.data.validity_days} days from sale` : `${result.data.validity_days} days, once sold`} />
-            {result.data.activated_at && <Row label="Sold" value={result.data.activated_at.slice(0, 10)} />}
-            {result.data.expires_at && <Row label="Expires" value={result.data.expires_at.slice(0, 10)} />}
-            {result.data.notes && <Row label="Notes" value={result.data.notes} />}
-            <Button variant="primary" className="w-full mt-4 justify-center" onClick={() => navigate(`/promotions`)}>
-              Go to Promotions <ArrowRight size={14} className="ml-1.5" />
-            </Button>
-          </>
-        )}
+        {!(view.items && view.items.length > 0) && view.details.length > 0 && <div className="h-1" />}
       </Card>
     );
   }
 
+  const showHints = !result && !error && !loading;
+
   return (
     <div>
-      <PageHeader
-        title="Find"
-        subtitle="Scan or type an exact code (barcode, SKU, invoice, customer/supplier/purchase code, transaction code, coupon/gift voucher code, username) — or just type a name (or “gift”, “voucher”, “coupon”) to search."
-      />
+      <PageHeader title="Find" subtitle="Scan or type a code, or start typing a name — then open whatever it turns up." />
 
       <Card className="mb-5">
         <form onSubmit={handleSubmit} className="flex gap-2">
@@ -456,7 +670,7 @@ export default function FindPage() {
               value={code}
               onChange={(e) => setCode(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Scan an exact code, or type a name to search... (↑/↓ for recent, Esc to clear)"
+              placeholder="Scan a code, or type a name…"
               className="pl-10"
             />
 
@@ -488,14 +702,79 @@ export default function FindPage() {
             )}
           </div>
           <Button type="submit" variant="primary" disabled={loading || !code.trim()} className="inline-flex items-center gap-1.5">
-            {loading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+            {loading ? <Loader2 size={14} className="animate-spin" /> : <CornerDownLeft size={14} />}
             Find
           </Button>
         </form>
+        <p className="mt-2.5 text-xs text-gray-400">
+          <kbd className="rounded border border-gray-200 bg-gray-50 px-1 text-[10px] text-gray-500">↑</kbd> <kbd className="rounded border border-gray-200 bg-gray-50 px-1 text-[10px] text-gray-500">↓</kbd> recent codes ·{" "}
+          <kbd className="rounded border border-gray-200 bg-gray-50 px-1 text-[10px] text-gray-500">Esc</kbd> clear ·{" "}
+          <kbd className="rounded border border-gray-200 bg-gray-50 px-1 text-[10px] text-gray-500">/</kbd> jump here
+        </p>
+
+        {history.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-gray-100 pt-3">
+            <History size={13} className="mr-0.5 text-gray-300" />
+            {history.slice(0, 8).map((h) => (
+              <button
+                key={h}
+                type="button"
+                onClick={() => lookup(h)}
+                className="rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-700 hover:bg-gray-200 transition"
+              >
+                {h}
+              </button>
+            ))}
+          </div>
+        )}
       </Card>
 
-      {error && <ErrorText>{error}</ErrorText>}
+      {error && (
+        <div className="flex items-start gap-3 rounded-2xl border border-red-100 bg-red-50 px-4 py-3.5">
+          <span className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-white">
+            <Search size={13} className="text-red-500" />
+          </span>
+          <div>
+            <p className="text-sm font-medium text-red-700">{error}</p>
+            <p className="mt-0.5 text-xs text-red-500/80">Check the code for typos, or type a name to search instead.</p>
+          </div>
+        </div>
+      )}
+      {loading && !result && (
+        <Card>
+          <div className="flex animate-pulse items-start gap-3.5">
+            <span className="h-11 w-11 rounded-2xl bg-gray-100" />
+            <div className="flex-1 space-y-2.5 pt-1">
+              <div className="h-3 w-24 rounded bg-gray-100" />
+              <div className="h-5 w-48 rounded bg-gray-100" />
+              <div className="h-14 rounded-xl bg-gray-50" />
+            </div>
+          </div>
+        </Card>
+      )}
       {renderResult()}
+
+      {showHints && (
+        <div>
+          <p className="mb-2.5 text-xs font-medium text-gray-400">What you can look up</p>
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3 xl:grid-cols-5">
+            {LOOKUP_HINTS.map((h) => {
+              const HIcon = h.icon;
+              return (
+                <div key={h.label} className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-3.5 py-3">
+                  <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-gray-100">
+                    <HIcon size={14} className="text-gray-600" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-gray-900">{h.label}</span>
+                    <span className="block truncate text-xs text-gray-400">{h.example}</span>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

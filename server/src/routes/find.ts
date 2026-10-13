@@ -3,6 +3,7 @@ import { db } from "../db/connection";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth, requireRole } from "../lib/auth";
 import { SALE_EXCHANGE_FLAGS_SQL } from "../lib/exchanges";
+import { CALC_SUBQUERY } from "./customers";
 
 export const findRouter = Router();
 
@@ -25,7 +26,16 @@ findRouter.get(
     const unit = db
       .prepare(
         `SELECT inventory.id, inventory.product_id, inventory.sku, inventory.barcode, inventory.size, inventory.color, inventory.status,
-                products.product_title, products.brand, products.category
+                inventory.selling_price, inventory.cost_price,
+                products.product_title, products.brand, products.category,
+                CASE WHEN inventory.status = 'sold' THEN (
+                  SELECT sales.id FROM sale_items si JOIN sales ON sales.id = si.sale_id
+                  WHERE si.inventory_id = inventory.id AND sales.is_voided = 0 AND sales.status = 'completed'
+                  ORDER BY sales.id DESC LIMIT 1) END AS sold_sale_id,
+                CASE WHEN inventory.status = 'sold' THEN (
+                  SELECT sales.invoice FROM sale_items si JOIN sales ON sales.id = si.sale_id
+                  WHERE si.inventory_id = inventory.id AND sales.is_voided = 0 AND sales.status = 'completed'
+                  ORDER BY sales.id DESC LIMIT 1) END AS sold_invoice
          FROM inventory
          JOIN products ON products.id = inventory.product_id
          WHERE LOWER(inventory.barcode) = LOWER(?) OR LOWER(inventory.sku) = LOWER(?)`
@@ -36,18 +46,37 @@ findRouter.get(
     const sale = db
       .prepare(
         `SELECT sales.id, sales.invoice, sales.date, sales.total, sales.amount_paid, sales.payment_status,
-                sales.sale_type, sales.is_voided, customers.name as customer_name, sales.deleted_customer_snapshot,
+                sales.sale_type, sales.payment_method, sales.is_voided, sales.customer_id,
+                customers.name as customer_name, sales.deleted_customer_snapshot,
+                deliveries.delivery_status, COALESCE(delivery_partners.name, deliveries.delivery_partner) AS delivery_partner_name,
                 ${SALE_EXCHANGE_FLAGS_SQL}
          FROM sales
          LEFT JOIN customers ON customers.id = sales.customer_id
+         LEFT JOIN deliveries ON deliveries.sale_id = sales.id
+         LEFT JOIN delivery_partners ON delivery_partners.code = deliveries.delivery_partner
          WHERE LOWER(sales.invoice) = LOWER(?)`
       )
-      .get(code);
-    if (sale) return res.json({ type: "sale", data: sale });
+      .get(code) as any;
+    if (sale) {
+      // What was sold, so the preview says more than a total.
+      const items = db
+        .prepare(
+          `SELECT COALESCE(products.product_title, si.product_snapshot, 'Item') AS title, inventory.size, inventory.color, si.unit_price
+           FROM sale_items si
+           LEFT JOIN inventory ON inventory.id = si.inventory_id
+           LEFT JOIN products ON products.id = inventory.product_id
+           WHERE si.sale_id = ? ORDER BY si.id`
+        )
+        .all(sale.id);
+      return res.json({ type: "sale", data: { ...sale, items } });
+    }
 
     const customer = db
       .prepare(
-        `SELECT id, customer_code, name, phone, phone2, gender, is_suspended FROM customers WHERE LOWER(customer_code) = LOWER(?)`
+        `SELECT customers.id, customers.customer_code, customers.name, customers.phone, customers.phone2, customers.gender, customers.is_suspended,
+                (SELECT COUNT(*) FROM sales WHERE customer_id = customers.id AND is_voided = 0 AND status = 'completed') AS order_count,
+                ${CALC_SUBQUERY}
+         FROM customers WHERE LOWER(customers.customer_code) = LOWER(?)`
       )
       .get(code);
     if (customer) return res.json({ type: "customer", data: customer });
@@ -70,7 +99,7 @@ findRouter.get(
 
     const transaction = db
       .prepare(
-        `SELECT id, transaction_code, entry_date, type, category, payment_method, amount, notes
+        `SELECT id, transaction_code, entry_date, type, category, payment_method, reference_id, amount, notes
          FROM cash_book WHERE LOWER(transaction_code) = LOWER(?)`
       )
       .get(code);
