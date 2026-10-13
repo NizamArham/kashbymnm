@@ -1,16 +1,16 @@
-import { useEffect, useState, Fragment, useRef } from "react";
-import { Package, ChevronDown, ChevronRight, Plus, X, Pencil, MinusCircle, CheckCircle, Search, Trash2, Settings, Receipt } from "lucide-react";
+import { useEffect, useMemo, useState, Fragment, useRef } from "react";
+import { useNavigate } from "react-router-dom";
+import { Package, ChevronDown, ChevronRight, Plus, X, Pencil, MinusCircle, CheckCircle, Search, Trash2, Settings, Receipt, RefreshCw, Loader2, Boxes, SquarePen } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Product, InventoryUnit, Supplier, RemovalReason, Purchase, Category, SubCategory } from "../lib/types";
 import { compareSizes } from "../lib/sizeSort";
-import { splitCategory, extractGenderSuffix, composeCategory } from "../lib/categoryTree";
+import { splitCategory, extractGenderSuffix, composeCategory, buildCategoryTree, buildGenderCategoryTree, splitCategoryWithGender, ProductGender } from "../lib/categoryTree";
+import { GenderNavTabs, GenderNavPanel, GenderNavItem } from "../components/GenderNav";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { useSortableData } from "../lib/useSortableData";
 import { useCopyToClipboard } from "../lib/useCopyToClipboard";
 import {
-  PageHeader,
   Card,
-  StatCard,
   Table,
   Th,
   Td,
@@ -38,7 +38,15 @@ const LOW_STOCK_THRESHOLD = 5;
 const removalReasons: RemovalReason[] = ["Damaged", "Gifted", "Staff Use", "Stolen", "Lost", "Other"];
 
 type ExpandedTab = "stock" | "restock" | "details";
-type ProductSortKey = "title" | "brand" | "category" | "price" | "qty";
+type ProductSortKey = "title" | "subCategory" | "brand" | "price" | "qty";
+const ALL = "__all__";
+
+interface SelectedFilter {
+  gender?: ProductGender;
+  category?: string;
+  subCategory?: string;
+  brand?: string;
+}
 
 interface VariantSummary {
   color: string;
@@ -530,6 +538,11 @@ export default function ManageProductsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
   useKeyboardShortcut("/", () => searchInputRef.current?.focus());
+  const navigate = useNavigate();
+  // Browsing — the same Men / Women / Kids tabs, category panel and brand filter as Stocks.
+  const [activeGender, setActiveGender] = useState<ProductGender | null>(null);
+  const [selectedFilter, setSelectedFilter] = useState<SelectedFilter>({});
+  const [hoveredNav, setHoveredNav] = useState<string | null>(null);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [inventoryByProduct, setInventoryByProduct] = useState<Record<number, InventoryUnit[]>>({});
   const [loading, setLoading] = useState(true);
@@ -846,7 +859,38 @@ export default function ManageProductsPage() {
     }
   }
 
+  const flatTree = useMemo(() => buildCategoryTree(products), [products]);
+  const genderGroups = useMemo(() => buildGenderCategoryTree(products), [products]);
+  const genderNavItems: GenderNavItem[] = [
+    { value: ALL, label: "All", count: products.length, categories: flatTree },
+    ...genderGroups.map((g) => ({ value: g.gender, label: g.label, count: g.count, categories: g.categories })),
+  ];
+  const hoveredItem = genderNavItems.find((i) => i.value === hoveredNav && i.categories.length > 0);
+
+  function selectGender(value: string) {
+    const gender = value === ALL ? null : (value as ProductGender);
+    setActiveGender(gender);
+    setSelectedFilter(gender ? { gender } : {});
+  }
+  function selectCategory(genderValue: string, category: string) {
+    const gender = genderValue === ALL ? null : (genderValue as ProductGender);
+    setActiveGender(gender);
+    setSelectedFilter({ gender: gender ?? undefined, category });
+    setHoveredNav(null);
+  }
+  function selectSubCategory(genderValue: string, category: string, subCategory: string) {
+    const gender = genderValue === ALL ? null : (genderValue as ProductGender);
+    setActiveGender(gender);
+    setSelectedFilter({ gender: gender ?? undefined, category, subCategory });
+    setHoveredNav(null);
+  }
+
   const filteredProducts = products.filter((p) => {
+    const parts = splitCategoryWithGender(p.category);
+    if (selectedFilter.gender && parts.gender !== selectedFilter.gender) return false;
+    if (selectedFilter.category && parts.category !== selectedFilter.category) return false;
+    if (selectedFilter.subCategory && parts.subCategory !== selectedFilter.subCategory) return false;
+    if (selectedFilter.brand && !(p.brand ?? "").toLowerCase().includes(selectedFilter.brand.toLowerCase())) return false;
     const q = searchQuery.trim().toLowerCase();
     if (!q) return true;
     return (
@@ -864,8 +908,8 @@ export default function ManageProductsPage() {
           return p.product_title.toLowerCase();
         case "brand":
           return (p.brand ?? "").toLowerCase();
-        case "category":
-          return (p.category ?? "").toLowerCase();
+        case "subCategory":
+          return splitCategory(p.category).subCategory.toLowerCase();
         case "price":
           return p.selling_price;
         case "qty":
@@ -875,111 +919,219 @@ export default function ManageProductsPage() {
     "title"
   );
 
+  const showSubCategoryColumn = !selectedFilter.subCategory;
+  const visibleUnits = filteredProducts.reduce((sum, p) => sum + p.qty, 0);
+
+  // Opens a product straight on one of its tabs (the row's menu: Restock, Edit details).
+  function manageProduct(p: Product, tab: ExpandedTab) {
+    if (expandedId !== p.id) toggleExpand(p);
+    setExpandedTab(tab);
+    if (tab === "restock") openRestockTab(p);
+    if (tab === "details") setIsEditingDetails(true);
+  }
+
   const { copy: copyValue, tooltip: copyTooltip } = useCopyToClipboard();
 
-  const totalUnitsInStock = products.reduce((sum, p) => sum + p.qty, 0);
-  const distinctCategoryCount = new Set(products.map((p) => splitCategory(p.category).category).filter(Boolean)).size;
   const editSelectedCategory = categories.find((c) => c.name === editForm.category);
 
   return (
-    <div className="flex flex-col h-full min-h-0">
-      {/* Fixed top section — never scrolls */}
-      <div className="flex-shrink-0">
-        <PageHeader
-          title="Manage products"
-          subtitle="Click any product to manage it."
-          action={
-            <Button onClick={() => setShowManageCategoriesModal(true)} className="inline-flex items-center gap-1.5">
-              <Settings size={14} />
-              Manage categories
-            </Button>
-          }
-        />
+    <div>
+      {/* ================= Header — the same as Stocks ================= */}
+      <div
+        className="sticky top-0 z-20 pb-3 mb-5 bg-white/95 backdrop-blur-sm border-b border-gray-200 relative"
+        onMouseLeave={() => setHoveredNav(null)}
+      >
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+          <button
+            onClick={() => selectGender(ALL)}
+            className="text-2xl font-bold text-gray-900 tracking-tight hover:text-gray-600 transition-colors flex-shrink-0"
+          >
+            Manage
+          </button>
 
-        {!loading && products.length > 0 && (
-          <div className="grid grid-cols-3 gap-3 mb-4">
-            <StatCard label="Products" value={products.length.toLocaleString()} />
-            <StatCard label="Units in stock" value={totalUnitsInStock.toLocaleString()} />
-            <StatCard label="Categories" value={distinctCategoryCount.toLocaleString()} />
+          <GenderNavTabs items={genderNavItems} activeValue={activeGender ?? ALL} onHover={setHoveredNav} onSelectGender={selectGender} />
+
+          <div className="flex items-center gap-2 flex-1 min-w-[240px]">
+            <div className="relative flex-1 min-w-0">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <Search size={14} className="text-gray-400" />
+              </div>
+              <Input
+                ref={searchInputRef}
+                className="pl-8 pr-7 py-2 text-sm"
+                placeholder="Search product, brand, category…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    setSearchQuery("");
+                    searchInputRef.current?.blur();
+                  }
+                }}
+              />
+              {searchQuery && (
+                <button onClick={() => setSearchQuery("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+            <button
+              onClick={load}
+              disabled={loading}
+              className="p-2.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all"
+              title="Refresh"
+            >
+              <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
+            </button>
           </div>
-        )}
 
-        {error && <ErrorText>{error}</ErrorText>}
+          {/* What's special about Manage: adding to the catalogue. */}
+          <Button variant="primary" onClick={() => navigate("/products/add")} className="inline-flex flex-shrink-0 items-center gap-1.5">
+            <Plus size={14} />
+            Add product
+          </Button>
+        </div>
 
-        {!loading && products.length > 0 && (
-          <div className="relative mb-4 max-w-md">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search products..."
-              className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-gray-400"
-            />
-          </div>
+        {hoveredItem && (
+          <GenderNavPanel
+            key={hoveredItem.value}
+            item={hoveredItem}
+            selectedGender={selectedFilter.gender ?? ALL}
+            selectedCategory={selectedFilter.category}
+            selectedSubCategory={selectedFilter.subCategory}
+            onSelectCategory={selectCategory}
+            onSelectSubCategory={selectSubCategory}
+          />
         )}
       </div>
 
-      {/* Scrollable table region — fills remaining height */}
-      <div className="flex-1 min-h-0">
-        {loading ? (
-          <p className="text-sm text-gray-400">Loading...</p>
-        ) : products.length === 0 ? (
-          <EmptyState icon={Package} title="No products yet" subtitle="Add one to get started" />
-        ) : filteredProducts.length === 0 ? (
-          <EmptyState icon={Search} title="No products match your search" subtitle={`Nothing found for "${searchQuery}"`} />
-        ) : (
-          <Card className="p-0 overflow-hidden h-full flex flex-col">
-            <div className="flex-1 min-h-0 overflow-y-auto">
-              <Table>
-                <thead className="sticky top-0 z-10 bg-white">
-                  <tr>
-                    <Th className="w-8"></Th>
-                    <SortHeader<ProductSortKey> label="Product title" sortKey="title" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
-                    <SortHeader<ProductSortKey> label="Brand" sortKey="brand" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
-                    <SortHeader<ProductSortKey> label="Category" sortKey="category" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
-                    <SortHeader<ProductSortKey> label="Selling price" sortKey="price" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
-                    <SortHeader<ProductSortKey> label="In stock" sortKey="qty" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
-                    <Th className="w-10">{null}</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortedProducts.map((p) => {
-                    const isExpanded = expandedId === p.id;
-                    const units = inventoryByProduct[p.id] ?? [];
+      {/* ---- Active filter chips ---- */}
+      {selectedFilter.brand && (
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <button
+            onClick={() => setSelectedFilter((f) => ({ ...f, brand: undefined }))}
+            className="inline-flex items-center gap-1.5 text-xs bg-gray-100 text-gray-900 hover:bg-gray-200 rounded-full pl-2.5 pr-1.5 py-1 transition"
+          >
+            Brand: {selectedFilter.brand}
+            <X size={12} />
+          </button>
+        </div>
+      )}
 
-                    return (
-                      <Fragment key={p.id}>
-                        <tr onClick={() => toggleExpand(p)} className="cursor-pointer hover:bg-gray-50">
-                          <Td className="w-8">
-                            {isExpanded ? <ChevronDown size={14} className="text-gray-400" /> : <ChevronRight size={14} className="text-gray-400" />}
-                          </Td>
-                          <Td className="font-medium">{p.product_title}</Td>
-                          <Td>{p.brand ?? "—"}</Td>
-                          <Td>{p.category ?? "—"}</Td>
-                          <Td>Rs. {p.selling_price.toLocaleString()}</Td>
-                          <Td>
-                            <div className="flex items-center gap-2">
-                              <span>{p.qty}</span>
-                              {p.qty < LOW_STOCK_THRESHOLD && (
-                                <Badge label="Low" tone="warning" />
-                              )}
-                            </div>
-                          </Td>
-                          <Td className="text-right">
-                            <ActionMenu
-                              items={[
-                                { label: "Sold invoices", icon: <Receipt size={14} />, onClick: () => setSalesFor({ id: p.id, title: p.product_title }) },
-                              ]}
-                            />
-                          </Td>
-                        </tr>
+      {error && <ErrorText>{error}</ErrorText>}
 
-                        {isExpanded && (
-                          <tr>
-                            <Td colSpan={7} className="bg-gray-50">
-                              <div className="py-3 space-y-4">
+      {loading && products.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-24">
+          <Loader2 size={28} className="animate-spin text-gray-300" />
+          <p className="mt-3 text-sm text-gray-400">Loading products…</p>
+        </div>
+      ) : products.length === 0 ? (
+        <EmptyState icon={Package} title="No products yet" subtitle="Add one to get started" />
+      ) : (
+        <Card className="p-0 overflow-hidden">
+          <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
+            <p className="text-sm text-gray-500 truncate">
+              {selectedFilter.gender ? genderGroups.find((g) => g.gender === selectedFilter.gender)?.label : "All"}
+              {selectedFilter.category && (
+                <>
+                  <span className="text-gray-300"> › </span>
+                  {selectedFilter.category}
+                </>
+              )}
+              {selectedFilter.subCategory && (
+                <>
+                  <span className="text-gray-300"> › </span>
+                  <span className="font-medium text-gray-900">{selectedFilter.subCategory}</span>
+                </>
+              )}
+              {searchQuery.trim() && <span className="text-gray-400"> · matching “{searchQuery.trim()}”</span>}
+            </p>
+            <div className="flex flex-shrink-0 items-center gap-4">
+              <p className="text-xs text-gray-400 tabular-nums">
+                {filteredProducts.length} product{filteredProducts.length === 1 ? "" : "s"}, {visibleUnits.toLocaleString()} unit{visibleUnits === 1 ? "" : "s"}
+              </p>
+              <button
+                onClick={() => setShowManageCategoriesModal(true)}
+                className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-900 transition"
+                title="Add, rename or remove categories"
+              >
+                <Settings size={13} />
+                Manage categories
+              </button>
+            </div>
+          </div>
+
+          {filteredProducts.length === 0 ? (
+            <EmptyState icon={Search} title="No products match" subtitle={searchQuery.trim() ? `Nothing found for "${searchQuery}"` : "Nothing in this selection"} />
+          ) : (
+            <Table className="[table-layout:fixed]">
+              <thead>
+                <tr>
+                  <Th className="w-6"></Th>
+                  <SortHeader<ProductSortKey> label="Product" sortKey="title" activeKey={sortKey} dir={sortDir} onClick={toggleSort} className={showSubCategoryColumn ? "w-[30%]" : "w-[40%]"} />
+                  {showSubCategoryColumn && (
+                    <SortHeader<ProductSortKey> label="Sub-category" sortKey="subCategory" activeKey={sortKey} dir={sortDir} onClick={toggleSort} className="w-[16%]" />
+                  )}
+                  <SortHeader<ProductSortKey> label="Brand" sortKey="brand" activeKey={sortKey} dir={sortDir} onClick={toggleSort} className={showSubCategoryColumn ? "w-[16%]" : "w-[20%]"} />
+                  <SortHeader<ProductSortKey> label="Qty" sortKey="qty" activeKey={sortKey} dir={sortDir} onClick={toggleSort} className="w-[14%]" align="right" />
+                  <SortHeader<ProductSortKey> label="Price" sortKey="price" activeKey={sortKey} dir={sortDir} onClick={toggleSort} className="w-[14%]" align="right" />
+                  <Th className="w-[8%]"></Th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedProducts.map((p) => {
+                  const isExpanded = expandedId === p.id;
+                  const units = inventoryByProduct[p.id] ?? [];
+                  const subCategory = splitCategory(p.category).subCategory;
+
+                  return (
+                    <Fragment key={p.id}>
+                      <tr onClick={() => toggleExpand(p)} className="cursor-pointer hover:bg-gray-50 transition-colors">
+                        <Td className="w-6">
+                          {isExpanded ? <ChevronDown size={12} className="text-gray-400" /> : <ChevronRight size={12} className="text-gray-400" />}
+                        </Td>
+                        <Td className="font-medium text-gray-900 truncate" title={p.product_title}>
+                          {p.product_title}
+                        </Td>
+                        {showSubCategoryColumn && <Td className="truncate text-gray-500">{subCategory || "—"}</Td>}
+                        <Td className="truncate" title={p.brand ?? undefined}>
+                          {p.brand ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedFilter((f) => ({ ...f, brand: p.brand ?? undefined }));
+                              }}
+                              className="hover:underline text-left"
+                              title={`Filter by ${p.brand}`}
+                            >
+                              {p.brand}
+                            </button>
+                          ) : (
+                            "—"
+                          )}
+                        </Td>
+                        <Td className="text-right tabular-nums">
+                          <span className="inline-flex items-center justify-end gap-2">
+                            {p.qty < LOW_STOCK_THRESHOLD && <Badge label={p.qty === 0 ? "Out" : "Low"} tone="warning" />}
+                            {p.qty}
+                          </span>
+                        </Td>
+                        <Td className="text-right tabular-nums">Rs. {p.selling_price.toLocaleString()}</Td>
+                        <Td className="text-right">
+                          <ActionMenu
+                            items={[
+                              { label: "Restock", icon: <Boxes size={14} />, onClick: () => manageProduct(p, "restock") },
+                              { label: "Edit details", icon: <SquarePen size={14} />, onClick: () => manageProduct(p, "details") },
+                              { label: "Sold invoices", icon: <Receipt size={14} />, onClick: () => setSalesFor({ id: p.id, title: p.product_title }) },
+                            ]}
+                          />
+                        </Td>
+                      </tr>
+
+                      {isExpanded && (
+                        <tr>
+                          <Td colSpan={showSubCategoryColumn ? 7 : 6} className="bg-gray-50/70 !py-3 !px-4">
+                            <div className="bg-white rounded-xl shadow-sm p-4 space-y-4">
                                 <div className="flex items-center gap-1 border-b border-gray-200">
                                   {(["stock", "restock", "details"] as ExpandedTab[]).map((tab) => (
                                     <button
@@ -988,13 +1140,12 @@ export default function ManageProductsPage() {
                                         setExpandedTab(tab);
                                         if (tab === "restock") openRestockTab(p);
                                       }}
-                                      className={`px-3 py-1.5 text-xs font-medium rounded-t-lg transition ${
-                                        expandedTab === tab
-                                          ? "bg-white border border-b-white border-gray-200 text-gray-900 -mb-px"
-                                          : "text-gray-500 hover:text-gray-800"
+                                      className={`relative px-3 py-2 text-sm font-medium transition-colors ${
+                                        expandedTab === tab ? "text-gray-900" : "text-gray-500 hover:text-gray-900"
                                       }`}
                                     >
                                       {tab === "stock" ? "Stock" : tab === "restock" ? "Restock" : "Details"}
+                                      {expandedTab === tab && <span className="absolute left-3 right-3 -bottom-px h-0.5 bg-gray-900 rounded-full" />}
                                     </button>
                                   ))}
                                 </div>
@@ -1464,14 +1615,9 @@ export default function ManageProductsPage() {
                   })}
                 </tbody>
               </Table>
-            </div>
-            {/* Optional footer showing count — helps replace pagination at a glance */}
-            <div className="flex-shrink-0 border-t border-gray-100 px-4 py-2 text-xs text-gray-400">
-              Showing {filteredProducts.length} of {products.length} product{products.length === 1 ? "" : "s"}
-            </div>
+            )}
           </Card>
-        )}
-      </div>
+      )}
 
       {salesFor && <ProductSalesModal productId={salesFor.id} productTitle={salesFor.title} onClose={() => setSalesFor(null)} />}
 

@@ -1,5 +1,3 @@
-import { InventoryUnit } from "./types";
-
 export interface CategoryTreeNode {
   category: string;
   count: number;
@@ -39,7 +37,7 @@ export function composeCategory(category: string, subCategory: string, genderSuf
 // data, not a fixed list, so imported/legacy category names (e.g. "Pants",
 // "Tees" from a spreadsheet import) always show up correctly instead of
 // silently mismatching a hardcoded list.
-export function buildCategoryTree(units: InventoryUnit[]): CategoryTreeNode[] {
+export function buildCategoryTree<T extends { category?: string | null }>(units: T[]): CategoryTreeNode[] {
   const map = new Map<string, { count: number; subCategories: Map<string, number> }>();
   units.forEach((u) => {
     const { category, subCategory } = splitCategory(u.category);
@@ -88,8 +86,8 @@ const GENDER_LABELS: Record<ProductGender, string> = { male: "Men", female: "Wom
 // tree — the "unspecified" bucket is real and often the largest, since
 // most stock predates gender tagging; it's kept (not hidden) so nothing
 // becomes unreachable through this view.
-export function buildGenderCategoryTree(units: InventoryUnit[]): GenderGroup[] {
-  const byGender = new Map<ProductGender, InventoryUnit[]>();
+export function buildGenderCategoryTree<T extends { category?: string | null }>(units: T[]): GenderGroup[] {
+  const byGender = new Map<ProductGender, T[]>();
   units.forEach((u) => {
     const { gender } = splitCategoryWithGender(u.category);
     const list = byGender.get(gender) ?? [];
