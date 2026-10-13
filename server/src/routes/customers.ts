@@ -89,13 +89,14 @@ const IS_COD_ORDER_SQL = `(sales.sale_type = 'online' AND COALESCE(sales.payment
 
 // COD a COURIER has already delivered and collected but not yet paid over: the
 // customer paid it — to the courier, at the door — so it isn't owed; the cash is
-// with the courier until they settle (see confirm-cod in sales.ts). Self delivery
-// (D2D) and on-demand riders hand the cash straight over, so those stay owed until
-// confirmed; a returned parcel is not "delivered".
+// with the courier until they settle (Couriers page). Every courier counts —
+// Dropp (code D2D) included, it settles like the rest. On-demand riders hand the
+// cash straight over, so those stay owed until confirmed (confirm-cod in
+// sales.ts); a returned parcel is not "delivered".
 const WITH_COURIER_SQL = `(CASE WHEN ${IS_COD_ORDER_SQL} AND EXISTS (
     SELECT 1 FROM deliveries hd LEFT JOIN delivery_partners hp ON hp.code = hd.delivery_partner
     WHERE hd.sale_id = sales.id AND hd.delivery_status = 'delivered' AND hd.delivery_partner IS NOT NULL
-      AND hd.delivery_partner <> 'D2D' AND COALESCE(hp.kind, '') <> 'on_demand'
+      AND COALESCE(hp.kind, '') <> 'on_demand'
   ) THEN ${COD_TOWARD_SALE_SQL} ELSE 0 END)`;
 
 // COD still to be collected at the door (not delivered yet — being packed, or on
@@ -120,7 +121,7 @@ const EXCHANGE_PENDING_SQL = `MAX(0, MIN(
 // COD is about to collect or has just collected, and any exchange credit pending.
 const REAL_OWED_SQL = `(sales.total - sales.amount_paid - ${WITH_COURIER_SQL} - ${ON_DELIVERY_SQL} - ${EXCHANGE_PENDING_SQL})`;
 
-const CALC_SUBQUERY = `
+export const CALC_SUBQUERY = `
   customers.bonus_points +
   COALESCE((SELECT SUM(points) FROM loyalty_transactions WHERE customer_id = customers.id), 0) AS loyalty_points,
   COALESCE((SELECT SUM(${REAL_OWED_SQL}) FROM sales WHERE customer_id = customers.id AND is_voided = 0 AND status = 'completed'), 0) AS balance_due,
@@ -1018,6 +1019,44 @@ customersRouter.post(
   })
 );
 
+// POST /api/customers/:id/store-credit-grant — admin only. Gives a customer store
+// credit by hand, with a reason — for money that came in with no invoice to attach it
+// to, such as a courier collecting Rs. 50 more than the order at the door. It isn't
+// tied to any sale, so it shows on their ledger as credit granted; no cash book entry
+// is made, because whatever money arrived is already recorded wherever it came in
+// (e.g. the courier's settlement).
+customersRouter.post(
+  "/:id/store-credit-grant",
+  requireRole("admin"),
+  asyncHandler(async (req, res) => {
+    const data = z
+      .object({
+        amount: z.number().positive().max(1_000_000),
+        reason: z.string().trim().min(3, "A reason is required — a few words is fine").max(200),
+        // Leave out for credit that never expires.
+        expiry_days: z.number().int().positive().max(3650).optional(),
+      })
+      .parse(req.body);
+    const customer = db.prepare(`SELECT id, name FROM customers WHERE id = ?`).get(req.params.id) as { id: number; name: string } | undefined;
+    if (!customer) throw new ApiError(404, "Customer not found");
+
+    const expiresAt = data.expiry_days ? new Date(Date.now() + data.expiry_days * 24 * 60 * 60 * 1000).toISOString() : null;
+    db.prepare(
+      `INSERT INTO store_credit_transactions (customer_id, amount, reason, reference_id, notes, expires_at)
+       VALUES (?, ?, 'manual_adjustment', NULL, ?, ?)`
+    ).run(customer.id, data.amount, data.reason, expiresAt);
+
+    logAudit(
+      req.user!,
+      "store_credit_grant",
+      "customer",
+      customer.id,
+      `Gave ${customer.name} Rs. ${data.amount.toLocaleString()} of store credit — ${data.reason}${data.expiry_days ? ` (valid ${data.expiry_days} days)` : ""}`
+    );
+    res.status(201).json({ store_credit: usableStoreCredit(customer.id) });
+  })
+);
+
 // GET /api/customers/:id/amount-due — what a customer needs to pay right
 // now: every invoice still owing money, the store credit they can use
 // against it, and the net amount to pay. Same sources as the customer's
@@ -1310,6 +1349,11 @@ customersRouter.post(
           );
         }
       } else {
+        // Only what was applied to invoices is the payment; anything beyond what they owed
+        // is kept as store credit, as the preview says ("Left as credit") — its own cash
+        // book line and credit entry, so nothing received is left unaccounted for.
+        const excess = Math.round(unapplied * 100) / 100;
+        const appliedTotal = Math.round((totalAmount - excess) * 100) / 100;
         db.prepare(
           `INSERT INTO cash_book (transaction_code, type, category, payment_method, reference_id, amount, notes)
            VALUES (?, 'income', 'customer_payment', ?, ?, ?, ?)`
@@ -1317,11 +1361,27 @@ customersRouter.post(
           nextTransactionCode(),
           data.method,
           req.params.id,
-          totalAmount,
+          appliedTotal,
           `Payment from ${customer.name} (${customer.customer_code}) — applied to ${invoiceList}${
             data.notes?.trim() ? ` — ${data.notes.trim()}` : ""
           }`
         );
+        if (excess > 0.009) {
+          db.prepare(
+            `INSERT INTO cash_book (transaction_code, type, category, payment_method, reference_id, amount, notes)
+             VALUES (?, 'income', 'customer_credit', ?, ?, ?, ?)`
+          ).run(
+            nextTransactionCode(),
+            data.method,
+            req.params.id,
+            excess,
+            `Rs. ${excess.toLocaleString()} paid over what ${customer.name} (${customer.customer_code}) owed — kept as store credit`
+          );
+          db.prepare(
+            `INSERT INTO store_credit_transactions (customer_id, amount, reason, reference_id, notes, expires_at)
+             VALUES (?, ?, 'overpayment', NULL, ?, NULL)`
+          ).run(req.params.id, excess, `Paid over what was owed (${invoiceList})`);
+        }
       }
     });
 

@@ -621,10 +621,15 @@ salesRouter.post(
         // case COD is only ever the delivery fee, since the product
         // total is tracked as balance due instead of being collected now.
         // For an exchange the old item's value comes off (once it's collected)
-        // and the customer's share of the pickup charge rides along.
+        // and the customer's share of the pickup charge rides along. Store credit
+        // spent on the order counts as paid, like any other payment — otherwise a
+        // courier would be sent to collect money the customer has already covered.
         const cod_amount = data.is_credit_order
           ? delivery_fee
-          : Math.max(0, total - (exchangePlan?.applied ?? 0) + delivery_fee + (exchangePlan?.pickupCollected ?? 0) - data.amount_paid);
+          : Math.max(
+              0,
+              total - (exchangePlan?.applied ?? 0) + delivery_fee + (exchangePlan?.pickupCollected ?? 0) - data.amount_paid - storeCreditApplied
+            );
 
         db.prepare(
           `INSERT INTO deliveries
@@ -948,7 +953,7 @@ salesRouter.put(
     if (sale.is_voided) throw new ApiError(409, "This sale has been voided");
     if (sale.payment_status === "paid") throw new ApiError(409, "This sale is already marked as paid");
 
-    // This action is only for orders the shop delivered itself (D2D). A
+    // This action is only for orders the shop delivered itself (no courier). A
     // courier-delivered order (CPAK/DEX) holds the cash until settlement
     // — confirming it here would wrongly record money that hasn't
     // actually reached the shop yet, and would also make that delivery
@@ -965,10 +970,10 @@ salesRouter.put(
          WHERE deliveries.sale_id = ?`
       )
       .get(req.params.id) as { delivery_partner: string | null; kind: string | null } | undefined;
-    if (delivery && delivery.delivery_partner && delivery.delivery_partner !== "D2D" && delivery.kind !== "on_demand") {
+    if (delivery && delivery.delivery_partner && delivery.kind !== "on_demand") {
       throw new ApiError(
         409,
-        "This order was shipped via a courier — its COD is collected by them and settled separately, not confirmed here."
+        "This order was shipped via a courier — its COD is collected by them and settled separately (Couriers page), not confirmed here."
       );
     }
 

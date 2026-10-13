@@ -8,6 +8,7 @@ import { PageHeader, Card, Table, Th, Td, Input, Button, EmptyState, ErrorText, 
 import { CityPicker } from "../components/CityPicker";
 import LoyaltyAdjustModal from "../components/LoyaltyAdjustModal";
 import StoreCreditRefundModal from "../components/StoreCreditRefundModal";
+import StoreCreditGrantModal from "../components/StoreCreditGrantModal";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { useSortableData } from "../lib/useSortableData";
 import { downloadBalanceSlip } from "../lib/balanceSlip";
@@ -139,6 +140,7 @@ export default function ViewCustomersPage() {
   const [expandedDetail, setExpandedDetail] = useState<Customer | null>(null);
   const [expandedTab, setExpandedTab] = useState<ExpandedTab>("overview");
   const [refundCreditFor, setRefundCreditFor] = useState<Customer | null>(null);
+  const [addCreditFor, setAddCreditFor] = useState<Customer | null>(null);
   const [creditBreakdown, setCreditBreakdown] = useState<{ amount: number; reason: string; expires_at: string | null }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1034,6 +1036,15 @@ export default function ViewCustomersPage() {
                                         Refund store credit
                                       </button>
                                     )}
+                                    {isAdmin && (
+                                      <button
+                                        onClick={() => setAddCreditFor(expandedDetail)}
+                                        className="mt-1.5 ml-3 text-xs text-black underline hover:no-underline"
+                                        title="Give this customer store credit by hand, with a reason"
+                                      >
+                                        Add store credit
+                                      </button>
+                                    )}
                                   </div>
                                   <div>
                                     <p className="text-xs text-gray-400">Last order</p>
@@ -1806,6 +1817,17 @@ export default function ViewCustomersPage() {
           onDone={async () => {
             await load();
             await refreshExpanded(refundCreditFor.id);
+          }}
+        />
+      )}
+
+      {addCreditFor && (
+        <StoreCreditGrantModal
+          customer={addCreditFor}
+          onClose={() => setAddCreditFor(null)}
+          onDone={async () => {
+            await load();
+            await refreshExpanded(addCreditFor.id);
           }}
         />
       )}

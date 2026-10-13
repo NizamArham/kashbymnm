@@ -526,7 +526,7 @@ export default function SaleHistoryPage() {
         {sale.invoice.startsWith("OCD") &&
           !sale.is_voided &&
           sale.payment_status !== "paid" &&
-          (!sale.delivery_partner || sale.delivery_partner === "D2D" || sale.delivery_partner_kind === "on_demand") && (
+          (!sale.delivery_partner || sale.delivery_partner_kind === "on_demand") && (
             <button
               onClick={() => {
                 setOpenMenuId(null);
@@ -543,7 +543,7 @@ export default function SaleHistoryPage() {
         {sale.invoice.startsWith("OCD") &&
           !sale.is_voided &&
           sale.payment_status === "paid" &&
-          (!sale.delivery_partner || sale.delivery_partner === "D2D" || sale.delivery_partner_kind === "on_demand") && (
+          (!sale.delivery_partner || sale.delivery_partner_kind === "on_demand") && (
             <button
               onClick={() => handleUndoCod(sale)}
               disabled={undoingId === sale.id}

@@ -209,7 +209,7 @@ export function approveReturnRequest(requestId: number | string, user: AuthUser,
   const saleItem = db
     .prepare(
       `SELECT sale_items.*, sales.invoice, sales.customer_id, sales.loyalty_points_earned, sales.total, sales.amount_paid,
-              sales.subtotal, sales.discount
+              sales.subtotal, sales.discount, sales.sale_type, sales.payment_method
        FROM sale_items JOIN sales ON sales.id = sale_items.sale_id
        WHERE sale_items.id = ?`
     )
@@ -257,13 +257,29 @@ export function approveReturnRequest(requestId: number | string, user: AuthUser,
   const realCashPaid = Math.max(0, saleItem.amount_paid - creditRedeemedRow.total);
   const paidFraction = saleItem.total > 0 ? Math.min(1, realCashPaid / saleItem.total) : 0;
 
-  const refund_amount = request.resolution === "refund" ? Math.round(saleItem.unit_price * paidFraction) : 0;
-  const ledgerWriteOff = request.resolution === "refund" ? saleItem.unit_price - refund_amount : 0;
+  // An online COD order whose parcel never got delivered (packed and called back, refused
+  // at the door) collected nothing: there's no money to hand back as credit. Turning it
+  // into store credit would give the customer value for goods that were never paid for, so
+  // it's treated as a refund of nothing — the item's price just comes off the order.
+  const parcel = db.prepare(`SELECT delivery_status FROM deliveries WHERE sale_id = ?`).get(saleItem.sale_id) as
+    | { delivery_status: string }
+    | undefined;
+  const parcelNeverCollected =
+    request.resolution === "store_credit_exchange" &&
+    saleItem.sale_type === "online" &&
+    saleItem.payment_method !== "credit" &&
+    !!parcel &&
+    parcel.delivery_status !== "delivered" &&
+    realCashPaid <= 0.009;
+  const resolution: string = parcelNeverCollected ? "refund" : request.resolution;
+
+  const refund_amount = resolution === "refund" ? Math.round(saleItem.unit_price * paidFraction) : 0;
+  const ledgerWriteOff = resolution === "refund" ? saleItem.unit_price - refund_amount : 0;
   // An immediate exchange creates no new sale for the replacement to
   // earn its own points on, so those stay; a refund or a store-credit
   // return doesn't (the replacement is a separate, new sale).
   const pointsToReverse =
-    request.resolution === "refund" || request.resolution === "store_credit_exchange" ? pointsEarnedOnItem(saleItem) : 0;
+    resolution === "refund" || resolution === "store_credit_exchange" ? pointsEarnedOnItem(saleItem) : 0;
 
   const runApproval = db.transaction(() => {
     const returnResult = db
@@ -274,7 +290,7 @@ export function approveReturnRequest(requestId: number | string, user: AuthUser,
       .run(
         request.sale_item_id,
         request.condition,
-        request.resolution,
+        resolution,
         refund_amount,
         request.exchange_inventory_id,
         request.reason
@@ -284,7 +300,7 @@ export function approveReturnRequest(requestId: number | string, user: AuthUser,
     const newStatus = request.condition === "clean" ? "available" : "damaged";
     db.prepare(`UPDATE inventory SET status = ? WHERE id = ?`).run(newStatus, saleItem.inventory_id);
 
-    if (request.resolution === "refund") {
+    if (resolution === "refund") {
       if (refund_amount > 0) {
         db.prepare(
           `INSERT INTO cash_book (transaction_code, type, category, payment_method, reference_id, amount, notes)
@@ -326,7 +342,7 @@ export function approveReturnRequest(requestId: number | string, user: AuthUser,
       db.prepare(`UPDATE inventory SET status = 'sold' WHERE id = ?`).run(request.exchange_inventory_id);
     }
 
-    if (request.resolution === "store_credit_exchange") {
+    if (resolution === "store_credit_exchange") {
       // The returned item's value becomes real, expiring store
       // credit — the customer picks their actual replacement later,
       // as a genuinely new sale, applying this credit as a payment
@@ -360,7 +376,9 @@ export function approveReturnRequest(requestId: number | string, user: AuthUser,
     "return_approve",
     "return_request",
     Number(requestId),
-    `Approved return on invoice ${saleItem.invoice} — ${request.resolution.replace(/_/g, " ")}${refund_amount > 0 ? ` (Rs. ${refund_amount.toLocaleString()} refunded)` : ""}`
+    `Approved return on invoice ${saleItem.invoice} — ${
+      parcelNeverCollected ? "parcel never collected, nothing paid: written off, no store credit" : request.resolution.replace(/_/g, " ")
+    }${refund_amount > 0 ? ` (Rs. ${refund_amount.toLocaleString()} refunded)` : ""}`
   );
 
   return db.prepare(`${REQUEST_SELECT} WHERE return_requests.id = ?`).get(requestId);
