@@ -273,7 +273,7 @@ salesRouter.get(
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     const rows = db
       .prepare(
-        `SELECT sales.*, customers.name as customer_name, customers.customer_code,
+        `SELECT sales.*, customers.name as customer_name, customers.customer_code, customers.phone as customer_phone,
                 deliveries.delivery_partner, delivery_partners.kind as delivery_partner_kind,
                 deliveries.delivery_status as delivery_status,
                 ${SALE_EXCHANGE_FLAGS_SQL}
@@ -286,6 +286,141 @@ salesRouter.get(
       )
       .all(...params);
     res.json(rows);
+  })
+);
+
+// GET /api/sales/:id/profit — admin only. What one bill actually earned: each piece's selling
+// price against what that very piece cost, less the discount given, plus what the delivery
+// brought in against what the courier charges. Pieces that came back count for nothing
+// (a damaged one is the cost lost); a voided invoice earned nothing.
+salesRouter.get(
+  "/:id/profit",
+  requireRole("admin"),
+  asyncHandler(async (req, res) => {
+    const sale = db
+      .prepare(
+        `SELECT sales.id, sales.invoice, sales.status, sales.sale_type, sales.subtotal, sales.discount, sales.total,
+                sales.amount_paid, sales.is_voided, sales.payment_method, sales.is_wholesale
+         FROM sales WHERE sales.id = ?`
+      )
+      .get(req.params.id) as any;
+    if (!sale) throw new ApiError(404, "Sale not found");
+    if (sale.status === "quotation") throw new ApiError(409, "A quotation has no profit yet — nothing has been sold.");
+    if (sale.is_voided) return res.json({ invoice: sale.invoice, voided: true });
+
+    const rows = db
+      .prepare(
+        `SELECT si.id, si.quantity, si.unit_price, si.line_total, si.inventory_id,
+                COALESCE(products.product_title, si.product_snapshot, 'Item') AS title,
+                inventory.size, inventory.color, inventory.cost_price AS cost,
+                (SELECT resolution FROM returns WHERE returns.sale_item_id = si.id ORDER BY id DESC LIMIT 1) AS return_resolution,
+                (SELECT condition FROM returns WHERE returns.sale_item_id = si.id ORDER BY id DESC LIMIT 1) AS return_condition
+         FROM sale_items si
+         LEFT JOIN inventory ON inventory.id = si.inventory_id
+         LEFT JOIN products ON products.id = inventory.product_id
+         WHERE si.sale_id = ? ORDER BY si.id`
+      )
+      .all(sale.id) as any[];
+
+    let keptRevenue = 0;
+    let itemsProfit = 0;
+    let unknownCost = 0;
+    const items = rows.map((r) => {
+      const qty = r.quantity ?? 1;
+      const cost = r.cost == null ? null : r.cost * qty;
+      // A refund or store-credit return hands the money back: nothing earned, and the piece goes back
+      // on the shelf (clean) or its cost is simply lost (damaged). A 1:1 swap earned what it earned.
+      const handedBack = r.return_resolution === "refund" || r.return_resolution === "store_credit_exchange";
+      let state: "sold" | "returned" | "returned_damaged" | "swapped" = "sold";
+      let profit: number | null = null;
+      if (handedBack) {
+        state = r.return_condition === "damaged" ? "returned_damaged" : "returned";
+        profit = state === "returned_damaged" ? (cost == null ? null : -cost) : 0;
+      } else {
+        if (r.return_resolution === "exchange") state = "swapped";
+        keptRevenue += r.line_total;
+        profit = cost == null ? null : r.line_total - cost;
+      }
+      if (profit == null) unknownCost += 1;
+      else itemsProfit += profit;
+      return { title: r.title, size: r.size, color: r.color, quantity: qty, price: r.line_total, cost, profit, state };
+    });
+
+    // The discount only counts on what was kept.
+    const discount = sale.subtotal > 0 ? (sale.discount * keptRevenue) / sale.subtotal : 0;
+    const goodsProfit = itemsProfit - discount;
+    const soldFor = keptRevenue - discount;
+
+    const delivery = db
+      .prepare(
+        `SELECT d.id, d.delivery_status, d.delivery_fee, d.is_free_delivery, d.pickup_collected, d.rider_direct,
+                d.actual_fare, d.delivery_partner, dp.kind, COALESCE(dp.name, d.delivery_partner) AS partner_name
+         FROM deliveries d LEFT JOIN delivery_partners dp ON dp.code = d.delivery_partner
+         WHERE d.sale_id = ?`
+      )
+      .get(sale.id) as any;
+
+    let deliveryView: {
+      partner: string | null;
+      charged: number;
+      courier_cost: number;
+      margin: number;
+      estimated: boolean;
+      note: string | null;
+    } | null = null;
+    if (delivery) {
+      const cameBack = ["returned", "cancelled"].includes(delivery.delivery_status);
+      let courierCost = 0;
+      let estimated = false;
+      let note: string | null = null;
+      if (delivery.kind === "on_demand") {
+        courierCost = delivery.rider_direct ? 0 : delivery.actual_fare ?? 0;
+        if (!delivery.rider_direct && delivery.actual_fare == null) note = "The ride's fare isn't entered yet.";
+      } else {
+        const recon = db
+          .prepare(`SELECT courier_charge, return_charge, charge_confirmed FROM courier_reconciliations WHERE delivery_id = ?`)
+          .get(delivery.id) as { courier_charge: number; return_charge: number; charge_confirmed: number } | undefined;
+        if (recon) {
+          courierCost = recon.courier_charge + recon.return_charge;
+          estimated = !recon.charge_confirmed;
+        } else if (delivery.partner_name) {
+          note = "The courier's charge isn't known until the parcel is dispatched.";
+        }
+      }
+      const charged = cameBack || delivery.rider_direct ? 0 : (delivery.is_free_delivery ? 0 : delivery.delivery_fee) + (delivery.pickup_collected ?? 0);
+      const waitingExchange = db
+        .prepare(`SELECT pickup_charge FROM online_exchanges WHERE new_sale_id = ? AND status = 'awaiting_pickup' AND pickup_booked = 0`)
+        .get(sale.id) as { pickup_charge: number } | undefined;
+      if (cameBack) note = "The parcel came back, so no delivery fee was collected.";
+      else if (waitingExchange && waitingExchange.pickup_charge > 0)
+        note = `The courier's Rs. ${waitingExchange.pickup_charge.toLocaleString()} pickup charge for the old item only counts once it's received.`;
+      else if (delivery.is_free_delivery && !note) note = "Free delivery — you paid the courier.";
+      deliveryView = {
+        partner: delivery.partner_name ?? null,
+        charged,
+        courier_cost: courierCost,
+        margin: charged - courierCost,
+        estimated,
+        note,
+      };
+    }
+
+    const netProfit = goodsProfit + (deliveryView?.margin ?? 0);
+    res.json({
+      invoice: sale.invoice,
+      voided: false,
+      wholesale: !!sale.is_wholesale,
+      items,
+      sold_for: soldFor,
+      items_profit: itemsProfit,
+      discount,
+      goods_profit: goodsProfit,
+      goods_margin_pct: soldFor > 0 ? (goodsProfit / soldFor) * 100 : null,
+      delivery: deliveryView,
+      net_profit: netProfit,
+      unknown_cost_items: unknownCost,
+      not_collected: Math.max(0, sale.total - sale.amount_paid),
+    });
   })
 );
 

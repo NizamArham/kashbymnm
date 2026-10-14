@@ -1,14 +1,15 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Receipt, Printer, FileText, MessageCircle, ShoppingCart, XCircle, Repeat } from "lucide-react";
+import { ArrowLeft, Receipt, Printer, FileText, MessageCircle, ShoppingCart, XCircle, Repeat, TrendingUp, ChevronDown, ChevronRight } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Sale } from "../lib/types";
 import { downloadA4Pdf, downloadThermalPdf, sendWhatsAppBill, groupSaleItemsForDisplay } from "../lib/receipts";
-import { PageHeader, Card, Table, Th, Td, ErrorText, Badge, RefLink, Button } from "../components/ui";
+import { PageHeader, Card, Table, Th, Td, ErrorText, Badge, RefLink, Button, ActionMenu } from "../components/ui";
+import SaleProfitModal from "../components/SaleProfitModal";
 import ReceiptOptionsModal, { ModalOption } from "../components/ReceiptOptionsModal";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { hasDraftInProgress } from "../lib/posDraft";
-import { salePaymentLabel } from "../lib/salePayment";
+import { salePaymentLabel, saleStatusLabel } from "../lib/salePayment";
 import DeliveryChargeSummary from "../components/DeliveryChargeSummary";
 import OnlineExchangeModal from "../components/OnlineExchangeModal";
 import ExchangeNotice, { ExchangedOutNotice } from "../components/ExchangeNotice";
@@ -26,6 +27,9 @@ export default function SaleDetailPage() {
   const [receiptError, setReceiptError] = useState<string | null>(null);
   const { user } = useAuth();
   const [showExchange, setShowExchange] = useState(false);
+  const [showProfit, setShowProfit] = useState(false);
+  // Products folded into one row on a big (wholesale) bill, and which of them are opened up.
+  const [openProducts, setOpenProducts] = useState<Set<string>>(new Set());
   const [reloadKey, setReloadKey] = useState(0);
 
   const isQuotation = sale?.status === "quotation";
@@ -117,6 +121,77 @@ export default function SaleDetailPage() {
     }
   }, [searchParams, canExchange, setSearchParams]);
 
+  // One row per product once it has a long run of sizes/colours (a wholesale bill); smaller
+  // bills are drawn exactly as before.
+  const FOLD_AT = sale?.is_wholesale ? 2 : 3;
+  const productRows = useMemo(() => {
+    const lines = groupSaleItemsForDisplay(sale?.items ?? []);
+    const byProduct = new Map<string, typeof lines>();
+    for (const l of lines) {
+      const key = String(l.product_id ?? l.product_title ?? "");
+      byProduct.set(key, [...(byProduct.get(key) ?? []), l]);
+    }
+    const rows: (
+      | { kind: "line"; item: (typeof lines)[number] }
+      | { kind: "product"; key: string; title: string | undefined; product_id: number | null | undefined; items: typeof lines; quantity: number; total: number }
+    )[] = [];
+    const done = new Set<string>();
+    for (const l of lines) {
+      const key = String(l.product_id ?? l.product_title ?? "");
+      const group = byProduct.get(key)!;
+      if (group.length < FOLD_AT) {
+        rows.push({ kind: "line", item: l });
+      } else if (!done.has(key)) {
+        done.add(key);
+        rows.push({
+          kind: "product",
+          key,
+          title: l.product_title,
+          product_id: l.product_id,
+          items: group,
+          quantity: group.reduce((n, i) => n + i.quantity, 0),
+          total: group.reduce((n, i) => n + i.line_total, 0),
+        });
+      }
+    }
+    return rows;
+  }, [sale, FOLD_AT]);
+  function toggleProduct(key: string) {
+    setOpenProducts((cur) => {
+      const next = new Set(cur);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+  function renderLine(item: ReturnType<typeof groupSaleItemsForDisplay>[number], nested: boolean) {
+    return (
+      <tr key={item.ids.join(",")} className={`${item.is_returned ? "opacity-60" : ""} ${nested ? "bg-gray-50/70" : ""}`}>
+        <Td className={item.is_returned ? "line-through" : ""}>{item.sku}</Td>
+        <Td className={`min-w-[16rem] ${nested ? "pl-8" : ""} ${item.is_returned ? "line-through" : ""}`}>
+          {nested ? (
+            <span className="text-gray-500">{item.product_title}</span>
+          ) : item.product_id ? (
+            <RefLink to={`/products/${item.product_id}`}>{item.product_title}</RefLink>
+          ) : (
+            item.product_title
+          )}
+          {item.is_returned ? (
+            <span className="ml-2 not-italic no-underline">
+              <Badge label="RTN" tone="danger" />
+            </span>
+          ) : null}
+        </Td>
+        <Td className={item.is_returned ? "line-through" : ""}>
+          {item.size ?? "—"} / {item.color ?? "—"}
+        </Td>
+        <Td className={item.is_returned ? "line-through" : ""}>{item.quantity}</Td>
+        <Td className={item.is_returned ? "line-through" : ""}>Rs. {item.unit_price.toLocaleString()}</Td>
+        <Td className={item.is_returned ? "line-through" : ""}>Rs. {item.line_total.toLocaleString()}</Td>
+      </tr>
+    );
+  }
+
   function openReceiptOptions() {
     setReceiptError(null);
     setShowReceiptOptions(true);
@@ -179,9 +254,15 @@ export default function SaleDetailPage() {
                   <Printer size={14} />
                   {isQuotation ? "Get Quotation" : "Get Receipt"}
                 </Button>
+                {/* Admin only, and tucked away: what this bill earned. */}
+                {user?.role === "admin" && !isQuotation && (
+                  <ActionMenu items={[{ label: "Profit on this bill", icon: <TrendingUp size={14} />, onClick: () => setShowProfit(true) }]} />
+                )}
               </div>
             }
           />
+
+          {showProfit && sale && <SaleProfitModal saleId={sale.id} invoice={sale.invoice} onClose={() => setShowProfit(false)} />}
 
           {isQuotation && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 text-sm text-amber-800">
@@ -230,7 +311,7 @@ export default function SaleDetailPage() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
               <div>
                 <p className="text-xs text-gray-400">Status</p>
-                <p className="text-gray-900 font-medium capitalize">{isQuotation ? "Quotation" : sale.payment_status}</p>
+                <p className="text-gray-900 font-medium capitalize">{isQuotation ? "Quotation" : saleStatusLabel({ payment_status: sale.payment_status, is_voided: sale.is_voided, exchange_in_status: sale.exchange?.status ?? null })}</p>
               </div>
               <div>
                 <p className="text-xs text-gray-400">Payment</p>
@@ -273,29 +354,35 @@ export default function SaleDetailPage() {
                 </tr>
               </thead>
               <tbody>
-                {groupSaleItemsForDisplay(sale.items ?? []).map((item) => (
-                  <tr key={item.ids.join(",")} className={item.is_returned ? "opacity-60" : ""}>
-                    <Td className={item.is_returned ? "line-through" : ""}>{item.sku}</Td>
-                    <Td className={`min-w-[16rem] ${item.is_returned ? "line-through" : ""}`}>
-                      {item.product_id ? (
-                        <RefLink to={`/products/${item.product_id}`}>{item.product_title}</RefLink>
-                      ) : (
-                        item.product_title
-                      )}
-                      {item.is_returned ? (
-                        <span className="ml-2 not-italic no-underline">
-                          <Badge label="RTN" tone="danger" />
-                        </span>
-                      ) : null}
-                    </Td>
-                    <Td className={item.is_returned ? "line-through" : ""}>
-                      {item.size ?? "—"} / {item.color ?? "—"}
-                    </Td>
-                    <Td className={item.is_returned ? "line-through" : ""}>{item.quantity}</Td>
-                    <Td className={item.is_returned ? "line-through" : ""}>Rs. {item.unit_price.toLocaleString()}</Td>
-                    <Td className={item.is_returned ? "line-through" : ""}>Rs. {item.line_total.toLocaleString()}</Td>
-                  </tr>
-                ))}
+                {productRows.map((row) => {
+                  if (row.kind === "line") return renderLine(row.item, false);
+                  const isOpen = openProducts.has(row.key);
+                  const allBack = row.items.every((i) => i.is_returned);
+                  const prices = Array.from(new Set(row.items.map((i) => i.unit_price)));
+                  return (
+                    <Fragment key={row.key}>
+                      <tr
+                        onClick={() => toggleProduct(row.key)}
+                        className={`cursor-pointer hover:bg-gray-50 ${allBack ? "opacity-60" : ""}`}
+                      >
+                        <Td className="text-gray-400">
+                          <span className="inline-flex items-center gap-1">
+                            {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                            <span className="text-xs">{row.items.length} lines</span>
+                          </span>
+                        </Td>
+                        <Td className={`min-w-[16rem] font-medium ${allBack ? "line-through" : ""}`}>
+                          {row.product_id ? <RefLink to={`/products/${row.product_id}`}>{row.title}</RefLink> : row.title}
+                        </Td>
+                        <Td className="text-gray-500">{row.items.length} sizes / colours</Td>
+                        <Td>{row.quantity}</Td>
+                        <Td>{prices.length === 1 ? `Rs. ${prices[0].toLocaleString()}` : "varies"}</Td>
+                        <Td className="font-medium">Rs. {row.total.toLocaleString()}</Td>
+                      </tr>
+                      {isOpen && row.items.map((item) => renderLine(item, true))}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </Table>
           </Card>
