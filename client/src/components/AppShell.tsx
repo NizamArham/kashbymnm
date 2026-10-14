@@ -228,9 +228,9 @@ export default function AppShell() {
 
   const isOnProfile = location.pathname === "/profile";
   const isPosScreen = location.pathname === "/pos";
-  // The cash book, like the till, fits the screen on desktop: its entries
-  // scroll inside the page instead of the whole page scrolling.
-  const isCashBook = location.pathname === "/cash-book";
+  // The cash book and the sale history, like the till, fit the screen on desktop:
+  // their rows are paged inside the page instead of the whole page scrolling.
+  const isFitScreen = location.pathname === "/cash-book" || location.pathname === "/sales";
 
   return (
     <div className="min-h-screen flex bg-gray-50 text-black">
@@ -356,7 +356,7 @@ export default function AppShell() {
       <div className={`flex-1 min-w-0 lg:ml-64 bg-gray-50 ${
         isPosScreen
           ? "h-[100dvh] flex flex-col overflow-hidden"
-          : isCashBook
+          : isFitScreen
           ? "min-h-screen lg:h-[100dvh] lg:flex lg:flex-col lg:overflow-hidden"
           : "min-h-screen"
       }`}>
@@ -379,7 +379,7 @@ export default function AppShell() {
           <div className="flex-1 min-h-0 flex flex-col">
             <Outlet />
           </div>
-        ) : isCashBook ? (
+        ) : isFitScreen ? (
           <div className="p-4 lg:p-6 lg:flex-1 lg:min-h-0 lg:flex lg:flex-col">
             <div className="bg-white border border-gray-200 rounded-2xl p-4 lg:p-6 shadow-sm lg:flex-1 lg:min-h-0 lg:flex lg:flex-col">
               <Outlet />

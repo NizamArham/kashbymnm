@@ -9,7 +9,7 @@ import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { useSortableData } from "../lib/useSortableData";
 import { useCopyToClipboard } from "../lib/useCopyToClipboard";
 import { isAwaitingCod, salePaymentLabel, saleStatusLabel } from "../lib/salePayment";
-import { PageHeader, Card, Table, Th, Td, Badge, SortHeader, paymentStatusTone, EmptyState, ErrorText, DateRangePicker, Button, RowCard, RowCardStats, RowCardStat, FormGroup, Label, Input, Modal, RefLink, TabToggle } from "../components/ui";
+import { PageHeader, Card, Th, Td, Badge, SortHeader, paymentStatusTone, EmptyState, ErrorText, DateRangePicker, Button, RowCard, RowCardStats, RowCardStat, FormGroup, Label, Input, Modal, RefLink, TabToggle } from "../components/ui";
 import ReceiptOptionsModal, { ModalOption } from "../components/ReceiptOptionsModal";
 import ExchangeTag from "../components/ExchangeTag";
 import SaleProfitModal from "../components/SaleProfitModal";
@@ -53,6 +53,18 @@ const KIND_FILTER: Record<Kind, (s: Sale) => boolean> = {
   wholesale: (s) => !s.is_voided && !!s.is_wholesale,
   voided: (s) => !!s.is_voided,
 };
+
+// The list fits the screen on desktop and is read a page at a time. A row is this tall (taller when an
+// exchange tag sits under the invoice number), so the number of rows that fit is worked out
+// from the room on screen. Phones and tablets get stacked cards, a fixed number to a page.
+const ROW_HEIGHT = 57;
+const TAGGED_ROW_HEIGHT = 89;
+const TABLE_HEAD_HEIGHT = 37;
+const CARDS_PER_PAGE = 12;
+const MENU_HEIGHT = 340;
+const rowHeightOf = (s: Sale) => (s.exchange_out_status || s.exchange_in_status ? TAGGED_ROW_HEIGHT : ROW_HEIGHT);
+const PAGER_BUTTON =
+  "px-2.5 py-1 text-xs border border-gray-200 rounded-lg hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed bg-white";
 
 function toISODate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -174,6 +186,15 @@ export default function SaleHistoryPage() {
   const [startDate, setStartDate] = useState<string | null>(null);
   const [endDate, setEndDate] = useState<string | null>(null);
 
+  // Paging. `rowRoom` is how many pixels of rows fit in the table area on screen right now.
+  const [page, setPage] = useState(1);
+  const [desktop, setDesktop] = useState(() => window.matchMedia("(min-width: 1024px)").matches);
+  const [rowRoom, setRowRoom] = useState(CARDS_PER_PAGE * ROW_HEIGHT);
+  const tableBodyRef = useRef<HTMLDivElement>(null);
+  // Where the open "…" menu sits. It is fixed to the screen, not to its row, so the last rows' menus
+  // aren't cut off by the table area (and open upward when there is no room below).
+  const [menuPos, setMenuPos] = useState<{ top?: number; bottom?: number; right: number; maxHeight: number } | null>(null);
+
   useEffect(() => {
     api
       .get<Sale[]>("/sales")
@@ -256,6 +277,84 @@ export default function SaleHistoryPage() {
     "date",
     "desc"
   );
+
+  // Fill the table area with as many rows as fit — never fewer than five. The area keeps one height
+  // whether the list is loading, empty or full (the footer is always there), so this can't flip back and forth.
+  useEffect(() => {
+    const el = tableBodyRef.current;
+    if (!el) return;
+    const fit = () => {
+      const isDesktop = window.matchMedia("(min-width: 1024px)").matches;
+      setDesktop(isDesktop);
+      setRowRoom(isDesktop ? Math.max(5 * ROW_HEIGHT, el.clientHeight - TABLE_HEAD_HEIGHT) : CARDS_PER_PAGE * ROW_HEIGHT);
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(el);
+    window.addEventListener("resize", fit);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", fit);
+    };
+  }, []);
+
+  // Pages are filled row by row until the room runs out, so a page with a few taller rows simply
+  // holds one or two fewer sales instead of spilling out of the table area.
+  const pages = useMemo(() => {
+    const out: Sale[][] = [];
+    let current: Sale[] = [];
+    let used = 0;
+    for (const sale of sortedSales) {
+      const h = desktop ? rowHeightOf(sale) : ROW_HEIGHT;
+      if (current.length > 0 && used + h > rowRoom) {
+        out.push(current);
+        current = [];
+        used = 0;
+      }
+      current.push(sale);
+      used += h;
+    }
+    if (current.length > 0) out.push(current);
+    return out.length > 0 ? out : [[]];
+  }, [sortedSales, desktop, rowRoom]);
+
+  const totalPages = pages.length;
+  const currentPage = Math.min(page, totalPages);
+  const pageSales = pages[currentPage - 1];
+  const rangeStart = pageSales.length === 0 ? 0 : pages.slice(0, currentPage - 1).reduce((n, p) => n + p.length, 0) + 1;
+  const rangeEnd = rangeStart === 0 ? 0 : rangeStart + pageSales.length - 1;
+
+  // A different list (period, kind, search, sort) starts again from the first page.
+  useEffect(() => {
+    setPage(1);
+    setExpanded(null);
+    setOpenMenuId(null);
+  }, [period, kind, search, startDate, endDate, sortKey, sortDir]);
+
+  function goToPage(p: number) {
+    setPage(Math.min(totalPages, Math.max(1, p)));
+    setExpanded(null);
+    setOpenMenuId(null);
+  }
+
+  // Opens the "…" menu under its button, or above it when the screen has no room below.
+  function toggleMenu(e: MouseEvent, saleId: number) {
+    e.stopPropagation();
+    if (openMenuId === saleId) {
+      setOpenMenuId(null);
+      return;
+    }
+    const r = e.currentTarget.getBoundingClientRect();
+    const below = window.innerHeight - r.bottom - 12;
+    const above = r.top - 12;
+    const right = window.innerWidth - r.right;
+    setMenuPos(
+      below >= MENU_HEIGHT || below >= above
+        ? { top: r.bottom + 4, right, maxHeight: below }
+        : { bottom: window.innerHeight - r.top + 4, right, maxHeight: above }
+    );
+    setOpenMenuId(saleId);
+  }
 
   const { copy: copySku, tooltip: skuCopyTooltip } = useCopyToClipboard();
 
@@ -640,8 +739,45 @@ export default function SaleHistoryPage() {
     );
   }
 
+  // Shown in place of the list while it loads or when nothing matches.
+  const listMessage = loading ? (
+    <p className="text-sm text-gray-400">Loading...</p>
+  ) : filteredSales.length === 0 ? (
+    <EmptyState icon={Receipt} title="No sales match these filters" subtitle="Try another period, or clear the filters." />
+  ) : null;
+
+  // The page buttons and "Showing a–b of n", under the table (desktop) or the cards (phones).
+  const pager = (
+    <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-t border-gray-100 bg-gray-50/50 flex-shrink-0">
+      <p className="text-xs text-gray-500">
+        Showing <span className="text-gray-700">{rangeStart}–{rangeEnd}</span> of{" "}
+        <span className="text-gray-700">{sortedSales.length.toLocaleString()}</span>
+      </p>
+      <div className="flex items-center gap-1">
+        <button onClick={() => goToPage(1)} disabled={currentPage === 1} className={PAGER_BUTTON}>
+          First
+        </button>
+        <button onClick={() => goToPage(currentPage - 1)} disabled={currentPage === 1} className={PAGER_BUTTON}>
+          Previous
+        </button>
+        <span className="px-2 text-xs text-gray-500 tabular-nums">
+          Page {currentPage} of {totalPages}
+        </span>
+        <button onClick={() => goToPage(currentPage + 1)} disabled={currentPage >= totalPages} className={PAGER_BUTTON}>
+          Next
+        </button>
+        <button onClick={() => goToPage(totalPages)} disabled={currentPage >= totalPages} className={PAGER_BUTTON}>
+          Last
+        </button>
+      </div>
+    </div>
+  );
+
   return (
-    <div>
+    // On desktop the page takes the screen's height (see AppShell): the title and filters stay put and
+    // only the table area below them is sized to what is left.
+    <div className="lg:flex-1 lg:min-h-0 lg:flex lg:flex-col">
+      <div className="flex-shrink-0">
       <PageHeader
         title="Sale history"
         subtitle="Click a row to see the items included."
@@ -764,33 +900,37 @@ export default function SaleHistoryPage() {
         </p>
       )}
 
-      {loading ? (
-        <p className="text-sm text-gray-400">Loading...</p>
-      ) : filteredSales.length === 0 ? (
-        <EmptyState icon={Receipt} title="No sales match these filters" subtitle="Try another period, or clear the filters." />
-      ) : (
-        <>
-          {/* Desktop / tablet-landscape */}
-          <Card className="p-0 overflow-hidden hidden lg:block">
-            <Table>
-              <thead>
-                <tr>
-                  <SortHeader<SaleSortKey> label="Invoice" sortKey="invoice" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
-                  <SortHeader<SaleSortKey> label="Date" sortKey="date" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
-                  <SortHeader<SaleSortKey> label="Customer" sortKey="customer" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
-                  <Th>Type</Th>
-                  <SortHeader<SaleSortKey> label="Total" sortKey="total" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
-                  <SortHeader<SaleSortKey> label="Paid" sortKey="paid" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
-                  <Th>Payment</Th>
-                  <Th>Status</Th>
-                  <Th></Th>
+      </div>
+
+      {/* Desktop / tablet-landscape */}
+      <Card className="p-0 overflow-hidden hidden lg:flex lg:flex-col lg:flex-1 lg:min-h-0">
+        {/* Scrolls inside itself (an opened row, a narrow window) so the page never has to. */}
+        <div ref={tableBodyRef} onScroll={() => setOpenMenuId(null)} className="flex-1 min-h-0 overflow-auto">
+          {listMessage ? (
+            <div className="p-4">{listMessage}</div>
+          ) : (
+            /* Fixed column widths: every column keeps the same place and size whichever filter is on,
+               instead of stretching and shrinking to fit whatever happens to be in the rows. */
+            <table className="w-full text-sm [table-layout:fixed] min-w-[980px]">
+              <thead className="sticky top-0 z-10 bg-gray-50 shadow-[inset_0_-1px_0_0_#f3f4f6]">
+                <tr className="bg-gray-50">
+                  <SortHeader<SaleSortKey> label="Invoice" sortKey="invoice" activeKey={sortKey} dir={sortDir} onClick={toggleSort} className="w-[13%]" />
+                  <SortHeader<SaleSortKey> label="Date" sortKey="date" activeKey={sortKey} dir={sortDir} onClick={toggleSort} className="w-[14%]" />
+                  <SortHeader<SaleSortKey> label="Customer" sortKey="customer" activeKey={sortKey} dir={sortDir} onClick={toggleSort} className="w-[14%]" />
+                  <Th className="w-[8%]">Type</Th>
+                  <SortHeader<SaleSortKey> label="Total" sortKey="total" activeKey={sortKey} dir={sortDir} onClick={toggleSort} className="w-[10%]" />
+                  <SortHeader<SaleSortKey> label="Paid" sortKey="paid" activeKey={sortKey} dir={sortDir} onClick={toggleSort} className="w-[10%]" />
+                  <Th className="w-[12%]">Payment</Th>
+                  <Th className="w-[14%]">Status</Th>
+                  <Th className="w-[5%]"></Th>
                 </tr>
               </thead>
               <tbody>
-                {sortedSales.map((sale) => (
+                {pageSales.map((sale) => (
                   <Fragment key={sale.id}>
                     <tr
                       onClick={() => toggleExpand(sale)}
+                      style={{ height: ROW_HEIGHT }}
                       className={`cursor-pointer hover:bg-gray-50 ${sale.is_voided ? "opacity-50" : ""}`}
                     >
                       <Td>
@@ -800,18 +940,18 @@ export default function SaleHistoryPage() {
                         </div>
                         <ExchangeTag sale={sale} />
                       </Td>
-                      <Td>{sale.date.slice(0, 16).replace("T", " ")}</Td>
-                      <Td>
+                      <Td className="whitespace-nowrap">{sale.date.slice(0, 16).replace("T", " ")}</Td>
+                      <Td className="truncate" title={sale.customer_name ?? sale.deleted_customer_snapshot ?? "Walk-in"}>
                         <CustomerName sale={sale} />
                       </Td>
                       <Td>{sale.sale_type === "online" ? "Online" : "In-Store"}</Td>
-                      <Td>Rs. {sale.total.toLocaleString()}</Td>
-                      <Td>Rs. {sale.amount_paid.toLocaleString()}</Td>
+                      <Td className="whitespace-nowrap tabular-nums">Rs. {sale.total.toLocaleString()}</Td>
+                      <Td className="whitespace-nowrap tabular-nums">Rs. {sale.amount_paid.toLocaleString()}</Td>
                       <Td>
                         <div className="capitalize">{salePaymentLabel(sale)}</div>
-                        {sale.change_due > 0 && <div className="text-xs text-gray-400">Change: Rs. {sale.change_due.toLocaleString()}</div>}
+                        {sale.change_due > 0 && <div className="text-xs text-gray-400 whitespace-nowrap">Change: Rs. {sale.change_due.toLocaleString()}</div>}
                         {sale.overpaid_amount > 0 && (
-                          <div className="text-xs text-amber-600">Overpaid: Rs. {sale.overpaid_amount.toLocaleString()}</div>
+                          <div className="text-xs text-amber-600 whitespace-nowrap">Overpaid: Rs. {sale.overpaid_amount.toLocaleString()}</div>
                         )}
                       </Td>
                       <Td>
@@ -820,19 +960,17 @@ export default function SaleHistoryPage() {
                       <Td>
                         <div className="relative" ref={openMenuId === sale.id ? desktopMenuRef : undefined}>
                           <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setOpenMenuId(openMenuId === sale.id ? null : sale.id);
-                            }}
+                            onClick={(e) => toggleMenu(e, sale.id)}
                             className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition"
                             title="Actions"
                           >
                             <MoreVertical size={16} />
                           </button>
-                          {openMenuId === sale.id && (
+                          {openMenuId === sale.id && menuPos && (
                             <div
                               onClick={(e: MouseEvent) => e.stopPropagation()}
-                              className="absolute right-0 z-20 mt-1 w-44 bg-white border border-gray-200 rounded-xl shadow-lg py-1"
+                              style={{ position: "fixed", ...menuPos }}
+                              className="z-30 w-44 overflow-y-auto bg-white border border-gray-200 rounded-xl shadow-lg py-1"
                             >
                               {renderActionsMenuItems(sale)}
                             </div>
@@ -850,12 +988,20 @@ export default function SaleHistoryPage() {
                   </Fragment>
                 ))}
               </tbody>
-            </Table>
-          </Card>
+            </table>
+          )}
+        </div>
+        {/* Always there, so the table area above keeps one height whether it is loading, empty or full. */}
+        {pager}
+      </Card>
 
-          {/* Mobile / tablet-portrait: stacked cards, same tap-to-expand */}
-          <div className="lg:hidden space-y-2.5">
-            {sortedSales.map((sale) => {
+      {/* Mobile / tablet-portrait: stacked cards, same tap-to-expand */}
+      <div className="lg:hidden">
+        {listMessage}
+        {!listMessage && (
+          <>
+          <div className="space-y-2.5">
+            {pageSales.map((sale) => {
               const isExpanded = expanded?.id === sale.id;
               return (
                 <RowCard key={sale.id} onClick={() => toggleExpand(sale)} className={sale.is_voided ? "opacity-50" : ""}>
@@ -912,8 +1058,10 @@ export default function SaleHistoryPage() {
               );
             })}
           </div>
-        </>
-      )}
+          <Card className="p-0 overflow-hidden mt-3">{pager}</Card>
+          </>
+        )}
+      </div>
 
       {receiptSale && (
         <ReceiptOptionsModal
