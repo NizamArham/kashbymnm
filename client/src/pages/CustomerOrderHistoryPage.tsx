@@ -256,11 +256,13 @@ export default function CustomerOrderHistoryPage() {
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
-                                  {groupSaleItemsForDisplay(items).map((item, i) => (
+                                  {groupSaleItemsForDisplay(items, { wholesale: !!sale.is_wholesale }).map((item, i) => (
                                     <tr key={item.ids.join(",")} className={i % 2 === 1 ? "bg-gray-50/50" : ""}>
                                       <td className="px-4 py-2 font-medium text-gray-900 min-w-[16rem]">{item.product_title ?? "—"}</td>
                                       <td className="px-4 py-2 text-gray-600">
-                                        {[item.size, item.color].filter(Boolean).join(" / ") || "—"}
+                                        {sale.is_wholesale && item.merged_lines && item.merged_lines > 1
+                                          ? `${item.merged_lines} sizes / colours`
+                                          : [item.size, item.color].filter(Boolean).join(" / ") || "—"}
                                       </td>
                                       <td
                                         onClick={(e) => item.sku && copySku(`sku-${item.ids.join(",")}`, item.sku, e)}

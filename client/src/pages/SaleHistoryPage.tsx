@@ -1,5 +1,5 @@
 import { useEffect, useState, Fragment, useMemo, MouseEvent, useRef, ReactNode } from "react";
-import { ChevronDown, ChevronRight, Receipt, Printer, MoreVertical, Wallet, Download, FileText, MessageCircle, Star, Repeat } from "lucide-react";
+import { ChevronDown, ChevronRight, Receipt, Printer, MoreVertical, Wallet, Download, FileText, MessageCircle, Star, Repeat, TrendingUp, Search, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiRequestError } from "../lib/api";
 import { Sale } from "../lib/types";
@@ -8,24 +8,51 @@ import { downloadA4Pdf, downloadThermalPdf, sendWhatsAppBill, groupSaleItemsForD
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { useSortableData } from "../lib/useSortableData";
 import { useCopyToClipboard } from "../lib/useCopyToClipboard";
-import { isAwaitingCod, salePaymentLabel } from "../lib/salePayment";
-import { PageHeader, Card, Table, Th, Td, Badge, SortHeader, paymentStatusTone, EmptyState, ErrorText, DateRangePicker, Button, RowCard, RowCardStats, RowCardStat, FormGroup, Label, Input, Modal, RefLink } from "../components/ui";
+import { isAwaitingCod, salePaymentLabel, saleStatusLabel } from "../lib/salePayment";
+import { PageHeader, Card, Table, Th, Td, Badge, SortHeader, paymentStatusTone, EmptyState, ErrorText, DateRangePicker, Button, RowCard, RowCardStats, RowCardStat, FormGroup, Label, Input, Modal, RefLink, TabToggle } from "../components/ui";
 import ReceiptOptionsModal, { ModalOption } from "../components/ReceiptOptionsModal";
 import ExchangeTag from "../components/ExchangeTag";
+import SaleProfitModal from "../components/SaleProfitModal";
 import DeliveryChargeSummary from "../components/DeliveryChargeSummary";
 import { useAuth } from "../context/AuthContext";
 
-type HistoryTab = "today" | "week" | "month" | "cash" | "credit_cod" | "voided";
+// Two separate questions, each answered on its own: WHEN (the period, or a custom date range) and
+// WHAT KIND of sale. They used to share one row of tabs, so picking "Voided" forgot the period.
+type Period = "today" | "week" | "month" | "all";
+type Kind = "all" | "cash" | "credit" | "cod" | "wholesale" | "voided";
 type SaleSortKey = "invoice" | "date" | "customer" | "total" | "paid";
 
-const TABS: { value: HistoryTab; label: string }[] = [
+const PERIODS: { value: Period; label: string }[] = [
   { value: "today", label: "Today" },
-  { value: "week", label: "This Week" },
-  { value: "month", label: "This Month" },
-  { value: "cash", label: "Cash Sales" },
-  { value: "credit_cod", label: "Credit / COD" },
+  { value: "week", label: "This week" },
+  { value: "month", label: "This month" },
+  { value: "all", label: "All time" },
+];
+
+const KINDS: { value: Kind; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "cash", label: "Cash" },
+  { value: "credit", label: "Credit / not paid" },
+  { value: "cod", label: "COD" },
+  { value: "wholesale", label: "Wholesale" },
   { value: "voided", label: "Voided" },
 ];
+
+// The invoice number already says what kind of order it is: OCD = online cash on delivery,
+// SCR / OCR = in-store / online credit, OPS = online paid up front, STR = in-store paid.
+const isCodSale = (s: Sale) => s.invoice.startsWith("OCD");
+
+// A voided invoice earned and owes nothing, so it only appears under "Voided".
+const KIND_FILTER: Record<Kind, (s: Sale) => boolean> = {
+  all: (s) => !s.is_voided,
+  cash: (s) => s.payment_method === "cash" && !s.is_voided && !isAwaitingCod(s),
+  // Still owes money: a credit sale not yet settled, or any part-paid bill — but not a COD that is
+  // simply on its way (that's under COD).
+  credit: (s) => !s.is_voided && s.payment_status !== "paid" && !isCodSale(s),
+  cod: (s) => !s.is_voided && isCodSale(s),
+  wholesale: (s) => !s.is_voided && !!s.is_wholesale,
+  voided: (s) => !!s.is_voided,
+};
 
 function toISODate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -52,7 +79,7 @@ function formatLongMonthYear(iso: string): string {
 // This is the VALUE for the header block's "Report" row — "Report" is
 // the label now, so this no longer repeats the word itself (matching
 // how the invoice's own kvRow values never restate their label).
-function reportTitleFor(tab: HistoryTab, startDate: string | null, endDate: string | null): string {
+function reportTitleFor(tab: Period, startDate: string | null, endDate: string | null): string {
   if (startDate && endDate) {
     return startDate === endDate ? `Sales — ${formatLongDate(startDate)}` : `Sales — ${formatShortDate(startDate)} to ${formatLongDate(endDate)}`;
   }
@@ -63,8 +90,7 @@ function reportTitleFor(tab: HistoryTab, startDate: string | null, endDate: stri
     return `Sales — ${formatShortDate(toISODate(weekAgo))} to ${formatLongDate(toISODate(new Date()))}`;
   }
   if (tab === "month") return `Sales — ${formatLongMonthYear(toISODate(new Date()))}`;
-  const label = TABS.find((t) => t.value === tab)?.label ?? "Sales";
-  return label;
+  return `Sales — ${PERIODS.find((p) => p.value === tab)?.label ?? "All time"}`;
 }
 
 // "This Month" on its own doesn't say what it actually covers — this
@@ -132,6 +158,7 @@ export default function SaleHistoryPage() {
   const [codConfirmSale, setCodConfirmSale] = useState<Sale | null>(null);
   // The already-rung-up sale being marked wholesale (admin): takes back its loyalty points.
   const [wholesaleSale, setWholesaleSale] = useState<Sale | null>(null);
+  const [profitSale, setProfitSale] = useState<Sale | null>(null);
   const [wholesaleReason, setWholesaleReason] = useState("");
   const [wholesaleError, setWholesaleError] = useState<string | null>(null);
   const [wholesaleBusy, setWholesaleBusy] = useState(false);
@@ -140,7 +167,9 @@ export default function SaleHistoryPage() {
   const [codPaymentMethod, setCodPaymentMethod] = useState<"cash" | "bank_transfer" | "card">("cash");
   const [undoingId, setUndoingId] = useState<number | null>(null);
 
-  const [activeTab, setActiveTab] = useState<HistoryTab>("month");
+  const [period, setPeriod] = useState<Period>("month");
+  const [kind, setKind] = useState<Kind>("all");
+  const [search, setSearch] = useState("");
 
   const [startDate, setStartDate] = useState<string | null>(null);
   const [endDate, setEndDate] = useState<string | null>(null);
@@ -164,42 +193,49 @@ export default function SaleHistoryPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const filteredSales = useMemo(() => {
-    let result = sales;
-
+  // First by when…
+  const inPeriod = useMemo(() => {
     if (startDate && endDate) {
-      result = result.filter((s) => {
+      return sales.filter((s) => {
         const d = s.date.slice(0, 10);
         return d >= startDate && d <= endDate;
       });
-    } else {
-      const today = toISODate(new Date());
-      if (activeTab === "today") {
-        result = result.filter((s) => s.date.slice(0, 10) === today);
-      } else if (activeTab === "week") {
-        const weekAgo = new Date();
-        weekAgo.setDate(weekAgo.getDate() - 6);
-        const start = toISODate(weekAgo);
-        result = result.filter((s) => s.date.slice(0, 10) >= start);
-      } else if (activeTab === "month") {
-        const now = new Date();
-        const monthStart = toISODate(new Date(now.getFullYear(), now.getMonth(), 1));
-        result = result.filter((s) => s.date.slice(0, 10) >= monthStart);
-      }
     }
-
-    if (activeTab === "cash") {
-      result = result.filter((s) => s.payment_method === "cash" && !s.is_voided && !isAwaitingCod(s));
-    } else if (activeTab === "credit_cod") {
-      result = result.filter((s) => (s.payment_method === "credit" || s.sale_type === "online") && !s.is_voided);
-    } else if (activeTab === "voided") {
-      result = result.filter((s) => s.is_voided);
-    } else {
-      result = result.filter((s) => !s.is_voided);
+    const today = toISODate(new Date());
+    if (period === "today") return sales.filter((s) => s.date.slice(0, 10) === today);
+    if (period === "week") {
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 6);
+      const start = toISODate(weekAgo);
+      return sales.filter((s) => s.date.slice(0, 10) >= start);
     }
+    if (period === "month") {
+      const now = new Date();
+      const monthStart = toISODate(new Date(now.getFullYear(), now.getMonth(), 1));
+      return sales.filter((s) => s.date.slice(0, 10) >= monthStart);
+    }
+    return sales;
+  }, [sales, period, startDate, endDate]);
 
-    return result;
-  }, [sales, activeTab, startDate, endDate]);
+  // …how many of each kind fall in that period (shown on the kind buttons)…
+  const kindCounts = useMemo(() => {
+    const counts = {} as Record<Kind, number>;
+    for (const k of KINDS) counts[k.value] = inPeriod.filter(KIND_FILTER[k.value]).length;
+    return counts;
+  }, [inPeriod]);
+
+  // …then the kind and anything typed in the search box (invoice number or customer).
+  const filteredSales = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return inPeriod.filter(KIND_FILTER[kind]).filter((s) => {
+      if (!q) return true;
+      return (
+        s.invoice.toLowerCase().includes(q) ||
+        (s.customer_name ?? s.deleted_customer_snapshot ?? "walk-in").toLowerCase().includes(q) ||
+        (s.customer_phone ?? "").includes(q)
+      );
+    });
+  }, [inPeriod, kind, search]);
 
   const { sorted: sortedSales, sortKey, sortDir, toggleSort } = useSortableData<Sale, SaleSortKey>(
     filteredSales,
@@ -230,7 +266,7 @@ export default function SaleHistoryPage() {
   // elsewhere, since `sales` already holds everything and filtering is
   // done client-side.
   function downloadSalesPdf() {
-    const activeTabLabel = TABS.find((t) => t.value === activeTab)?.label ?? "Sales";
+    const periodLabel = PERIODS.find((p) => p.value === period)?.label ?? "Sales";
     let rangeLabel: string;
     // Short and filename-safe — deliberately separate from rangeLabel
     // above, which is free to be as descriptive as the page needs.
@@ -238,33 +274,34 @@ export default function SaleHistoryPage() {
     if (startDate && endDate) {
       rangeLabel = rangeLabelFor(startDate, endDate);
       filenameTag = filenameRangeTag(startDate, endDate);
-    } else if (activeTab === "today") {
+    } else if (period === "today") {
       const today = toISODate(new Date());
-      rangeLabel = formatPresetRange(today, today, activeTabLabel);
+      rangeLabel = formatPresetRange(today, today, periodLabel);
       filenameTag = filenameRangeTag(today, today);
-    } else if (activeTab === "week") {
+    } else if (period === "week") {
       const weekAgo = new Date();
       weekAgo.setDate(weekAgo.getDate() - 6);
-      rangeLabel = formatPresetRange(toISODate(weekAgo), toISODate(new Date()), activeTabLabel);
+      rangeLabel = formatPresetRange(toISODate(weekAgo), toISODate(new Date()), periodLabel);
       filenameTag = filenameRangeTag(toISODate(weekAgo), toISODate(new Date()));
-    } else if (activeTab === "month") {
+    } else if (period === "month") {
       const now = new Date();
       const monthStart = toISODate(new Date(now.getFullYear(), now.getMonth(), 1));
-      rangeLabel = formatPresetRange(monthStart, toISODate(now), activeTabLabel);
+      rangeLabel = formatPresetRange(monthStart, toISODate(now), periodLabel);
       // The common case — a whole month's report — gets the plain
       // "Sep2026" tag rather than a day-range, since that's what it
       // actually is once you're downloading the current month's sales.
       filenameTag = now.toLocaleDateString("en-GB", { month: "short", year: "numeric" }).replace(/\s+/g, "");
     } else {
-      rangeLabel = activeTabLabel;
-      filenameTag = activeTabLabel.replace(/[^\w]+/g, "");
+      rangeLabel = periodLabel;
+      filenameTag = periodLabel.replace(/[^\w]+/g, "");
     }
 
     downloadTabularReport({
       headerLabel: "M&M Clothing — Sales Report",
       headerFields: [
-        { label: "Report", value: reportTitleFor(activeTab, startDate, endDate) },
+        { label: "Report", value: reportTitleFor(period, startDate, endDate) },
         { label: "Period", value: rangeLabel },
+        ...(kind !== "all" ? [{ label: "Showing", value: KINDS.find((k) => k.value === kind)?.label ?? "" }] : []),
         { label: "Generated", value: todayLongDate() },
       ],
       rangeLabel,
@@ -288,7 +325,7 @@ export default function SaleHistoryPage() {
           `Rs. ${sale.total.toLocaleString()}`,
           `Rs. ${sale.amount_paid.toLocaleString()}`,
           salePaymentLabel(sale),
-          sale.is_voided ? "Voided" : sale.payment_status,
+          sale.is_voided ? "Voided" : saleStatusLabel(sale),
         ],
         styles: sale.is_voided ? [{ color: 150 }, { color: 150 }, { color: 150 }, { color: 150 }, { color: 150 }, { color: 150 }, { color: 150 }, { color: 150 }] : undefined,
       })),
@@ -297,7 +334,7 @@ export default function SaleHistoryPage() {
         amount: `Rs. ${periodTotal.toLocaleString()}`,
         note: `${filteredSales.length} sale${filteredSales.length !== 1 ? "s" : ""}`,
       },
-      filename: buildReportFilename("Sales Report", rangeLabel),
+      filename: buildReportFilename(kind === "all" ? "Sales Report" : `Sales Report ${KINDS.find((k) => k.value === kind)?.label ?? ""}`, rangeLabel),
     });
   }
 
@@ -441,7 +478,7 @@ export default function SaleHistoryPage() {
             </tr>
           </thead>
           <tbody>
-            {groupSaleItemsForDisplay(sale.items ?? []).map((item) => (
+            {groupSaleItemsForDisplay(sale.items ?? [], { wholesale: !!sale.is_wholesale }).map((item) => (
               <tr key={item.ids.join(",")} className={item.is_returned ? "opacity-60" : ""}>
                 <td
                   onClick={(e) => item.sku && copySku(`sku-${item.ids.join(",")}`, item.sku, e)}
@@ -459,7 +496,13 @@ export default function SaleHistoryPage() {
                   ) : null}
                 </Td>
                 <Td className={item.is_returned ? "line-through" : ""}>
-                  {item.size ?? "—"} / {item.color ?? "—"}
+                  {sale.is_wholesale ? (
+                    <span className="text-gray-400">{item.merged_lines && item.merged_lines > 1 ? `${item.merged_lines} sizes / colours` : [item.size, item.color].filter(Boolean).join(" / ") || "—"}</span>
+                  ) : (
+                    <>
+                      {item.size ?? "—"} / {item.color ?? "—"}
+                    </>
+                  )}
                 </Td>
                 <Td className={item.is_returned ? "line-through" : ""}>{item.quantity}</Td>
                 <Td className={item.is_returned ? "line-through" : ""}>Rs. {item.unit_price.toLocaleString()}</Td>
@@ -468,6 +511,11 @@ export default function SaleHistoryPage() {
             ))}
           </tbody>
         </table>
+        {sale.is_wholesale ? (
+          <p className="text-xs text-gray-400 mt-2">
+            Wholesale bill — counted in pieces per product. <RefLink to={`/sales/${sale.id}`}>Open the invoice</RefLink> for the size and colour breakdown.
+          </p>
+        ) : null}
         {sale.discount > 0 && (
           <p className="text-xs text-gray-400 mt-2">
             Discounts & Coupons: Rs. {sale.discount.toLocaleString()}
@@ -567,6 +615,18 @@ export default function SaleHistoryPage() {
             Mark as wholesale
           </button>
         )}
+        {isAdmin && !sale.is_voided && sale.status !== "quotation" && (
+          <button
+            onClick={() => {
+              setOpenMenuId(null);
+              setProfitSale(sale);
+            }}
+            className="w-full flex items-center gap-2 px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition"
+          >
+            <TrendingUp size={14} />
+            Profit on this bill
+          </button>
+        )}
         {isAdmin && !sale.is_voided && (
           <button
             onClick={() => handleVoid(sale)}
@@ -608,26 +668,67 @@ export default function SaleHistoryPage() {
         }
       />
 
-      <div className="flex items-center gap-2 mb-4 flex-wrap">
-        {TABS.map((tab) => (
-          <button
-            key={tab.value}
-            onClick={() => {
-              setActiveTab(tab.value);
+      {/* When… */}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <TabToggle<Period | "custom">
+            value={startDate && endDate ? "custom" : period}
+            onChange={(v) => {
+              if (v === "custom") return;
+              setPeriod(v);
               setStartDate(null);
               setEndDate(null);
             }}
-            className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition ${
-              activeTab === tab.value && !startDate
-                ? tab.value === "voided"
-                  ? "bg-red-600 text-white"
-                  : "bg-black text-white"
-                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
+            options={[...PERIODS, ...(startDate && endDate ? [{ value: "custom" as const, label: "Custom dates" }] : [])]}
+          />
+          {startDate && endDate && (
+            <button
+              onClick={() => {
+                setStartDate(null);
+                setEndDate(null);
+              }}
+              className="text-xs text-gray-400 hover:text-gray-700 underline"
+            >
+              Clear dates
+            </button>
+          )}
+        </div>
+        <div className="relative w-full sm:w-72">
+          <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <Input
+            className="py-2 pl-8 pr-8 text-sm"
+            placeholder="Invoice, customer or phone…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setSearch("");
+            }}
+          />
+          {search && (
+            <button onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600" title="Clear">
+              <X size={14} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* …and what kind of sale, with how many of each in that period. */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        {KINDS.map((k) => {
+          const active = kind === k.value;
+          return (
+            <button
+              key={k.value}
+              onClick={() => setKind(k.value)}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-sm font-medium transition ${
+                active ? (k.value === "voided" ? "bg-red-600 text-white" : "bg-black text-white") : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+            >
+              {k.label}
+              {!loading && <span className={`text-xs tabular-nums ${active ? "text-white/70" : "text-gray-400"}`}>{kindCounts[k.value]}</span>}
+            </button>
+          );
+        })}
       </div>
 
       {error && <ErrorText>{error}</ErrorText>}
@@ -635,13 +736,38 @@ export default function SaleHistoryPage() {
       {!loading && (
         <p className="text-xs text-gray-400 mb-3">
           {filteredSales.length} sale{filteredSales.length !== 1 ? "s" : ""} · Rs. {periodTotal.toLocaleString()} total
+          {kind === "credit" && filteredSales.length > 0 && (
+            <>
+              {" · "}
+              <span className="font-medium text-red-600">Rs. {filteredSales.reduce((sum, x) => sum + Math.max(0, x.total - x.amount_paid), 0).toLocaleString()} still owed</span>
+            </>
+          )}
+          {kind === "cod" && filteredSales.some((x) => x.payment_status !== "paid") && (
+            <> · {filteredSales.filter((x) => x.payment_status !== "paid").length} still to be collected</>
+          )}
+          {(kind !== "all" || search || (startDate && endDate)) && (
+            <>
+              {" · "}
+              <button
+                onClick={() => {
+                  setKind("all");
+                  setSearch("");
+                  setStartDate(null);
+                  setEndDate(null);
+                }}
+                className="underline hover:text-gray-700"
+              >
+                Clear filters
+              </button>
+            </>
+          )}
         </p>
       )}
 
       {loading ? (
         <p className="text-sm text-gray-400">Loading...</p>
       ) : filteredSales.length === 0 ? (
-        <EmptyState icon={Receipt} title="No sales match this view" />
+        <EmptyState icon={Receipt} title="No sales match these filters" subtitle="Try another period, or clear the filters." />
       ) : (
         <>
           {/* Desktop / tablet-landscape */}
@@ -689,7 +815,7 @@ export default function SaleHistoryPage() {
                         )}
                       </Td>
                       <Td>
-                        {sale.is_voided ? <Badge label="voided" tone="danger" /> : <Badge label={sale.payment_status} tone={paymentStatusTone(sale.payment_status)} />}
+                        {sale.is_voided ? <Badge label="voided" tone="danger" /> : <Badge label={saleStatusLabel(sale)} tone={saleStatusLabel(sale) === "exchange pending" ? "warning" : paymentStatusTone(sale.payment_status)} />}
                       </Td>
                       <Td>
                         <div className="relative" ref={openMenuId === sale.id ? desktopMenuRef : undefined}>
@@ -746,7 +872,7 @@ export default function SaleHistoryPage() {
                       </p>
                     </div>
                     <div className="flex-shrink-0 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                      {sale.is_voided ? <Badge label="voided" tone="danger" /> : <Badge label={sale.payment_status} tone={paymentStatusTone(sale.payment_status)} />}
+                      {sale.is_voided ? <Badge label="voided" tone="danger" /> : <Badge label={saleStatusLabel(sale)} tone={saleStatusLabel(sale) === "exchange pending" ? "warning" : paymentStatusTone(sale.payment_status)} />}
                       <div className="relative" ref={openMenuId === sale.id ? mobileMenuRef : undefined}>
                         <button
                           onClick={() => setOpenMenuId(openMenuId === sale.id ? null : sale.id)}
@@ -798,6 +924,8 @@ export default function SaleHistoryPage() {
           onClose={() => setReceiptSale(null)}
         />
       )}
+
+      {profitSale && <SaleProfitModal saleId={profitSale.id} invoice={profitSale.invoice} onClose={() => setProfitSale(null)} />}
 
       {wholesaleSale && (
         <Modal

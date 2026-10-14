@@ -255,6 +255,8 @@ function buildView(result: FindResult): ResultView {
       const inTransit = !!d.delivery_status && ["pending", "packed", "dispatched"].includes(d.delivery_status);
       const balanceStat: Stat = d.is_voided
         ? { label: "Balance", value: "—", tone: "muted" }
+        : d.exchange_in_status === "awaiting_pickup" && owed > 0
+        ? { label: "Waiting for the old item", value: money(owed), hint: "its value comes off when the old item is received" }
         : isCod && inTransit
         ? { label: "COD to collect", value: money(owed), hint: "paid at the door" }
         : isCod && d.delivery_status === "delivered" && d.delivery_partner_name
@@ -268,7 +270,7 @@ function buildView(result: FindResult): ResultView {
           <>
             {d.is_voided ? <Badge label="Voided" /> : null}
             <Badge label={d.sale_type === "online" ? "Online" : "In-store"} />
-            <Badge label={cap(d.payment_status)} />
+            <Badge label={d.exchange_in_status === "awaiting_pickup" && d.payment_status !== "paid" ? "Exchange pending" : cap(d.payment_status)} />
             {d.delivery_status && <Badge label={`Delivery: ${cap(d.delivery_status)}`} />}
             <ExchangeTag sale={d} className="!mt-0" />
           </>
