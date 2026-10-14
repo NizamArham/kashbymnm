@@ -49,7 +49,9 @@ export type AuditAction =
   | "sale_payment_recorded"
   | "loyalty_adjust"
   | "loyalty_block"
-  | "sale_wholesale";
+  | "sale_wholesale"
+  | "cashier_mode_on"
+  | "cashier_mode_off";
 
 export function logAudit(
   actor: AuthUser,

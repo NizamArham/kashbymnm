@@ -114,6 +114,44 @@ authRouter.post(
   })
 );
 
+// POST /api/auth/cashier-mode — an admin steps into a staff-level session to work the till. They stay
+// themselves (same name on the sales, same audit trail), but the session is staff in every way the
+// server checks, so admin screens and actions are really closed, not just hidden.
+authRouter.post(
+  "/cashier-mode",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const me = db.prepare(`SELECT id, username, role, name FROM users WHERE id = ?`).get(req.user!.id) as
+      | { id: number; username: string; role: "admin" | "staff"; name: string | null }
+      | undefined;
+    if (!me || me.role !== "admin") throw new ApiError(403, "Only an admin can switch to cashier mode");
+
+    const user = { id: me.id, username: me.username, role: "staff" as const, name: me.name, cashier_mode: true };
+    if (!req.user!.cashier_mode) logAudit(req.user!, "cashier_mode_on", "staff", me.id, `${me.name ?? me.username} switched to cashier mode`);
+    res.json({ token: signToken(user), user });
+  })
+);
+
+// POST /api/auth/exit-cashier-mode — back to the admin session. Needs the admin's own password, so
+// nobody else at the till can step up to admin from a cashier-mode screen. A wrong password is a 403,
+// not a 401: the app treats a 401 on a logged-in request as an expired session and signs you out.
+authRouter.post(
+  "/exit-cashier-mode",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    if (!req.user!.cashier_mode) throw new ApiError(400, "This session isn't in cashier mode");
+    const { password } = z.object({ password: z.string().min(1, "Enter your password") }).parse(req.body);
+
+    const me = db.prepare(`SELECT * FROM users WHERE id = ?`).get(req.user!.id) as any;
+    if (!me || me.role !== "admin") throw new ApiError(403, "This account is no longer an admin");
+    if (!bcrypt.compareSync(password, me.password_hash)) throw new ApiError(403, "That password isn't right");
+
+    const user = { id: me.id, username: me.username, role: "admin" as const, name: me.name };
+    logAudit(req.user!, "cashier_mode_off", "staff", me.id, `${me.name ?? me.username} went back to admin`);
+    res.json({ token: signToken(user), user });
+  })
+);
+
 // GET /api/auth/me — confirms who you are, useful for the frontend on page load
 authRouter.get(
   "/me",

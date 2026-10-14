@@ -56,6 +56,8 @@ const ACTION_META: Record<string, { label: string; icon: typeof AlertTriangle; t
   loyalty_adjust: { label: "Changed loyalty points", icon: Pencil, tone: "neutral" },
   loyalty_block: { label: "Changed whether a customer earns points", icon: Pencil, tone: "neutral" },
   sale_wholesale: { label: "Marked sale wholesale", icon: Pencil, tone: "neutral" },
+  cashier_mode_on: { label: "Switched to cashier mode", icon: UserCog, tone: "neutral" },
+  cashier_mode_off: { label: "Went back to admin", icon: UserCog, tone: "neutral" },
 };
 
 function actionMeta(action: string) {

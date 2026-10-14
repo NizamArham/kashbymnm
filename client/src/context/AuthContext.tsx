@@ -7,6 +7,9 @@ interface AuthContextValue {
   loading: boolean;
   login: (username: string, password: string) => Promise<AuthUser>;
   logout: () => void;
+  // An admin steps into a staff-level session to work the till, and back out with their password.
+  enterCashierMode: () => Promise<AuthUser>;
+  exitCashierMode: (password: string) => Promise<AuthUser>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -35,6 +38,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return result.user;
   }
 
+  async function switchSession(path: string, body: unknown) {
+    const result = await api.post<{ token: string; user: AuthUser }>(path, body);
+    localStorage.setItem("mm_token", result.token);
+    localStorage.setItem("mm_user", JSON.stringify(result.user));
+    setUser(result.user);
+    return result.user;
+  }
+
+  const enterCashierMode = () => switchSession("/auth/cashier-mode", {});
+  const exitCashierMode = (password: string) => switchSession("/auth/exit-cashier-mode", { password });
+
   function logout() {
     localStorage.removeItem("mm_token");
     localStorage.removeItem("mm_user");
@@ -42,7 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, enterCashierMode, exitCashierMode }}>
       {children}
     </AuthContext.Provider>
   );

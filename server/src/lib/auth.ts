@@ -15,6 +15,9 @@ export interface AuthUser {
   username: string;
   role: UserRole;
   name: string | null;
+  // An admin working the till: the session is staff-level (so the server really does refuse
+  // admin actions), but it is still that admin — their name goes on the sales they ring up.
+  cashier_mode?: boolean;
 }
 
 export function signToken(user: AuthUser): string {

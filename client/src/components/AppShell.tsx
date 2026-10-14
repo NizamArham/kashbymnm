@@ -34,6 +34,7 @@ import {
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useNavShortcuts, navShortcutHint } from "../lib/navShortcuts";
+import CashierModeControl from "./CashierModeControl";
 
 interface MenuSubItem {
   id: string;
@@ -57,6 +58,8 @@ export default function AppShell() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const isAdmin = user?.role === "admin";
+  // An admin working the till: a staff-level session, so isAdmin above is false and every admin screen is closed.
+  const inCashierMode = !!user?.cashier_mode;
   useNavShortcuts(isAdmin);
 
   // Accordion — only one section's sub-items are ever open at a time.
@@ -259,7 +262,7 @@ export default function AppShell() {
               <X size={20} />
             </button>
           </div>
-          <p className="text-xs lg:text-sm text-gray-400">{isAdmin ? "Admin Console" : "Staff Console"}</p>
+          <p className="text-xs lg:text-sm text-gray-400">{inCashierMode ? "Cashier mode" : isAdmin ? "Admin Console" : "Staff Console"}</p>
         </div>
 
         <div className="flex-1 p-3 lg:p-4 space-y-1 lg:space-y-2 overflow-y-auto">
@@ -335,13 +338,14 @@ export default function AppShell() {
             </div>
             <div className="flex-1 min-w-0 hidden lg:block">
               <p className="text-sm font-medium text-gray-200 truncate">{user?.name || user?.username}</p>
-              <p className="text-xs text-gray-500 capitalize">{user?.role}</p>
+              <p className="text-xs text-gray-500 capitalize">{inCashierMode ? "Cashier mode" : user?.role}</p>
             </div>
           </Link>
-          <div className="px-3 lg:px-4 pb-3 lg:pb-4">
+          <div className="px-3 lg:px-4 pb-3 lg:pb-4 flex items-stretch gap-2">
+            <CashierModeControl onDone={handleLinkClick} />
             <button
               onClick={handleLogout}
-              className="w-full flex items-center justify-center gap-2 px-2 lg:px-3 py-1.5 lg:py-2 bg-black border border-red-500/30 text-red-400 rounded-lg hover:bg-red-600 hover:text-white hover:border-red-600 transition text-xs lg:text-sm"
+              className="flex-1 flex items-center justify-center gap-2 px-2 lg:px-3 py-1.5 lg:py-2 bg-black border border-red-500/30 text-red-400 rounded-lg hover:bg-red-600 hover:text-white hover:border-red-600 transition text-xs lg:text-sm"
             >
               <LogOut size={14} />
               <span className="font-medium">Logout</span>

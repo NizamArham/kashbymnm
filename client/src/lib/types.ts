@@ -5,6 +5,8 @@ export interface AuthUser {
   username: string;
   role: UserRole;
   name: string | null;
+  // An admin working the till in a staff-level session (see Cashier mode in the sidebar).
+  cashier_mode?: boolean;
 }
 
 // Full HR record — salary/bank fields are only ever populated by the
