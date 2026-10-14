@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, Fragment, useRef } from "react";
-import { Users, Search, MessageCircle, Pencil, Plus, Star, X, ChevronDown, ChevronRight, Wallet, UserX, UserCheck, Trash2, AlertTriangle, ArrowLeft, Building2, FileText, MoreHorizontal, ShoppingBag, Receipt } from "lucide-react";
+import { Users, Search, Lock, MessageCircle, Pencil, Plus, Star, X, ChevronDown, ChevronRight, Wallet, UserX, UserCheck, Trash2, AlertTriangle, ArrowLeft, Building2, FileText, MoreHorizontal, ShoppingBag, Receipt } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Customer, CustomerAddress, BankAccount, CustomerGender } from "../lib/types";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -14,6 +14,8 @@ import { useSortableData } from "../lib/useSortableData";
 import { downloadBalanceSlip } from "../lib/balanceSlip";
 import { whatsappMessageLink, loyaltyPointsMessage } from "../lib/whatsapp";
 import { normalizePhone, phoneError, whatsappNumber } from "../lib/phone";
+import { findCustomers, CASHIER_SEARCH_MIN_CHARS } from "../lib/customerSearch";
+import { useAdminApproval } from "../components/AdminApproval";
 import PhoneInput from "../components/PhoneInput";
 
 function whatsappLink(phone: string): string {
@@ -131,6 +133,9 @@ export default function ViewCustomersPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+  // A cashier can look up "who owes" only with an admin's password typed at the till, once per look.
+  const { runWithApproval } = useAdminApproval();
+  const [showingCredit, setShowingCredit] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   // A customer opened from a link elsewhere is shown as the first row, whatever
@@ -235,10 +240,19 @@ export default function ViewCustomersPage() {
   const [editAddr, setEditAddr] = useState({ address_line1: "", address_line2: "", city: "" });
   const [editAddrError, setEditAddrError] = useState<string | null>(null);
 
+  // An admin sees everyone. A cashier sees nobody until they type a customer's FULL name or phone number
+  // (the server only answers an exact match), so there is no list to browse or read off the screen.
   async function load() {
     setLoading(true);
     try {
-      setCustomers(await api.get<Customer[]>("/customers"));
+      if (isAdmin) setCustomers(await api.get<Customer[]>("/customers"));
+      else if (showingCredit) {
+        // The credit list was unlocked once; refreshing it (after a payment, say) just re-reads those same
+        // people — no second password — and drops anyone who no longer owes.
+        const again = await Promise.all(customers.map((c) => api.get<Customer>(`/customers/${c.id}`)));
+        setCustomers(again.filter((c) => c.balance_due > 0));
+      }
+      else setCustomers(query.trim().length >= CASHIER_SEARCH_MIN_CHARS ? await findCustomers(query) : []);
     } catch (err) {
       setError(err instanceof ApiRequestError ? err.message : "Failed to load customers");
     } finally {
@@ -250,15 +264,78 @@ export default function ViewCustomersPage() {
     load();
   }, []);
 
+  // A cashier's search: a beat after the last keystroke (Enter doesn't wait). Part of a name or number
+  // (3+ characters) brings up a few people at most — there is no list to browse.
+  const exactSearchSeq = useRef(0);
+  function searchExactly(text: string) {
+    const seq = ++exactSearchSeq.current;
+    const q = text.trim();
+    if (q.length < CASHIER_SEARCH_MIN_CHARS) {
+      setCustomers([]);
+      return;
+    }
+    findCustomers(q)
+      .then((found) => {
+        if (seq === exactSearchSeq.current) setCustomers(found);
+      })
+      .catch(() => {
+        if (seq === exactSearchSeq.current) setCustomers([]);
+      });
+  }
+  // Only typing starts a search: arriving from a link (which opens one customer) mustn't be wiped by an
+  // empty search firing a moment later.
+  const userTyped = useRef(false);
+  // "Credit customers": who owes money, for a cashier — a one-time look, after an admin types their password.
+  async function showCreditCustomers() {
+    setError(null);
+    try {
+      const owing = await runWithApproval((approval) => api.get<Customer[]>("/customers?owing=1", { approval }));
+      exactSearchSeq.current++;
+      userTyped.current = false;
+      setQuery("");
+      setExpandedId(null);
+      setShowingCredit(true);
+      setCustomers(owing);
+      if (sortKey !== "balance") toggleSort("balance"); // most owing first (their balance is the most negative)
+    } catch (err) {
+      // A cancelled password prompt just leaves things as they were.
+      if (!(err instanceof ApiRequestError && err.code === "needs_approval")) {
+        setError(err instanceof ApiRequestError ? err.message : "Couldn't load the credit customers");
+      }
+    }
+  }
+  function hideCreditCustomers() {
+    if (sortKey === "balance") toggleSort("name");
+    setShowingCredit(false);
+    setExpandedId(null);
+    setCustomers([]);
+  }
+
+  useEffect(() => {
+    if (isAdmin || !userTyped.current) return;
+    const timer = window.setTimeout(() => searchExactly(query), 300);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, isAdmin]);
+
   // Arriving from a customer's name elsewhere (e.g. Sale History links to
   // /customers?open=12): once the list is in, open that customer's profile
   // as the first row.
   useEffect(() => {
     const openId = Number(searchParams.get("open"));
+    // A cashier has no list to find them in, so fetch just that one customer (they were already on screen elsewhere).
+    if (openId && !isAdmin && !customers.some((c) => c.id === openId)) {
+      api
+        .get<Customer>(`/customers/${openId}`)
+        .then((one) => setCustomers([one]))
+        .catch(() => setSearchParams({}, { replace: true }));
+      return;
+    }
     if (!openId || customers.length === 0) return;
     setSearchParams({}, { replace: true });
     const target = customers.find((c) => c.id === openId);
     if (!target) return;
+    userTyped.current = false;
     setQuery("");
     setPinnedId(openId);
     window.scrollTo({ top: 0 });
@@ -754,6 +831,9 @@ export default function ViewCustomersPage() {
   }
 
   const filteredCustomers = useMemo(() => {
+    // A cashier's list already is the exact match the server found (a typed "0771234567" is a stored
+    // "771234567"), so it isn't filtered again here.
+    if (!isAdmin) return customers;
     const trimmed = query.trim().toLowerCase();
     if (!trimmed) return customers;
     return customers.filter(
@@ -792,12 +872,13 @@ export default function ViewCustomersPage() {
         case "loyalty":
           return c.loyalty_points;
         case "balance":
-          return c.store_credit_balance - c.balance_due;
+          return (c.store_credit_balance ?? 0) - (c.balance_due ?? 0);
         case "last_order":
           return c.last_order_date ?? "";
       }
     },
-    "priority"
+    // Most-owing first is an admin's view; a cashier's list just goes by name.
+    isAdmin ? "priority" : "name"
   );
 
   const shownCustomers = useMemo(() => {
@@ -828,8 +909,39 @@ export default function ViewCustomersPage() {
           <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
             <Search size={16} className="text-gray-400" />
           </div>
-          <Input ref={searchInputRef} className="pl-10" placeholder="Search customers..." value={query} onChange={(e) => setQuery(e.target.value)} />
+          <Input
+            ref={searchInputRef}
+            className="pl-10"
+            placeholder={isAdmin ? "Search customers..." : "Type part of a name, or a phone number..."}
+            value={query}
+            onChange={(e) => {
+              userTyped.current = true;
+              if (showingCredit && sortKey === "balance") toggleSort("name");
+              setShowingCredit(false);
+              setQuery(e.target.value);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !isAdmin) searchExactly(query);
+            }}
+          />
         </div>
+        {!isAdmin && (
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <p className="text-xs text-gray-400">
+              {showingCredit ? "Customers who owe money, most owing first." : "Showing up to 5 people at a time."}
+            </p>
+            {showingCredit ? (
+              <Button size="sm" onClick={hideCreditCustomers}>
+                Hide the list
+              </Button>
+            ) : (
+              <Button size="sm" onClick={showCreditCustomers} className="inline-flex items-center gap-1.5" title="Needs an admin's password">
+                <Lock size={13} />
+                Credit customers
+              </Button>
+            )}
+          </div>
+        )}
       </Card>
 
       {error && <ErrorText>{error}</ErrorText>}
@@ -837,7 +949,21 @@ export default function ViewCustomersPage() {
       {loading ? (
         <p className="text-sm text-gray-400">Loading...</p>
       ) : filteredCustomers.length === 0 ? (
-        <EmptyState icon={Users} title={query ? "No matching customers" : "No customers yet"} />
+        isAdmin ? (
+          <EmptyState icon={Users} title={query ? "No matching customers" : "No customers yet"} />
+        ) : (
+          <EmptyState
+            icon={Users}
+            title={showingCredit ? "Nobody owes anything right now" : query.trim().length >= CASHIER_SEARCH_MIN_CHARS ? "No customer found" : "Find a customer"}
+            subtitle={
+              showingCredit
+                ? undefined
+                : query.trim().length >= CASHIER_SEARCH_MIN_CHARS
+                ? "Check the spelling, or try their phone number."
+                : "Type part of their name, or their phone number, above."
+            }
+          />
+        )
       ) : (
         <Card className="p-0 overflow-hidden">
           <Table>
@@ -848,14 +974,15 @@ export default function ViewCustomersPage() {
                 <SortHeader<CustomerSortKey> label="Name" sortKey="name" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
                 <SortHeader<CustomerSortKey> label="Phone" sortKey="phone" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
                 <SortHeader<CustomerSortKey> label="Loyalty points" sortKey="loyalty" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
-                <SortHeader<CustomerSortKey> label="Balance" sortKey="balance" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+                {/* A customer's balance is for admins in the list; a cashier sees it once that customer is opened. */}
+                {(isAdmin || showingCredit) && <SortHeader<CustomerSortKey> label="Balance" sortKey="balance" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />}
                 <SortHeader<CustomerSortKey> label="Last order" sortKey="last_order" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
               </tr>
             </thead>
             <tbody>
               {shownCustomers.map((c) => {
                 const isExpanded = expandedId === c.id;
-                const netBalance = c.store_credit_balance - c.balance_due;
+                const netBalance = (c.store_credit_balance ?? 0) - (c.balance_due ?? 0);
                 return (
                   <Fragment key={c.id}>
                     <tr data-customer-row={c.id} onClick={() => toggleExpand(c)} className="cursor-pointer hover:bg-gray-50">
@@ -876,15 +1003,17 @@ export default function ViewCustomersPage() {
                           {c.loyalty_points}
                         </span>
                       </Td>
-                      <Td className={netBalance < 0 ? "text-red-600 font-medium" : netBalance > 0 ? "text-green-700 font-medium" : ""}>
-                        {netBalance === 0 ? "—" : netBalance > 0 ? `+Rs. ${netBalance.toLocaleString()}` : `-Rs. ${Math.abs(netBalance).toLocaleString()}`}
-                      </Td>
+                      {(isAdmin || showingCredit) && (
+                        <Td className={netBalance < 0 ? "text-red-600 font-medium" : netBalance > 0 ? "text-green-700 font-medium" : ""}>
+                          {netBalance === 0 ? "—" : netBalance > 0 ? `+Rs. ${netBalance.toLocaleString()}` : `-Rs. ${Math.abs(netBalance).toLocaleString()}`}
+                        </Td>
+                      )}
                       <Td>{c.last_order_date ? c.last_order_date.slice(0, 10) : "—"}</Td>
                     </tr>
 
                     {isExpanded && expandedDetail && (
                       <tr>
-                        <Td colSpan={7} className="bg-gray-50">
+                        <Td colSpan={isAdmin || showingCredit ? 7 : 6} className="bg-gray-50">
                           <div className="py-3 px-1">
                             <div className="flex items-center justify-between mb-4">
                               <div>

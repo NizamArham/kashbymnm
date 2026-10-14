@@ -10,6 +10,8 @@ import { api } from "../lib/api";
 import { Customer, BusinessInfo } from "../lib/types";
 import { applyBusinessInfoToReturnAddress } from "../lib/businessInfo";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
+import { useAuth } from "../context/AuthContext";
+import { findCustomers, CASHIER_SEARCH_MIN_CHARS } from "../lib/customerSearch";
 import { previewPdf } from "../lib/pdfPreview";
 
 function formatLabelDate(d: Date): string {
@@ -20,6 +22,8 @@ function formatLabelDate(d: Date): string {
 type Step = "receiver" | "package";
 
 export default function WaybillGeneratorPage() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const [step, setStep] = useState<Step>("receiver");
 
   const [customerName, setCustomerName] = useState("");
@@ -169,12 +173,30 @@ export default function WaybillGeneratorPage() {
     return customers;
   }
 
+  // A cashier finds a saved customer by typing part of a name or number (the server answers with a few people at
+  // most, 3+ characters); an admin searches the whole list.
+  const exactSearchSeq = useRef(0);
+  async function searchCustomersExactly(value: string) {
+    const seq = ++exactSearchSeq.current;
+    try {
+      const found = await findCustomers(value);
+      if (seq === exactSearchSeq.current) setCustomerResults(found);
+    } catch {
+      if (seq === exactSearchSeq.current) setCustomerResults([]);
+    }
+  }
+
   async function handleCustomerNameChange(value: string) {
     setCustomerName(value);
     setCustomerSearchOpen(true);
     const trimmed = value.trim().toLowerCase();
-    if (trimmed.length < 2) {
+    if (trimmed.length < (isAdmin ? 2 : CASHIER_SEARCH_MIN_CHARS)) {
+      exactSearchSeq.current++;
       setCustomerResults([]);
+      return;
+    }
+    if (!isAdmin) {
+      await searchCustomersExactly(value);
       return;
     }
     const customers = await ensureCustomersLoaded();
@@ -192,11 +214,15 @@ export default function WaybillGeneratorPage() {
   async function loadCustomerDetails(c: Customer) {
     setCustomerNoAddressNotice(false);
     setCustomerName(c.name);
-    setPhone1(c.phone ?? "");
-    setPhone2(c.phone2 ?? "");
+    // A cashier's search result can carry a masked number ("••••••033"), so only a real one is used here;
+    // the full record fetched just below sets them properly.
+    setPhone1(c.phone && !c.phone.includes("•") ? c.phone : "");
+    setPhone2(c.phone2 && !c.phone2.includes("•") ? c.phone2 : "");
 
     try {
       const full = await api.get<Customer>(`/customers/${c.id}`);
+      setPhone1(full.phone ?? "");
+      setPhone2(full.phone2 ?? "");
       const addresses = full.addresses ?? [];
       const defaultAddr = addresses.find((a) => a.is_default) ?? addresses[0];
       if (defaultAddr) {
@@ -228,8 +254,9 @@ export default function WaybillGeneratorPage() {
   async function handlePhone1Blur() {
     const trimmed = phone1.trim();
     if (trimmed.length < 7 || trimmed === dismissedPhoneMatch) return;
-    const customers = await ensureCustomersLoaded();
-    const match = customers.find((c) => c.phone === trimmed || c.phone2 === trimmed);
+    // A cashier asks the server about just this number; only a customer it says matches exactly counts.
+    const customers = isAdmin ? await ensureCustomersLoaded() : await findCustomers(trimmed).catch(() => []);
+    const match = isAdmin ? customers.find((c) => c.phone === trimmed || c.phone2 === trimmed) : customers.find((c) => c.exact_match);
     if (match && match.name !== customerName) {
       setPhoneMatchCustomer(match);
     }
@@ -383,10 +410,10 @@ export default function WaybillGeneratorPage() {
                   <Input
                     value={customerName}
                     onChange={(e) => handleCustomerNameChange(e.target.value)}
-                    onFocus={() => customerName.trim().length >= 2 && setCustomerSearchOpen(true)}
+                    onFocus={() => customerName.trim().length >= (isAdmin ? 2 : CASHIER_SEARCH_MIN_CHARS) && setCustomerSearchOpen(true)}
                     placeholder="Search customers..."
                   />
-                  {customerSearchOpen && customerName.trim().length >= 2 && customerResults.length > 0 && (
+                  {customerSearchOpen && customerName.trim().length >= (isAdmin ? 2 : CASHIER_SEARCH_MIN_CHARS) && customerResults.length > 0 && (
                     <div className="absolute z-20 top-full left-0 right-0 mt-1.5 bg-white border border-gray-200 rounded-xl shadow-lg max-h-56 overflow-y-auto">
                       {customerResults.slice(0, 6).map((c) => (
                         <button

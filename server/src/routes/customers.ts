@@ -8,6 +8,7 @@ import { logAudit } from "../lib/auditLog";
 import { storeCreditSources } from "../lib/storeCreditSources";
 import { loyaltyBalance } from "../lib/loyalty";
 import { normalizePhone } from "../lib/phones";
+import { approveIfNeeded } from "../lib/approval";
 import { exchangeForSale } from "../lib/exchanges";
 import { refundStoreCredit, usableStoreCredit } from "../lib/storeCreditRefund";
 
@@ -169,14 +170,70 @@ function computeCreditGrantBreakdown(customerId: number) {
     }));
 }
 
+// A cashier finds a customer by typing part of their name or phone number (or a customer code in full) — but never by
+// browsing: at least 3 characters, at most 5 people come back, and only the one whose full name / code /
+// number was typed exactly shows a whole phone number (the rest show their last three digits, enough to tell
+// two "Ali"s apart). No balances either; those come with the customer once opened (GET /api/customers/:id).
+const CASHIER_MIN_CHARS = 3;
+const CASHIER_MAX_MATCHES = 5;
+const maskPhone = (p: string | null) => (p ? `••••••${p.replace(/\D/g, "").slice(-3)}` : null);
+const escapeLike = (t: string) => t.replace(/[\\%_]/g, (c) => `\\${c}`);
+
+export function searchCustomersForCashier(text: string) {
+  const q = text.trim();
+  if (q.length < CASHIER_MIN_CHARS) return [];
+  let phone: string | undefined;
+  try {
+    phone = normalizePhone(q); // "0771234567", "771234567" and "+94 77 123 4567" are all the same number
+  } catch {
+    phone = undefined; // not a full number — it can still be part of a name, a code, or the start of a number
+  }
+  const digits = q.replace(/\D/g, "").replace(/^0+/, "");
+  const phoneLike = digits.length >= 5 ? `%${escapeLike(digits)}%` : null; // part of a number needs 5+ digits
+  const like = `%${escapeLike(q)}%`;
+  const rows = db
+    .prepare(
+      `SELECT customers.*, ${CALC_SUBQUERY},
+              CASE WHEN LOWER(customers.name) = LOWER(?) OR LOWER(customers.customer_code) = LOWER(?)
+                        OR customers.phone = ? OR customers.phone2 = ? THEN 1 ELSE 0 END AS exact_match
+       FROM customers
+       WHERE customers.name LIKE ? ESCAPE '\\' OR LOWER(customers.customer_code) = LOWER(?)
+          OR customers.phone LIKE ? ESCAPE '\\' OR customers.phone2 LIKE ? ESCAPE '\\'
+       ORDER BY exact_match DESC, customers.name
+       LIMIT ?`
+    )
+    .all(q, q, phone ?? null, phone ?? null, like, q, phoneLike, phoneLike, CASHIER_MAX_MATCHES) as any[];
+  return rows.map(({ balance_due, with_courier, on_delivery, store_credit_balance, ...r }) => ({
+    ...r,
+    exact_match: !!r.exact_match,
+    phone: r.exact_match ? r.phone : maskPhone(r.phone),
+    phone2: r.exact_match ? r.phone2 : maskPhone(r.phone2),
+  }));
+}
+
 // GET /api/customers
+//
+// An admin gets the whole list. A cashier gets no list at all: only a search (?find=…, see above), or — with an
+// admin's password typed at the till — the customers who owe money (?owing=1), which is management information
+// and so needs that one-time OK each time.
 customersRouter.get(
   "/",
-  asyncHandler(async (_req, res) => {
-    const rows = db
-      .prepare(`SELECT customers.*, ${CALC_SUBQUERY} FROM customers ORDER BY id DESC`)
-      .all();
-    res.json(rows);
+  asyncHandler(async (req, res) => {
+    if (req.user!.role !== "staff") {
+      res.json(db.prepare(`SELECT customers.*, ${CALC_SUBQUERY} FROM customers ORDER BY id DESC`).all());
+      return;
+    }
+
+    if (req.query.owing) {
+      approveIfNeeded(req, res, ["the list of customers who owe money"], "This list");
+      const owing = (db.prepare(`SELECT customers.*, ${CALC_SUBQUERY} FROM customers`).all() as any[])
+        .filter((c) => c.balance_due > 0)
+        .sort((a, b) => b.balance_due - a.balance_due);
+      res.json(owing);
+      return;
+    }
+
+    res.json(searchCustomersForCashier(String(req.query.find ?? "")));
   })
 );
 

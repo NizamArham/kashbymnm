@@ -49,6 +49,7 @@ import { saveDraftSale, loadDraftSale, clearDraftSale, PosDraftSale } from "../l
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { whatsappMessageLink, loyaltyPointsMessage } from "../lib/whatsapp";
 import { normalizePhone, phoneError } from "../lib/phone";
+import { findCustomers, CASHIER_SEARCH_MIN_CHARS } from "../lib/customerSearch";
 import PhoneInput from "../components/PhoneInput";
 import { downloadA4Pdf, downloadThermalPdf, sendWhatsAppBill } from "../lib/receipts";
 import ReceiptOptionsModal, { ModalOption } from "../components/ReceiptOptionsModal";
@@ -784,12 +785,35 @@ export default function PosPage() {
     return customers;
   }
 
+  // A cashier finds a customer by typing part of a name or number — the server answers with a few people at
+  // most (3+ characters), never a list. Waits a beat after the last keystroke (Enter doesn't wait), and drops
+  // answers that arrive after the person typed on.
+  const exactSearchTimer = useRef<number | undefined>(undefined);
+  const exactSearchSeq = useRef(0);
+  function searchCustomersExactly(value: string, delay = 300) {
+    window.clearTimeout(exactSearchTimer.current);
+    const seq = ++exactSearchSeq.current;
+    exactSearchTimer.current = window.setTimeout(async () => {
+      try {
+        const found = await findCustomers(value);
+        if (seq === exactSearchSeq.current) setCustomerResults(found);
+      } catch {
+        if (seq === exactSearchSeq.current) setCustomerResults([]);
+      }
+    }, delay);
+  }
+
   async function handleCustomerQueryChange(value: string) {
     setCustomerQuery(value);
     setCustomerSearchOpen(true);
     const trimmed = value.trim().toLowerCase();
-    if (trimmed.length < 2) {
+    if (trimmed.length < (isAdmin ? 2 : CASHIER_SEARCH_MIN_CHARS)) {
+      exactSearchSeq.current++;
       setCustomerResults([]);
+      return;
+    }
+    if (!isAdmin) {
+      searchCustomersExactly(value);
       return;
     }
     const customers = await ensureCustomersLoaded();
@@ -1643,6 +1667,9 @@ export default function PosPage() {
                           placeholder="Search by name or phone..."
                           value={customerQuery}
                           onChange={(e) => handleCustomerQueryChange(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && !isAdmin) searchCustomersExactly(customerQuery, 0);
+                          }}
                           onFocus={() => customerQuery && setCustomerSearchOpen(true)}
                         />
                         <button
@@ -1654,7 +1681,7 @@ export default function PosPage() {
                         </button>
                       </div>
 
-                      {customerSearchOpen && customerQuery.trim().length >= 2 && (
+                      {customerSearchOpen && customerQuery.trim().length >= (isAdmin ? 2 : CASHIER_SEARCH_MIN_CHARS) && (
                         <div className="absolute z-20 bottom-full left-0 right-0 mb-1.5 bg-white border border-gray-200 rounded-xl shadow-lg max-h-56 overflow-y-auto">
                           {customerResults.length > 0 ? (
                             <>

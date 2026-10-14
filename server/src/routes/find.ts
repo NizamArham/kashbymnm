@@ -4,7 +4,7 @@ import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth } from "../lib/auth";
 import { approveIfNeeded } from "../lib/approval";
 import { SALE_EXCHANGE_FLAGS_SQL } from "../lib/exchanges";
-import { CALC_SUBQUERY } from "./customers";
+import { CALC_SUBQUERY, searchCustomersForCashier } from "./customers";
 
 export const findRouter = Router();
 
@@ -180,15 +180,19 @@ findRouter.get(
       .all(startsWith, like, like)
       .map((r: any) => ({ type: "product", id: r.id, title: r.title, subtitle: r.subtitle, route: `/products/${r.id}` }));
 
-    const customers = db
-      .prepare(
-        `SELECT id, name as title, customer_code as subtitle, ${rank("name")} as rnk
-         FROM customers
-         WHERE name LIKE ? OR phone LIKE ? OR customer_code LIKE ?
-         ORDER BY rnk, name LIMIT 6`
-      )
-      .all(startsWith, like, like, like)
-      .map((r: any) => ({ type: "customer", id: r.id, title: r.title, subtitle: r.subtitle, route: `/customers/${r.id}/orders` }));
+    // A cashier's suggestions follow the same narrow search as the Customers page: 3+ characters, at most 5
+    // people, and no browsing.
+    const customersSql = isAdminUser(req)
+      ? db
+          .prepare(
+            `SELECT id, name as title, customer_code as subtitle, ${rank("name")} as rnk
+             FROM customers
+             WHERE name LIKE ? OR phone LIKE ? OR customer_code LIKE ?
+             ORDER BY rnk, name LIMIT 6`
+          )
+          .all(startsWith, like, like, like)
+      : searchCustomersForCashier(q).map((c) => ({ id: c.id, title: c.name, subtitle: c.customer_code }));
+    const customers = (customersSql as any[]).map((r: any) => ({ type: "customer", id: r.id, title: r.title, subtitle: r.subtitle, route: `/customers/${r.id}/orders` }));
 
     const suppliers = db
       .prepare(
