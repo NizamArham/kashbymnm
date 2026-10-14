@@ -5,6 +5,8 @@ import { api, ApiRequestError } from "../lib/api";
 import { PageHeader, Card, Input, Button, Badge, RefLink } from "../components/ui";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import ExchangeTag from "../components/ExchangeTag";
+import { useAuth } from "../context/AuthContext";
+import { useAdminApproval } from "../components/AdminApproval";
 
 type FindResult =
   | { type: "inventory"; data: InventoryResult }
@@ -29,7 +31,8 @@ interface InventoryResult {
   brand: string | null;
   category: string | null;
   selling_price: number | null;
-  cost_price: number | null;
+  // Not sent to a cashier at all.
+  cost_price?: number | null;
   sold_sale_id: number | null;
   sold_invoice: string | null;
 }
@@ -217,10 +220,20 @@ interface ResultView {
   actions: Action[];
 }
 
-function buildView(result: FindResult): ResultView {
+// Records a cashier can only see by having an admin type their password — and whose pages are admin-only,
+// so for a cashier the card itself is all there is (no buttons into pages they can't open).
+const ADMIN_ONLY_TYPES: FindResult["type"][] = ["supplier", "purchase", "staff", "transaction", "coupon", "gift_voucher"];
+
+function buildView(result: FindResult, isAdmin: boolean): ResultView {
+  const view = buildViewFor(result);
+  return !isAdmin && ADMIN_ONLY_TYPES.includes(result.type) ? { ...view, actions: [] } : view;
+}
+
+function buildViewFor(result: FindResult): ResultView {
   switch (result.type) {
     case "inventory": {
       const d = result.data;
+      const showCost = d.cost_price !== undefined;
       const margin = d.selling_price != null && d.cost_price != null ? d.selling_price - d.cost_price : null;
       return {
         title: d.product_title,
@@ -233,8 +246,12 @@ function buildView(result: FindResult): ResultView {
         ),
         stats: [
           { label: "Selling price", value: d.selling_price != null ? money(d.selling_price) : "—" },
-          { label: "Cost", value: d.cost_price != null ? money(d.cost_price) : "—", tone: "muted" },
-          { label: "Margin", value: margin != null ? money(margin) : "—", tone: margin != null && margin < 0 ? "bad" : "good" },
+          ...(showCost
+            ? ([
+                { label: "Cost", value: d.cost_price != null ? money(d.cost_price) : "—", tone: "muted" },
+                { label: "Margin", value: margin != null ? money(margin) : "—", tone: margin != null && margin < 0 ? "bad" : "good" },
+              ] as Stat[])
+            : []),
         ],
         details: [
           ["Brand", d.brand ?? "—"],
@@ -450,8 +467,16 @@ const LOOKUP_HINTS: { icon: typeof Package; label: string; example: string }[] =
   { icon: UserCog, label: "Staff", example: "username" },
 ];
 
+// What a cashier can look up without anyone's say-so: stock units, invoices, customers.
+const CASHIER_LOOKUP_HINTS = LOOKUP_HINTS.filter((h) => ["Product unit", "Invoice", "Customer"].includes(h.label));
+
 export default function FindPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
+  // Typing the exact code of something beyond a cashier's limits (a supplier, a staff member, a cash
+  // book entry...) asks for an admin's password for that one lookup.
+  const { runWithApproval } = useAdminApproval();
   const [code, setCode] = useState("");
   const [result, setResult] = useState<FindResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -517,7 +542,7 @@ export default function FindPage() {
     setResult(null);
     setSuggestions([]);
     try {
-      const found = await api.get<FindResult>(`/find?code=${encodeURIComponent(trimmed)}`);
+      const found = await runWithApproval((approval) => api.get<FindResult>(`/find?code=${encodeURIComponent(trimmed)}`, { approval }));
       setResult(found);
     } catch (err) {
       setError(err instanceof ApiRequestError ? err.message : "Lookup failed");
@@ -569,7 +594,7 @@ export default function FindPage() {
     if (!result) return null;
     const meta = TYPE_META[result.type];
     const Icon = meta.icon;
-    const view = buildView(result);
+    const view = buildView(result, isAdmin);
     const primary = view.actions.find((a) => a.primary);
     const others = view.actions.filter((a) => !a.primary);
 
@@ -760,7 +785,7 @@ export default function FindPage() {
         <div>
           <p className="mb-2.5 text-xs font-medium text-gray-400">What you can look up</p>
           <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3 xl:grid-cols-5">
-            {LOOKUP_HINTS.map((h) => {
+            {(isAdmin ? LOOKUP_HINTS : CASHIER_LOOKUP_HINTS).map((h) => {
               const HIcon = h.icon;
               return (
                 <div key={h.label} className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-3.5 py-3">

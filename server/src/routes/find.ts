@@ -1,13 +1,14 @@
 import { Router } from "express";
 import { db } from "../db/connection";
 import { ApiError, asyncHandler } from "../lib/errors";
-import { requireAuth, requireRole } from "../lib/auth";
+import { requireAuth } from "../lib/auth";
+import { approveIfNeeded } from "../lib/approval";
 import { SALE_EXCHANGE_FLAGS_SQL } from "../lib/exchanges";
 import { CALC_SUBQUERY } from "./customers";
 
 export const findRouter = Router();
 
-// Universal code lookup — admin only. Scan or type any barcode, SKU,
+// Universal code lookup. Scan or type any barcode, SKU,
 // invoice number, customer/supplier/purchase code, cash book transaction
 // code, or coupon/gift voucher code from anywhere in the system and get
 // back whatever record it actually belongs to.
@@ -15,7 +16,17 @@ export const findRouter = Router();
 // so inventory goes first) and stops at the first match — code formats
 // don't collide across these tables in practice, but if one ever did,
 // this order decides which record wins.
-findRouter.use(requireAuth, requireRole("admin"));
+//
+// A cashier can look up what they sell and who they sell to: stock units (never with the cost),
+// invoices and customers. Anything else — suppliers, purchases, cash book entries, staff, coupons,
+// gift vouchers — is beyond their limits, so that one lookup asks for an admin's password (any
+// admin's, typed at the till; see approval.ts), and the audit log credits that admin.
+findRouter.use(requireAuth);
+
+const isAdminUser = (req: { user?: { role: string } }) => req.user?.role === "admin";
+function beyondACashier(req: any, res: any, what: string) {
+  approveIfNeeded(req, res, [`${what} records are admin-only`], "This lookup");
+}
 
 findRouter.get(
   "/",
@@ -41,7 +52,11 @@ findRouter.get(
          WHERE LOWER(inventory.barcode) = LOWER(?) OR LOWER(inventory.sku) = LOWER(?)`
       )
       .get(code, code);
-    if (unit) return res.json({ type: "inventory", data: unit });
+    if (unit) {
+      // What a piece cost, and so the margin on it, isn't the till's business.
+      if (!isAdminUser(req)) delete (unit as any).cost_price;
+      return res.json({ type: "inventory", data: unit });
+    }
 
     const sale = db
       .prepare(
@@ -84,7 +99,10 @@ findRouter.get(
     const supplier = db
       .prepare(`SELECT id, supplier_code, name, phone, city FROM suppliers WHERE LOWER(supplier_code) = LOWER(?)`)
       .get(code);
-    if (supplier) return res.json({ type: "supplier", data: supplier });
+    if (supplier) {
+      beyondACashier(req, res, "supplier");
+      return res.json({ type: "supplier", data: supplier });
+    }
 
     const purchase = db
       .prepare(
@@ -95,7 +113,10 @@ findRouter.get(
          WHERE LOWER(purchases.purchase_code) = LOWER(?)`
       )
       .get(code);
-    if (purchase) return res.json({ type: "purchase", data: purchase });
+    if (purchase) {
+      beyondACashier(req, res, "purchase");
+      return res.json({ type: "purchase", data: purchase });
+    }
 
     const transaction = db
       .prepare(
@@ -103,18 +124,30 @@ findRouter.get(
          FROM cash_book WHERE LOWER(transaction_code) = LOWER(?)`
       )
       .get(code);
-    if (transaction) return res.json({ type: "transaction", data: transaction });
+    if (transaction) {
+      beyondACashier(req, res, "cash book");
+      return res.json({ type: "transaction", data: transaction });
+    }
 
     const staff = db
       .prepare(`SELECT id, username, name, role, job_title, phone FROM users WHERE LOWER(username) = LOWER(?)`)
       .get(code);
-    if (staff) return res.json({ type: "staff", data: staff });
+    if (staff) {
+      beyondACashier(req, res, "staff");
+      return res.json({ type: "staff", data: staff });
+    }
 
     const coupon = db.prepare(`SELECT * FROM coupons WHERE LOWER(code) = LOWER(?)`).get(code);
-    if (coupon) return res.json({ type: "coupon", data: coupon });
+    if (coupon) {
+      beyondACashier(req, res, "coupon");
+      return res.json({ type: "coupon", data: coupon });
+    }
 
     const voucher = db.prepare(`SELECT * FROM gift_vouchers WHERE LOWER(code) = LOWER(?)`).get(code);
-    if (voucher) return res.json({ type: "gift_voucher", data: voucher });
+    if (voucher) {
+      beyondACashier(req, res, "gift voucher");
+      return res.json({ type: "gift_voucher", data: voucher });
+    }
 
     throw new ApiError(404, `No record found for "${code}"`);
   })
@@ -241,6 +274,9 @@ findRouter.get(
       route: "/promotions",
     }));
 
+    // A cashier's suggestions stop at what they sell and who they sell to; the rest is found by typing
+    // its exact code, which asks for an admin's password.
+    if (!isAdminUser(req)) return res.json([...products, ...customers, ...sales]);
     res.json([...products, ...customers, ...suppliers, ...sales, ...staff, ...coupons, ...vouchers]);
   })
 );

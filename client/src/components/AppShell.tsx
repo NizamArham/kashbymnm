@@ -77,7 +77,7 @@ export default function AppShell() {
 
   const menu: MenuItem[] = [
     { id: "dashboard", label: "Dashboard", icon: Home, path: "/" },
-    { id: "find", label: "Find", icon: Search, path: "/find", adminOnly: true },
+    { id: "find", label: "Find", icon: Search, path: "/find" },
     { id: "analytics", label: "Analytics", icon: BarChart3, path: "/analytics", adminOnly: true },
     {
       id: "pos",
@@ -167,11 +167,20 @@ export default function AppShell() {
     },
   ];
 
-  const visibleMenu = menu.filter((item) => !item.adminOnly || isAdmin);
-
   function itemVisible(item: MenuSubItem) {
     return !item.adminOnly || isAdmin;
   }
+
+  // What this person's sidebar holds. A cashier is sent straight to the till (the dashboard just
+  // bounces them there), so it isn't offered; and a group that has only one thing left in it for them
+  // (Inventory → Stocks, Directory → Customers...) is that thing as a plain link, not a folder to open first.
+  const visibleMenu = menu
+    .filter((item) => (!item.adminOnly || isAdmin) && (item.id !== "dashboard" || isAdmin))
+    .map((item): MenuItem => {
+      const subs = item.subItems?.filter(itemVisible);
+      if (subs?.length === 1) return { id: item.id, label: subs[0].label, path: subs[0].path, icon: subs[0].icon };
+      return item;
+    });
 
   useEffect(() => {
     const path = location.pathname;

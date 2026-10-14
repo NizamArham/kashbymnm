@@ -213,14 +213,7 @@ export default function App() {
             </ProtectedRoute>
           }
         />
-        <Route
-          path="/find"
-          element={
-            <ProtectedRoute adminOnly>
-              <FindPage />
-            </ProtectedRoute>
-          }
-        />
+        <Route path="/find" element={<FindPage />} />
         <Route
           path="/analytics"
           element={
