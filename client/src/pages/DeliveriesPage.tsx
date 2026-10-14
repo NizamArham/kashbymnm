@@ -7,6 +7,7 @@ import ExchangeNotice from "../components/ExchangeNotice";
 import PackWaybillModal from "../components/PackWaybillModal";
 import ChangePartnerModal from "../components/ChangePartnerModal";
 import DeliveryFareModal from "../components/DeliveryFareModal";
+import { useAdminApproval } from "../components/AdminApproval";
 import { courierTrackingUrl, waybillShopCode, partnerLabel as partnerName, useDeliveryPartners, waybillItemsDescription, isAwaitingFare, paidByOf, findPartner } from "../lib/delivery";
 import { generateWaybillLabelPdf, generateExchangeWaybillsPdf, returnItemsOf } from "../lib/waybillLabelPdf";
 import { WaybillLabelData } from "../components/WaybillLabel";
@@ -320,6 +321,9 @@ const TABS: { key: DeliveryStatus; label: string; icon: any }[] = [
 ];
 
 export default function DeliveriesPage() {
+  // A cashier works the whole pipeline; the steps that change money (marking a parcel returned, or putting one
+  // back that would take a payment off an order) ask for an admin's password once, at that step.
+  const { runWithApproval } = useAdminApproval();
   // Loads the partner list (names, waybill codes, tracking links) the
   // rows below read from.
   const { partners } = useDeliveryPartners();
@@ -481,7 +485,7 @@ export default function DeliveriesPage() {
       return;
     setActionError(null);
     try {
-      await api.put<{ taken_back: number }>(`/deliveries/${id}/undeliver`, {});
+      await runWithApproval((approval) => api.put<{ taken_back: number }>(`/deliveries/${id}/undeliver`, {}, { approval }));
       load();
     } catch (err) {
       setActionError(err instanceof ApiRequestError ? err.message : "Couldn't put it back to dispatched");
@@ -496,7 +500,7 @@ export default function DeliveriesPage() {
     if (!confirm(message)) return;
     setActionError(null);
     try {
-      await api.put(`/deliveries/${id}/return`, {});
+      await runWithApproval((approval) => api.put(`/deliveries/${id}/return`, {}, { approval }));
       load();
     } catch (err) {
       setActionError(err instanceof ApiRequestError ? err.message : "Failed to mark returned");

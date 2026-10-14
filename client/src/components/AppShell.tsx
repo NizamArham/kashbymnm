@@ -147,7 +147,7 @@ export default function AppShell() {
       icon: Truck,
       path: "/deliveries",
       subItems: [
-        { id: "deliveries", label: "Deliveries", path: "/deliveries", icon: Truck, adminOnly: true },
+        { id: "deliveries", label: "Deliveries", path: "/deliveries", icon: Truck },
         { id: "couriers", label: "Couriers", path: "/couriers", icon: Send, adminOnly: true },
         { id: "waybill-generator", label: "Waybill Generator", path: "/waybill-generator", icon: PackageCheck },
         { id: "delivery-partners", label: "Delivery Partners", path: "/delivery-partners", icon: Settings, adminOnly: true },

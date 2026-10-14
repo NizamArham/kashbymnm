@@ -2,7 +2,8 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "../db/connection";
 import { ApiError, asyncHandler } from "../lib/errors";
-import { requireAuth, requireRole } from "../lib/auth";
+import { requireAuth } from "../lib/auth";
+import { requireAdminOrApproval, approveIfNeeded, actorOf } from "../lib/approval";
 import { applyReturnCharge } from "./courierReconciliation";
 import { citypakCreateOrder } from "../lib/citypak";
 import { fardarCreateParcel, fardarCityName, postalCodeOf } from "../lib/fardar";
@@ -13,8 +14,12 @@ import { cancelExchangeForSale, exchangeForSale, recentExchangesBySale, restockS
 
 export const deliveriesRouter = Router();
 
-// Admin only, per the access model (staff don't handle courier/delivery logistics).
-deliveriesRouter.use(requireAuth, requireRole("admin"));
+// The shipping pipeline is for the cashier too: see the orders, pack and print the waybill, dispatch, check
+// whether a parcel was delivered. What it costs and what the courier is owed (couriers, settlements, charges)
+// lives in other, admin-only places. Inside the pipeline, the few steps that change money — switching courier,
+// setting a fare, marking a parcel returned (the courier's return charge), creating a record by hand, or undoing a
+// delivery that would take a payment back off an order — need an admin's password typed at the till.
+deliveriesRouter.use(requireAuth);
 
 const deliveryInput = z.object({
   sale_id: z.number().int().positive(),
@@ -101,6 +106,7 @@ deliveriesRouter.get(
 // POST /api/deliveries — create a delivery record for a sale
 deliveriesRouter.post(
   "/",
+  requireAdminOrApproval("Creating a delivery record"),
   asyncHandler(async (req, res) => {
     const data = deliveryInput.parse(req.body);
 
@@ -370,6 +376,7 @@ const onDemandPaidBy = z.enum(["customer", "shop", "rider_direct"]);
 // get a fresh waybill) and the old details are kept in the notes.
 deliveriesRouter.put(
   "/:id/partner",
+  requireAdminOrApproval("Switching a parcel's courier"),
   asyncHandler(async (req, res) => {
     const data = z
       .object({
@@ -443,7 +450,7 @@ deliveriesRouter.put(
       d.id
     );
 
-    logAudit(req.user!, "delivery_partner_change", "delivery", d.id, `${d.invoice}: ${note}`);
+    logAudit(actorOf(req), "delivery_partner_change", "delivery", d.id, `${d.invoice}: ${note}`);
     res.json(db.prepare(`SELECT * FROM deliveries WHERE id = ?`).get(d.id));
   })
 );
@@ -457,6 +464,7 @@ deliveriesRouter.put(
 // delivered (the rider's fare is often confirmed after pick-up).
 deliveriesRouter.put(
   "/:id/fare",
+  requireAdminOrApproval("Setting a delivery fare"),
   asyncHandler(async (req, res) => {
     const data = z
       .object({
@@ -497,7 +505,7 @@ deliveriesRouter.put(
     const what = plan.riderDirect
       ? "customer pays the rider directly"
       : `fare Rs. ${plan.actualFare!.toLocaleString()}, ${plan.paidBy === "shop" ? "we pay (free delivery)" : "charged to the customer"}`;
-    logAudit(req.user!, "delivery_fare_set", "delivery", d.id, `${d.invoice} (${partner.name}): ${what}`);
+    logAudit(actorOf(req), "delivery_fare_set", "delivery", d.id, `${d.invoice} (${partner.name}): ${what}`);
     res.json(db.prepare(`SELECT * FROM deliveries WHERE id = ?`).get(d.id));
   })
 );
@@ -614,6 +622,14 @@ deliveriesRouter.put(
       if (towardSale > 0 && settledAfter) takenBack = Math.min(sale.amount_paid, towardSale);
     }
 
+    // Putting a parcel back is plain pipeline work — unless it would take a payment back off the order.
+    approveIfNeeded(
+      req,
+      res,
+      takenBack > 0 ? [`it takes Rs. ${takenBack.toLocaleString()} back off an order a courier settlement had counted as paid`] : [],
+      "Putting this parcel back"
+    );
+
     db.transaction(() => {
       db.prepare(`UPDATE deliveries SET delivery_status = 'dispatched', delivery_date = NULL WHERE id = ?`).run(existing.id);
       if (takenBack > 0) {
@@ -624,7 +640,7 @@ deliveriesRouter.put(
     })();
 
     logAudit(
-      req.user!,
+      actorOf(req),
       "delivery_undelivered",
       "sale",
       sale.id,
@@ -640,6 +656,7 @@ deliveriesRouter.put(
 // a separate terminal state rather than a step in the forward pipeline.
 deliveriesRouter.put(
   "/:id/return",
+  requireAdminOrApproval("Marking a parcel returned"),
   asyncHandler(async (req, res) => {
     const data = z.object({ notes: z.string().optional() }).parse(req.body);
     const existing = db.prepare(`SELECT * FROM deliveries WHERE id = ?`).get(req.params.id) as any;
@@ -665,7 +682,7 @@ deliveriesRouter.put(
     if (restocked > 0) {
       const sale = db.prepare(`SELECT invoice FROM sales WHERE id = ?`).get(existing.sale_id) as { invoice: string };
       logAudit(
-        req.user!,
+        actorOf(req),
         "exchange_cancelled",
         "sale",
         existing.sale_id,

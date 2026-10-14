@@ -12,6 +12,7 @@ import {
   useDeliveryPartners,
 } from "../lib/delivery";
 import { Button, ErrorText, Modal } from "./ui";
+import { useAdminApproval } from "./AdminApproval";
 import { OnDemandFareInput, OnDemandPaidByPicker } from "./OnDemandFareFields";
 
 // Switch which delivery partner an order ships with, any time before the
@@ -27,6 +28,7 @@ export default function ChangePartnerModal({
   onChanged: () => void | Promise<void>;
 }) {
   const { activePartners } = useDeliveryPartners();
+  const { runWithApproval } = useAdminApproval();
   const [selected, setSelected] = useState<string | null>(null);
   const [fare, setFare] = useState<OnDemandFare>(EMPTY_ON_DEMAND_FARE);
   const [error, setError] = useState<string | null>(null);
@@ -60,10 +62,12 @@ export default function ChangePartnerModal({
     setError(null);
     setSaving(true);
     try {
-      await api.put(`/deliveries/${delivery.id}/partner`, {
+      const change = {
         delivery_partner: target.code,
         ...(isOnDemand ? onDemandPayload(fare) : {}),
-      });
+      };
+      // Switching courier can change what the customer is charged, so a cashier gets an admin-password prompt here.
+      await runWithApproval((approval) => api.put(`/deliveries/${delivery.id}/partner`, change, { approval }));
       await onChanged();
       onClose();
     } catch (err) {

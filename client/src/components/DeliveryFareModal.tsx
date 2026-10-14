@@ -3,6 +3,7 @@ import { api, ApiRequestError } from "../lib/api";
 import { Delivery } from "../lib/types";
 import { DeliveryPaidBy, EMPTY_ON_DEMAND_FARE, OnDemandFare, onDemandFareError, paidByOf, partnerLabel } from "../lib/delivery";
 import { Button, ErrorText, Modal } from "./ui";
+import { useAdminApproval } from "./AdminApproval";
 import { OnDemandFareInput, OnDemandPaidByPicker } from "./OnDemandFareFields";
 
 // Enter the fare of an Uber / PickMe Flash order once the ride is booked —
@@ -19,6 +20,7 @@ export default function DeliveryFareModal({
   onClose: () => void;
   onSaved: () => void | Promise<void>;
 }) {
+  const { runWithApproval } = useAdminApproval();
   const current = paidByOf(delivery);
   // A fare already on the order is being corrected; otherwise it's being added.
   const editing = delivery.actual_fare != null;
@@ -41,10 +43,12 @@ export default function DeliveryFareModal({
     setError(null);
     setSaving(true);
     try {
-      await api.put(`/deliveries/${delivery.id}/fare`, {
+      const fare = {
         delivery_paid_by: value.paidBy,
         ...(value.paidBy !== "rider_direct" ? { delivery_fare: parseFloat(value.fare) } : {}),
-      });
+      };
+      // The fare is money: a cashier gets an admin-password prompt here.
+      await runWithApproval((approval) => api.put(`/deliveries/${delivery.id}/fare`, fare, { approval }));
       await onSaved();
       onClose();
     } catch (err) {
