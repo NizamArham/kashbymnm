@@ -15,6 +15,16 @@ export function isAwaitingCod(sale: Pick<Sale, "sale_type" | "payment_status" | 
   );
 }
 
+// The status shown next to an invoice. An exchange replacement whose old item hasn't come back yet has
+// no money on it — its value is covered by the item that's on its way — so it says that, instead of a
+// bare "unpaid" that would read as the customer owing it (their payment history says "settled").
+// Once the old item is received the credit is applied and it becomes Paid.
+export function saleStatusLabel(sale: Pick<Sale, "payment_status" | "is_voided" | "exchange_in_status">): string {
+  if (sale.is_voided) return "voided";
+  if (sale.exchange_in_status === "awaiting_pickup" && sale.payment_status !== "paid") return "exchange pending";
+  return sale.payment_status;
+}
+
 // What to show as a sale's "Payment": COD while the delivery is unpaid, the
 // part-payment method plus COD when only some was paid up front, otherwise
 // the method it was actually paid with.

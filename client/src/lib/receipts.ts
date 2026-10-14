@@ -24,6 +24,8 @@ export interface GroupedSaleItem {
   quantity: number;
   line_total: number;
   is_returned: boolean;
+  // Wholesale bills only: how many different size/colour lines were folded into this row.
+  merged_lines?: number;
 }
 
 // Same product + color + size, sold at the same price with the same
@@ -35,26 +37,41 @@ export interface GroupedSaleItem {
 // or item table shows. Anything that differs (price, discount, whether
 // it's been returned) is kept on its own line rather than merged, so a
 // partial return or a mid-sale price change never gets silently hidden.
-export function groupSaleItemsForDisplay(items: SaleItem[]): GroupedSaleItem[] {
+//
+// A wholesale bill is counted in pieces, not sizes: with `wholesale` set, every size
+// and colour of a product is folded into ONE row ("GP-Double Cotton Ladies Easy
+// Shorts-FO × 25"). The size/colour of each piece is still stored with the sale and
+// shown on the invoice page's breakdown — it just isn't printed on the bill.
+export function groupSaleItemsForDisplay(items: SaleItem[], options: { wholesale?: boolean } = {}): GroupedSaleItem[] {
   const groups = new Map<string, GroupedSaleItem>();
   const order: string[] = [];
+  const variants = new Map<string, Set<string>>();
   for (const item of items) {
     const returned = !!item.is_returned;
-    const key = [item.product_id ?? item.product_title ?? "", item.color ?? "", item.size ?? "", item.unit_price, item.original_selling_price ?? "", returned].join("::");
+    const key = options.wholesale
+      ? [item.product_id ?? item.product_title ?? "", item.unit_price, item.original_selling_price ?? "", returned].join("::")
+      : [item.product_id ?? item.product_title ?? "", item.color ?? "", item.size ?? "", item.unit_price, item.original_selling_price ?? "", returned].join("::");
     const existing = groups.get(key);
+    if (options.wholesale) {
+      const seen = variants.get(key) ?? new Set<string>();
+      seen.add(`${item.size ?? ""}|${item.color ?? ""}`);
+      variants.set(key, seen);
+    }
     if (existing) {
       existing.quantity += item.quantity;
       existing.line_total += item.line_total;
       existing.ids.push(item.id);
+      if (options.wholesale) existing.merged_lines = variants.get(key)!.size;
     } else {
       groups.set(key, {
         ids: [item.id],
-        sku: item.sku,
-        barcode: item.barcode,
+        sku: options.wholesale ? undefined : item.sku,
+        barcode: options.wholesale ? undefined : item.barcode,
         product_id: item.product_id,
         product_title: item.product_title,
-        size: item.size,
-        color: item.color,
+        size: options.wholesale ? null : item.size,
+        color: options.wholesale ? null : item.color,
+        merged_lines: options.wholesale ? 1 : undefined,
         unit_price: item.unit_price,
         original_selling_price: item.original_selling_price,
         quantity: item.quantity,
@@ -393,7 +410,7 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
   doc.setLineWidth(0.3);
   doc.line(marginX, y, rightX, y);
 
-  const items = groupSaleItemsForDisplay(sale.items ?? []);
+  const items = groupSaleItemsForDisplay(sale.items ?? [], { wholesale: !!sale.is_wholesale });
   // Main line (name, qty, price, total) at 10.5pt, the color/size
   // subline at 9pt — bigger than before on both, but the same 1.5pt
   // gap between them, so the subline stays clearly secondary rather
@@ -759,7 +776,7 @@ export function generateThermalPdf(sale: Sale): jsPDF {
   const widthMm = 80;
   const marginX = 4;
   const contentWidth = widthMm - marginX * 2;
-  const items = groupSaleItemsForDisplay(sale.items ?? []);
+  const items = groupSaleItemsForDisplay(sale.items ?? [], { wholesale: !!sale.is_wholesale });
   const shipTo = shippingAddress(sale);
   const service = deliveryService(sale);
 
@@ -830,9 +847,12 @@ export function generateThermalPdf(sale: Sale): jsPDF {
     doc.setFont("courier", "normal");
     doc.setFontSize(7);
     const detail = [item.size, item.color].filter(Boolean).join("/");
-    doc.text(detail || "—", marginX, y);
-    doc.text(`x${item.quantity}`, widthMm - marginX - 18, y);
-    doc.text(money(item.line_total), widthMm - marginX, y, { align: "right" });
+    doc.text(sale.is_wholesale ? `${money(item.unit_price)} each` : detail || "—", marginX, y);
+    // The quantity sits just left of the line total — measured, so a big wholesale total
+    // (Rs. 32,400) never runs into it.
+    const totalText = money(item.line_total);
+    doc.text(`x${item.quantity}`, widthMm - marginX - doc.getTextWidth(totalText) - 3, y, { align: "right" });
+    doc.text(totalText, widthMm - marginX, y, { align: "right" });
     y += 4.2;
 
     // Marked down: the original price, struck through. A price above the
@@ -1014,7 +1034,7 @@ export function downloadThermalPdf(sale: Sale) {
 // ---------------------------------------------------------------------
 export function buildWhatsAppMessage(sale: Sale, businessInfo?: BusinessInfo | null): string {
   const isQuotation = sale.status === "quotation";
-  const items = groupSaleItemsForDisplay(sale.items ?? []);
+  const items = groupSaleItemsForDisplay(sale.items ?? [], { wholesale: !!sale.is_wholesale });
   const lines: string[] = [];
 
   lines.push(`*${businessInfo?.business_name || "M&M Clothing"} — ${isQuotation ? "Price Quotation" : "Receipt"}*`);
@@ -1029,7 +1049,8 @@ export function buildWhatsAppMessage(sale: Sale, businessInfo?: BusinessInfo | n
   for (const item of items) {
     const detail = [item.size, item.color].filter(Boolean).join("/");
     const wasDiscounted = item.original_selling_price != null && item.original_selling_price > item.unit_price;
-    const wasNote = wasDiscounted ? ` ~${money(item.original_selling_price!)}~` : "";
+    // The struck-through price is the original PER PIECE, so on a multi-piece line say so.
+    const wasNote = wasDiscounted ? ` ~${money(item.original_selling_price!)}~${item.quantity > 1 ? " each" : ""}` : "";
     lines.push(`${item.product_title ?? "Item"}${detail ? ` (${detail})` : ""} x${item.quantity} — ${money(item.line_total)}${wasNote}`);
   }
   lines.push("");
