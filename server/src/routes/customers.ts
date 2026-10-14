@@ -229,6 +229,11 @@ customersRouter.post(
   "/",
   asyncHandler(async (req, res) => {
     const data = customerInput.parse(req.body);
+    // Points are worth store credit, so giving a new customer a head start is an admin decision
+    // (Loyalty adjust is admin-only for the same reason) — a cashier can't type them in.
+    if (data.bonus_points && req.user!.role !== "admin") {
+      throw new ApiError(403, "Only an admin can give a customer starting points");
+    }
     const customer_code = nextCustomerCode(data.gender);
 
     const result = db

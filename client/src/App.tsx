@@ -153,7 +153,14 @@ export default function App() {
             </ProtectedRoute>
           }
         />
-        <Route path="/deliveries" element={<DeliveriesPage />} />
+        <Route
+          path="/deliveries"
+          element={
+            <ProtectedRoute adminOnly>
+              <DeliveriesPage />
+            </ProtectedRoute>
+          }
+        />
         <Route path="/waybill-generator" element={<WaybillGeneratorPage />} />
         <Route
           path="/couriers"

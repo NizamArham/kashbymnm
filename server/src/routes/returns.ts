@@ -96,6 +96,7 @@ returnsRouter.get(
 // the Analytics page — see lib/returnedRevenue.ts.
 returnsRouter.get(
   "/revenue-impact",
+  requireRole("admin"),
   asyncHandler(async (req, res) => {
     const start = String(req.query.start ?? "");
     const end = String(req.query.end ?? "");

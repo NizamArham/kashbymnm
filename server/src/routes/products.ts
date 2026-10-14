@@ -10,12 +10,12 @@ export const productsRouter = Router();
 // Everyone using this API must be logged in; role checks happen per-route below.
 productsRouter.use(requireAuth);
 
-// Staff can view products (needed for POS) but never see cost_price —
-// that's financial data reserved for admin.
+// Staff can view products (needed for POS) but never see cost_price or which supplier
+// it came from — that's the owner's business, reserved for admin.
 function stripCostPriceIfStaff(req: any, row: any) {
   if (!row) return row;
   if (req.user?.role === "staff") {
-    const { cost_price, ...rest } = row;
+    const { cost_price, supplier_id, supplier_name, supplier_code, ...rest } = row;
     return rest;
   }
   return row;

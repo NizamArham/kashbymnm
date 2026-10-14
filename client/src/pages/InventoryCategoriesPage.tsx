@@ -933,7 +933,7 @@ export default function InventoryCategoriesPage() {
                               <table className="w-full text-sm">
                                 <thead>
                                   <tr className="bg-gray-50">
-                                    {["Size", "Color", "Qty", "SKU", "Barcode", "Supplier", "Status"].map(
+                                    {["Size", "Color", "Qty", "SKU", "Barcode", ...(isAdmin ? ["Supplier"] : []), "Status"].map(
                                       (h) => (
                                         <th
                                           key={h}
@@ -988,9 +988,12 @@ export default function InventoryCategoriesPage() {
                                         >
                                           {row.barcodeRange}
                                         </td>
-                                        <td className="px-4 py-2 text-gray-500">
-                                          {row.batchSupplierCode ?? "—"}
-                                        </td>
+                                        {/* Which supplier a batch came from is the owner's business, not the till's. */}
+                                        {isAdmin && (
+                                          <td className="px-4 py-2 text-gray-500">
+                                            {row.batchSupplierCode ?? "—"}
+                                          </td>
+                                        )}
                                         <td className="px-4 py-2">
                                           <Badge
                                             label={row.status}

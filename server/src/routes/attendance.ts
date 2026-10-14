@@ -7,8 +7,9 @@ import { requireAuth, requireRole } from "../lib/auth";
 export const attendanceRouter = Router();
 
 // Marking attendance is an admin/manager action — staff don't self-report
-// here, matching how a real attendance register works.
-attendanceRouter.use(requireAuth, requireRole("admin"));
+// here, matching how a real attendance register works. They can read their own
+// record, though (the Attendance tab on their profile).
+attendanceRouter.use(requireAuth);
 
 const markInput = z.object({
   user_id: z.number().int().positive(),
@@ -23,6 +24,7 @@ const markInput = z.object({
 // attendance status.
 attendanceRouter.post(
   "/",
+  requireRole("admin"),
   asyncHandler(async (req, res) => {
     const data = markInput.parse(req.body);
 
@@ -49,6 +51,7 @@ attendanceRouter.post(
 // with whether/how they've been marked yet today).
 attendanceRouter.get(
   "/",
+  requireRole("admin"),
   asyncHandler(async (req, res) => {
     const date = String(req.query.date ?? new Date().toISOString().slice(0, 10));
 
@@ -73,6 +76,9 @@ attendanceRouter.get(
 attendanceRouter.get(
   "/:userId",
   asyncHandler(async (req, res) => {
+    if (req.user!.role !== "admin" && Number(req.params.userId) !== req.user!.id) {
+      throw new ApiError(403, "You can only see your own attendance");
+    }
     const start = String(req.query.start ?? "0000-01-01");
     const end = String(req.query.end ?? "9999-12-31");
 

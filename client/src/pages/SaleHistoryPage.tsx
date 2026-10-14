@@ -437,7 +437,7 @@ export default function SaleHistoryPage() {
     });
   }
 
-  useKeyboardShortcut("d", downloadSalesPdf, { ctrlOrCmd: true, shift: true, enabled: filteredSales.length > 0 });
+  useKeyboardShortcut("d", downloadSalesPdf, { ctrlOrCmd: true, shift: true, enabled: isAdmin && filteredSales.length > 0 });
 
   async function toggleExpand(sale: Sale) {
     if (expanded?.id === sale.id) {
@@ -791,15 +791,18 @@ export default function SaleHistoryPage() {
                 setEndDate(e);
               }}
             />
-            <Button
-              onClick={downloadSalesPdf}
-              disabled={filteredSales.length === 0}
-              className="inline-flex items-center gap-1.5"
-              title="Download PDF (Ctrl/Cmd+Shift+D)"
-            >
-              <Download size={14} />
-              Download PDF
-            </Button>
+            {/* The sales report carries the shop's takings, so it's an admin's. */}
+            {isAdmin && (
+              <Button
+                onClick={downloadSalesPdf}
+                disabled={filteredSales.length === 0}
+                className="inline-flex items-center gap-1.5"
+                title="Download PDF (Ctrl/Cmd+Shift+D)"
+              >
+                <Download size={14} />
+                Download PDF
+              </Button>
+            )}
           </div>
         }
       />
@@ -871,8 +874,9 @@ export default function SaleHistoryPage() {
 
       {!loading && (
         <p className="text-xs text-gray-400 mb-3">
-          {filteredSales.length} sale{filteredSales.length !== 1 ? "s" : ""} · Rs. {periodTotal.toLocaleString()} total
-          {kind === "credit" && filteredSales.length > 0 && (
+          {filteredSales.length} sale{filteredSales.length !== 1 ? "s" : ""}
+          {isAdmin && <> · Rs. {periodTotal.toLocaleString()} total</>}
+          {isAdmin && kind === "credit" && filteredSales.length > 0 && (
             <>
               {" · "}
               <span className="font-medium text-red-600">Rs. {filteredSales.reduce((sum, x) => sum + Math.max(0, x.total - x.amount_paid), 0).toLocaleString()} still owed</span>

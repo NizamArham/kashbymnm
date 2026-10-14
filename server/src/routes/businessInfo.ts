@@ -5,8 +5,9 @@ import { requireAuth, requireRole } from "../lib/auth";
 
 export const businessInfoRouter = Router();
 
-// Business settings — admin only.
-businessInfoRouter.use(requireAuth, requireRole("admin"));
+// Everyone signed in can READ the shop's details — they're printed on every bill and receipt the
+// till hands out, so a cashier's receipts have to match an admin's. Only an admin can change them.
+businessInfoRouter.use(requireAuth);
 
 const infoInput = z.object({
   business_name: z.string().optional(),
@@ -23,13 +24,14 @@ const infoInput = z.object({
 });
 
 // GET /api/business-info — there's only ever one row (id=1)
-businessInfoRouter.get("/", (_req, res) => {
-  const row = db.prepare(`SELECT * FROM business_info WHERE id = 1`).get();
+businessInfoRouter.get("/", (req, res) => {
+  const row = db.prepare(`SELECT * FROM business_info WHERE id = 1`).get() as any;
+  if (row && req.user?.role === "staff") delete row.notes; // internal notes stay with the owner
   res.json(row ?? null);
 });
 
 // PUT /api/business-info — creates the single row if missing, otherwise updates it
-businessInfoRouter.put("/", (req, res) => {
+businessInfoRouter.put("/", requireRole("admin"), (req, res) => {
   const data = infoInput.parse(req.body);
   const existing = db.prepare(`SELECT * FROM business_info WHERE id = 1`).get() as any;
 

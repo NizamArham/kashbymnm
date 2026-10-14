@@ -11,6 +11,16 @@ export const inventoryRouter = Router();
 // Everyone using this API must be logged in.
 inventoryRouter.use(requireAuth);
 
+// Staff (and an admin in cashier mode) sell from this stock but never see what it cost or which
+// supplier's batch it came from — that's the owner's business, not the till's.
+const HIDDEN_FROM_STAFF = ["cost_price", "purchase_item_id", "batch_supplier_id", "batch_supplier_name", "batch_supplier_code"];
+function forRole(req: { user?: { role: string } }, row: any) {
+  if (!row || req.user?.role !== "staff") return row;
+  const copy = { ...row };
+  for (const key of HIDDEN_FROM_STAFF) delete copy[key];
+  return copy;
+}
+
 const inventoryInput = z.object({
   product_id: z.number().int().positive(),
   size: z.string().optional(),
@@ -52,7 +62,7 @@ inventoryRouter.get(
       )
       .all(...params);
 
-    res.json(rows);
+    res.json(rows.map((r) => forRole(req, r)));
   })
 );
 
@@ -96,7 +106,7 @@ inventoryRouter.get(
       )
       .get(req.params.id);
     if (!row) throw new ApiError(404, "Inventory unit not found");
-    res.json(row);
+    res.json(forRole(req, row));
   })
 );
 
@@ -114,7 +124,7 @@ inventoryRouter.get(
       )
       .get(req.params.barcode);
     if (!row) throw new ApiError(404, "No inventory unit found with that barcode");
-    res.json(row);
+    res.json(forRole(req, row));
   })
 );
 
