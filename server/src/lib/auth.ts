@@ -31,6 +31,8 @@ declare global {
   namespace Express {
     interface Request {
       user?: AuthUser;
+      // The admin who OK'd this one action at a cashier's screen with their password (see approval.ts).
+      approver?: AuthUser;
     }
   }
 }

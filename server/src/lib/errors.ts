@@ -3,9 +3,13 @@ import { ZodError } from "zod";
 
 export class ApiError extends Error {
   statusCode: number;
-  constructor(statusCode: number, message: string) {
+  // A short machine-readable reason the screen can act on (e.g. "needs_approval" opens the
+  // admin-password prompt), alongside the human message.
+  code?: string;
+  constructor(statusCode: number, message: string, code?: string) {
     super(message);
     this.statusCode = statusCode;
+    this.code = code;
   }
 }
 
@@ -26,7 +30,7 @@ export function errorHandler(
   _next: NextFunction
 ) {
   if (err instanceof ApiError) {
-    return res.status(err.statusCode).json({ error: err.message });
+    return res.status(err.statusCode).json({ error: err.message, ...(err.code ? { code: err.code } : {}) });
   }
 
   // A request that failed validation (a missing or badly-formed field) is the

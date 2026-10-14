@@ -33,6 +33,7 @@ import { Input, Label, FormGroup, ErrorText, SuccessText, Button, Dropdown, Help
 import { CityPicker } from "../components/CityPicker";
 import { OnDemandFareInput, OnDemandPaidByPicker } from "../components/OnDemandFareFields";
 import { useAuth } from "../context/AuthContext";
+import { useAdminApproval } from "../components/AdminApproval";
 import {
   DeliveryPartner,
   DeliveryPaidBy,
@@ -94,6 +95,9 @@ function PosTick({
 export default function PosPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+  // What a cashier can't do alone (a big discount, free delivery, credit, a price above the tag) asks
+  // for an admin's password at checkout — the server decides, this just runs the prompt.
+  const { runWithApproval } = useAdminApproval();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [saleType, setSaleType] = useState<SaleType>("in_store");
@@ -426,12 +430,8 @@ export default function PosPage() {
       return;
     }
     const originalPrice = line.units[0].selling_price ?? 0;
-    // Staff can only sell at or below the listed price; an admin may also
-    // price above it (a special order, a corrected tag...).
-    if (newPrice > originalPrice && !isAdmin) {
-      setPriceEditError(`Only an admin can go above the original price (Rs. ${originalPrice.toLocaleString()})`);
-      return;
-    }
+    // Above the listed price is allowed here for everyone; a cashier's sale at such a price asks
+    // for an admin's password at checkout (the server enforces it — see priceItems in sales.ts).
     setCart((c) => c.map((l) => (cartLineKey(l.units[0]) === lineKey ? { ...l, unit_price: newPrice } : l)));
     setEditingLineKey(null);
     setEditPriceValue("");
@@ -1101,7 +1101,7 @@ export default function PosPage() {
           ? advancePaymentMethod
           : paymentMethod;
 
-      const sale = await api.post<{ invoice: string }>("/sales", {
+      const salePayload = {
         customer_id: selectedCustomer?.id,
         salesperson: user?.name ?? user?.username,
         items: cart.flatMap((line) => line.units.map((u) => ({ inventory_id: u.id, unit_price: line.unit_price }))),
@@ -1125,7 +1125,8 @@ export default function PosPage() {
               ...(isOnDemand ? onDemandPayload(onDemandFare) : {}),
             }
           : {}),
-      });
+      };
+      const sale = await runWithApproval((approval) => api.post<{ invoice: string }>("/sales", salePayload, { approval }));
 
       setCheckoutSuccess(`Sale complete — ${sale.invoice}${saleType === "online" ? ". A pending delivery was created automatically." : "."}`);
       clearDraftSale();
@@ -1206,9 +1207,11 @@ export default function PosPage() {
       // Editing a reopened quotation updates that same record (same
       // number the customer may already have); otherwise it's a
       // brand-new one.
-      const created = editingQuotation
-        ? await api.put<{ id: number }>(`/sales/quotations/${editingQuotation.id}`, payload)
-        : await api.post<{ id: number }>("/sales/quotations", payload);
+      const created = await runWithApproval((approval) =>
+        editingQuotation
+          ? api.put<{ id: number }>(`/sales/quotations/${editingQuotation.id}`, payload, { approval })
+          : api.post<{ id: number }>("/sales/quotations", payload, { approval })
+      );
 
       // Fetch the fully joined record (items, customer phone, etc.) so
       // the receipt/WhatsApp options below have everything they need —
@@ -1778,17 +1781,15 @@ export default function PosPage() {
                           hint="The customer still pays for the order itself."
                         />
                       )}
-                      {isAdmin && (
-                        <PosTick
-                          checked={isCreditSale}
-                          onChange={(checked) => {
-                            setIsCreditSale(checked);
-                            if (checked) setAdvancePaid("0");
-                          }}
-                          label="Credit order"
-                          hint="The product goes on credit — the delivery fee is still collected on delivery."
-                        />
-                      )}
+                      <PosTick
+                        checked={isCreditSale}
+                        onChange={(checked) => {
+                          setIsCreditSale(checked);
+                          if (checked) setAdvancePaid("0");
+                        }}
+                        label="Credit order"
+                        hint="The product goes on credit — the delivery fee is still collected on delivery."
+                      />
                       {wholesaleTick}
                     </div>
                     {wholesaleNote}
@@ -1892,18 +1893,16 @@ export default function PosPage() {
                 ) : (
                   <>
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                      {isAdmin && (
-                        <PosTick
-                          checked={isCreditSale}
-                          disabled={!selectedCustomer}
-                          onChange={setIsCreditSale}
-                          label="Credit sale"
-                          hint="Settle later — tracked as balance due."
-                        />
-                      )}
+                      <PosTick
+                        checked={isCreditSale}
+                        disabled={!selectedCustomer}
+                        onChange={setIsCreditSale}
+                        label="Credit sale"
+                        hint="Settle later — tracked as balance due."
+                      />
                       {wholesaleTick}
                     </div>
-                    {isAdmin && !selectedCustomer && (
+                    {!selectedCustomer && (
                       <p className="text-xs text-gray-400 -mt-2">Select a customer first — credit isn't offered to walk-ins.</p>
                     )}
                     {wholesaleNote}

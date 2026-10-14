@@ -6,18 +6,28 @@ function getToken(): string | null {
 
 export class ApiRequestError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  // "needs_approval" = a cashier can't do this alone; an admin's password at the till unlocks it.
+  code?: string;
+  constructor(status: number, message: string, code?: string) {
     super(message);
     this.status = status;
+    this.code = code;
   }
+}
+
+// Sent along with one action to say "an admin OK'd this" — their password, for this request only.
+export interface RequestOptions {
+  approval?: string;
 }
 
 async function request<T>(
   method: string,
   path: string,
-  body?: unknown
+  body?: unknown,
+  options?: RequestOptions
 ): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (options?.approval) headers["X-Admin-Approval"] = encodeURIComponent(options.approval);
   const token = getToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
@@ -48,16 +58,16 @@ async function request<T>(
       localStorage.removeItem("mm_user");
       window.location.href = "/login";
     }
-    throw new ApiRequestError(res.status, message);
+    throw new ApiRequestError(res.status, message, data?.code);
   }
 
   return data as T;
 }
 
 export const api = {
-  get: <T,>(path: string) => request<T>("GET", path),
-  post: <T,>(path: string, body?: unknown) => request<T>("POST", path, body),
-  put: <T,>(path: string, body?: unknown) => request<T>("PUT", path, body),
+  get: <T,>(path: string, options?: RequestOptions) => request<T>("GET", path, undefined, options),
+  post: <T,>(path: string, body?: unknown, options?: RequestOptions) => request<T>("POST", path, body, options),
+  put: <T,>(path: string, body?: unknown, options?: RequestOptions) => request<T>("PUT", path, body, options),
   delete: <T,>(path: string) => request<T>("DELETE", path),
 };
 

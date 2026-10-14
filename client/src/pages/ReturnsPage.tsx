@@ -3,6 +3,7 @@ import { RotateCcw, AlertTriangle, ChevronDown, ChevronRight, Download } from "l
 import { api, ApiRequestError } from "../lib/api";
 import { Sale, ReturnRequest } from "../lib/types";
 import { useAuth } from "../context/AuthContext";
+import { useAdminApproval } from "../components/AdminApproval";
 import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
 import { useSortableData } from "../lib/useSortableData";
 import { useCopyToClipboard } from "../lib/useCopyToClipboard";
@@ -461,6 +462,9 @@ function RequestReturnTab() {
 }
 
 function AllReturnsTab({ isAdmin }: { isAdmin: boolean }) {
+  // A cashier can fill in the decision here too; confirming it asks for an admin's password, and the
+  // return is recorded as approved or declined by that admin.
+  const { runWithApproval } = useAdminApproval();
   const [requests, setRequests] = useState<ReturnRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -556,11 +560,12 @@ function AllReturnsTab({ isAdmin }: { isAdmin: boolean }) {
 
     setApproveSubmitting(true);
     try {
-      await api.put(`/returns/requests/${r.id}/approve`, {
+      const decision = {
         decision_reason: approveReason.trim() || undefined,
         payment_method: r.resolution === "refund" ? refundMethod : undefined,
         bank_account_id: r.resolution === "refund" && refundMethod === "bank_transfer" ? parseInt(selectedRefundAccountId, 10) : undefined,
-      });
+      };
+      await runWithApproval((approval) => api.put(`/returns/requests/${r.id}/approve`, decision, { approval }));
       setExpandedId(null);
       load();
     } catch (err) {
@@ -579,7 +584,8 @@ function AllReturnsTab({ isAdmin }: { isAdmin: boolean }) {
 
     setDeclineSubmitting(true);
     try {
-      await api.put(`/returns/requests/${r.id}/decline`, { decision_reason: declineReason.trim() });
+      const reason = declineReason.trim();
+      await runWithApproval((approval) => api.put(`/returns/requests/${r.id}/decline`, { decision_reason: reason }, { approval }));
       setExpandedId(null);
       load();
     } catch (err) {
@@ -663,8 +669,9 @@ function AllReturnsTab({ isAdmin }: { isAdmin: boolean }) {
           </div>
         )}
 
-        {r.status === "pending" && isAdmin && (
+        {r.status === "pending" && (
           <div className="border-t border-gray-200 pt-4">
+
             <TabToggle
               value={decisionMode}
               onChange={setDecisionMode}

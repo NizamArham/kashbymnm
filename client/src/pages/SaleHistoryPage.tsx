@@ -15,6 +15,7 @@ import ExchangeTag from "../components/ExchangeTag";
 import SaleProfitModal from "../components/SaleProfitModal";
 import DeliveryChargeSummary from "../components/DeliveryChargeSummary";
 import { useAuth } from "../context/AuthContext";
+import { useAdminApproval } from "../components/AdminApproval";
 
 // Two separate questions, each answered on its own: WHEN (the period, or a custom date range) and
 // WHAT KIND of sale. They used to share one row of tabs, so picking "Voided" forgot the period.
@@ -146,6 +147,8 @@ export default function SaleHistoryPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+  // A cashier can start a void or an undo too; the server asks for an admin's password before it goes through.
+  const { runWithApproval } = useAdminApproval();
 
   const [sales, setSales] = useState<Sale[]>([]);
   const [expanded, setExpanded] = useState<Sale | null>(null);
@@ -500,7 +503,7 @@ export default function SaleHistoryPage() {
 
     setVoidingId(sale.id);
     try {
-      await api.put(`/sales/${sale.id}/void`, { reason: reason.trim() || undefined });
+      await runWithApproval((approval) => api.put(`/sales/${sale.id}/void`, { reason: reason.trim() || undefined }, { approval }));
       const refreshed = await api.get<Sale[]>("/sales");
       setSales(refreshed);
       setExpanded(null);
@@ -549,7 +552,7 @@ export default function SaleHistoryPage() {
 
     setUndoingId(sale.id);
     try {
-      await api.put(`/sales/${sale.id}/undo-cod`, {});
+      await runWithApproval((approval) => api.put(`/sales/${sale.id}/undo-cod`, {}, { approval }));
       const refreshed = await api.get<Sale[]>("/sales");
       setSales(refreshed);
     } catch (err) {
@@ -726,7 +729,7 @@ export default function SaleHistoryPage() {
             Profit on this bill
           </button>
         )}
-        {isAdmin && !sale.is_voided && (
+        {!sale.is_voided && (
           <button
             onClick={() => handleVoid(sale)}
             disabled={voidingId === sale.id}

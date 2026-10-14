@@ -3,7 +3,8 @@ import { z } from "zod";
 import { db } from "../db/connection";
 import { nextInvoiceCode, InvoiceCategory, nextTransactionCode, nextQuotationCode, invoiceCodeFromQuotation } from "../lib/codes";
 import { ApiError, asyncHandler } from "../lib/errors";
-import { requireAuth, requireRole } from "../lib/auth";
+import { requireAuth, requireRole, AuthUser } from "../lib/auth";
+import { requireAdminOrApproval, approveIfNeeded, actorOf } from "../lib/approval";
 import { logAudit } from "../lib/auditLog";
 import { getPartner, planDelivery, DeliveryPartnerRow } from "../lib/deliveryPartners";
 import { storeCreditSources } from "../lib/storeCreditSources";
@@ -19,6 +20,10 @@ salesRouter.use(requireAuth);
 // (e.g. Rs. 2500 spent -> 25 points). Matches the business's real,
 // established rule.
 export const LOYALTY_RATE_PERCENT = 0.01;
+
+// A cashier can take up to this much off a sale on their own; more needs an admin's password.
+// (Nothing on the till screen mentions it — the admin-password prompt only appears at checkout.)
+export const CASHIER_MAX_DISCOUNT_PERCENT = 10;
 
 const saleItemInput = z.object({
   inventory_id: z.number().int().positive(),
@@ -131,14 +136,18 @@ interface ItemPricing {
   discount: number;
   total: number;
   loyalty_points_earned: number;
+  // What in this cart a cashier can't do alone (empty for an admin) — see approval.ts.
+  approvalReasons: string[];
 }
 
 function priceItems(
   items: { inventory_id: number; unit_price: number }[],
   manualDiscountType: "percent" | "fixed" | undefined,
   manualDiscountValue: number | undefined,
-  couponCodeInput: string | undefined
+  couponCodeInput: string | undefined,
+  actor?: AuthUser
 ): ItemPricing {
+  const approvalReasons = new Set<string>();
   const inventoryRows = items.map((item) => {
     const row = db.prepare(`SELECT * FROM inventory WHERE id = ?`).get(item.inventory_id) as any;
     if (!row) {
@@ -150,6 +159,11 @@ function priceItems(
         `Inventory unit ${item.inventory_id} (SKU ${row.sku}) is already sold and cannot be sold again`
       );
     }
+    // A cashier sells at the listed price or lower; going above it (a special order, a corrected
+    // tag) needs an admin's password.
+    if (actor && actor.role !== "admin" && item.unit_price > row.selling_price) {
+      approvalReasons.add("a price above the listed price");
+    }
     return row;
   });
 
@@ -157,6 +171,12 @@ function priceItems(
 
   const manual_discount =
     manualDiscountType === "percent" ? Math.round((subtotal * (manualDiscountValue ?? 0)) / 100) : manualDiscountValue ?? 0;
+
+  // A cashier's own discount stops at the limit; anything above needs an admin's password.
+  // (A coupon is a promotion an admin created, so it never counts against this.)
+  if (actor && actor.role !== "admin" && manual_discount > Math.round((subtotal * CASHIER_MAX_DISCOUNT_PERCENT) / 100)) {
+    approvalReasons.add(`a discount above ${CASHIER_MAX_DISCOUNT_PERCENT}%`);
+  }
 
   let coupon_discount = 0;
   let coupon_code: string | null = null;
@@ -177,7 +197,17 @@ function priceItems(
   const total = Math.max(0, subtotal - discount);
   const loyalty_points_earned = Math.floor(total * LOYALTY_RATE_PERCENT);
 
-  return { inventoryRows, subtotal, manual_discount, coupon_discount, coupon_code, discount, total, loyalty_points_earned };
+  return {
+    inventoryRows,
+    subtotal,
+    manual_discount,
+    coupon_discount,
+    coupon_code,
+    discount,
+    total,
+    loyalty_points_earned,
+    approvalReasons: Array.from(approvalReasons),
+  };
 }
 
 // The cash/change/store-credit math for a real checkout (POST /).
@@ -554,7 +584,6 @@ salesRouter.post(
     if (isCredit && !data.customer_id) {
       throw new ApiError(400, "Credit sales require a selected customer — it isn't offered to walk-ins.");
     }
-
     // An online exchange has to start from an item this customer really has from
     // a delivered order, and be delivered by a partner who can collect it.
     let exchangeSources: ReturnType<typeof checkExchangeSources> | null = null;
@@ -569,8 +598,14 @@ salesRouter.post(
     // available) and compute subtotal/discount/total — shared with the
     // quotation endpoint below so a quoted price is always exactly what
     // a real checkout of the same cart would charge.
-    const priced = priceItems(data.items, data.manual_discount_type, data.manual_discount_value, data.coupon_code);
+    const priced = priceItems(data.items, data.manual_discount_type, data.manual_discount_value, data.coupon_code, req.user);
     const { subtotal, manual_discount, coupon_discount, coupon_code, discount, total } = priced;
+    // Things a cashier can't do alone — credit, a big discount, free delivery, a price above the tag —
+    // go ahead only when an admin types their password for this sale.
+    const approvalReasons = [...priced.approvalReasons];
+    if (isCredit) approvalReasons.push("selling on credit");
+    if (data.sale_type === "online" && (data.is_free_delivery || data.delivery_paid_by === "shop")) approvalReasons.push("free delivery");
+    approveIfNeeded(req, res, approvalReasons, "This sale");
     // Wholesale orders, and customers marked as never earning points, get
     // none — the sale is simply recorded without any.
     const isWholesale = data.is_wholesale || loyaltyBlocked;
@@ -868,12 +903,15 @@ salesRouter.post(
       }
     }
 
-    const { subtotal, manual_discount, coupon_discount, coupon_code, discount, total, loyalty_points_earned } = priceItems(
+    const priced = priceItems(
       data.items,
       data.manual_discount_type,
       data.manual_discount_value,
-      data.coupon_code
+      data.coupon_code,
+      req.user
     );
+    approveIfNeeded(req, res, priced.approvalReasons, "This quotation");
+    const { subtotal, manual_discount, coupon_discount, coupon_code, discount, total, loyalty_points_earned } = priced;
 
     const invoice = nextQuotationCode();
     const { d: validUntil } = db
@@ -962,12 +1000,15 @@ salesRouter.put(
       }
     }
 
-    const { subtotal, manual_discount, coupon_discount, coupon_code, discount, total, loyalty_points_earned } = priceItems(
+    const priced = priceItems(
       data.items,
       data.manual_discount_type,
       data.manual_discount_value,
-      data.coupon_code
+      data.coupon_code,
+      req.user
     );
+    approveIfNeeded(req, res, priced.approvalReasons, "This quotation");
+    const { subtotal, manual_discount, coupon_discount, coupon_code, discount, total, loyalty_points_earned } = priced;
 
     const { d: validUntil } = db
       .prepare(`SELECT datetime('now', '+330 minutes', '+' || ? || ' days') as d`)
@@ -1142,6 +1183,7 @@ salesRouter.put(
 // mistake, voiding the whole sale is the right tool, not this.
 salesRouter.put(
   "/:id/undo-cod",
+  requireAdminOrApproval("Undoing a COD confirmation"),
   asyncHandler(async (req, res) => {
     const sale = db.prepare(`SELECT * FROM sales WHERE id = ?`).get(req.params.id) as any;
     if (!sale) throw new ApiError(404, "Sale not found");
@@ -1240,7 +1282,7 @@ salesRouter.put(
 // "was Rs. X, sold at Rs. Y" after the fact.
 salesRouter.put(
   "/:id/void",
-  requireRole("admin"),
+  requireAdminOrApproval("Voiding a sale"),
   asyncHandler(async (req, res) => {
     const reasonInput = z.object({ reason: z.string().optional() }).parse(req.body);
 
@@ -1336,7 +1378,7 @@ salesRouter.put(
     runVoidTransaction();
 
     logAudit(
-      req.user!,
+      actorOf(req),
       "sale_void",
       "sale",
       sale.id,

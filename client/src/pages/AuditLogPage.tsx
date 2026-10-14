@@ -58,6 +58,7 @@ const ACTION_META: Record<string, { label: string; icon: typeof AlertTriangle; t
   sale_wholesale: { label: "Marked sale wholesale", icon: Pencil, tone: "neutral" },
   cashier_mode_on: { label: "Switched to cashier mode", icon: UserCog, tone: "neutral" },
   cashier_mode_off: { label: "Went back to admin", icon: UserCog, tone: "neutral" },
+  till_approval: { label: "Approved at the till", icon: UserCog, tone: "warning" },
 };
 
 function actionMeta(action: string) {

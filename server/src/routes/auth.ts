@@ -5,6 +5,7 @@ import { db } from "../db/connection";
 import { signToken, requireAuth, requireRole } from "../lib/auth";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { logAudit } from "../lib/auditLog";
+import { findAdminByPassword } from "../lib/approval";
 
 export const authRouter = Router();
 
@@ -149,6 +150,20 @@ authRouter.post(
     const user = { id: me.id, username: me.username, role: "admin" as const, name: me.name };
     logAudit(req.user!, "cashier_mode_off", "staff", me.id, `${me.name ?? me.username} went back to admin`);
     res.json({ token: signToken(user), user });
+  })
+);
+
+// POST /api/auth/verify-admin — checks that a password is some admin's, so the approval prompt on a
+// cashier's screen can say "wrong password" on the spot. Nothing is remembered: the action it unlocks
+// sends the password again with its own request.
+authRouter.post(
+  "/verify-admin",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { password } = z.object({ password: z.string().min(1, "Enter an admin's password") }).parse(req.body);
+    const admin = findAdminByPassword(password, req.user!.id);
+    if (!admin) throw new ApiError(403, "That isn't an admin's password.", "wrong_approval");
+    res.json({ ok: true, admin_name: admin.name ?? admin.username });
   })
 );
 

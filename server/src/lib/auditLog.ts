@@ -51,7 +51,8 @@ export type AuditAction =
   | "loyalty_block"
   | "sale_wholesale"
   | "cashier_mode_on"
-  | "cashier_mode_off";
+  | "cashier_mode_off"
+  | "till_approval";
 
 export function logAudit(
   actor: AuthUser,

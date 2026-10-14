@@ -4,6 +4,7 @@ import { db } from "../db/connection";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { nextTransactionCode } from "../lib/codes";
 import { requireAuth, requireRole, AuthUser } from "../lib/auth";
+import { requireAdminOrApproval, actorOf } from "../lib/approval";
 import { logAudit } from "../lib/auditLog";
 import { LOYALTY_RATE_PERCENT } from "./sales";
 import { returnsInRange } from "../lib/returnedRevenue";
@@ -387,9 +388,9 @@ export function approveReturnRequest(requestId: number | string, user: AuthUser,
 
 returnsRouter.put(
   "/requests/:id/approve",
-  requireRole("admin"),
+  requireAdminOrApproval("Approving a return"),
   asyncHandler(async (req, res) => {
-    res.json(approveReturnRequest(req.params.id, req.user!, decisionInput.parse(req.body)));
+    res.json(approveReturnRequest(req.params.id, actorOf(req), decisionInput.parse(req.body)));
   })
 );
 
@@ -397,7 +398,7 @@ returnsRouter.put(
 // sale, stock, or cash book changes — only the request's own status.
 returnsRouter.put(
   "/requests/:id/decline",
-  requireRole("admin"),
+  requireAdminOrApproval("Declining a return"),
   asyncHandler(async (req, res) => {
     const data = z.object({ decision_reason: z.string().min(1, "A reason is required to decline a request") }).parse(req.body);
 
@@ -407,10 +408,10 @@ returnsRouter.put(
 
     db.prepare(
       `UPDATE return_requests SET status = 'declined', decided_by = ?, decided_at = datetime('now', '+330 minutes'), decision_reason = ? WHERE id = ?`
-    ).run(req.user!.id, data.decision_reason, req.params.id);
+    ).run(actorOf(req).id, data.decision_reason, req.params.id);
 
     logAudit(
-      req.user!,
+      actorOf(req),
       "return_decline",
       "return_request",
       Number(req.params.id),
