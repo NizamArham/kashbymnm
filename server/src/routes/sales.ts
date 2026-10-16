@@ -21,6 +21,12 @@ salesRouter.use(requireAuth);
 // established rule.
 export const LOYALTY_RATE_PERCENT = 0.01;
 
+// A cashier browses the shop's recent sales: today and the days before it, this many in all. Anything older is
+// still reachable one piece at a time — by its exact invoice number (?invoice=), through one customer's order
+// history (?customer_id=), or by opening a bill — but the whole history takes an admin's password typed at the
+// till (?window=all). So old takings and who-bought-what aren't something to scroll through at the till.
+export const CASHIER_HISTORY_DAYS = 7;
+
 // A cashier can take up to this much off a sale on their own; more needs an admin's password.
 // (Nothing on the till screen mentions it — the admin-password prompt only appears at checkout.)
 export const CASHIER_MAX_DISCOUNT_PERCENT = 10;
@@ -280,10 +286,10 @@ function computePaymentOutcome(input: PaymentOutcomeInput): PaymentOutcome {
   return { storeCreditApplied, effectiveAmountPaid, productAmountPaid, feePaid, payment_status, change_due, overpaid_amount };
 }
 
-// GET /api/sales — list all, with customer name. Optionally
+// GET /api/sales — list all (a cashier: the last CASHIER_HISTORY_DAYS days), with customer name. Optionally
 // ?customer_id=N to scope to just one customer's order history — used
 // by the customer order history page, so it doesn't have to fetch
-// every sale in the system just to filter client-side.
+// every sale in the system just to filter client-side — or ?invoice=X for one bill.
 //
 // Defaults to real sales only (status = 'completed') — a saved
 // quotation is a row in this same table, but it was never actually
@@ -299,6 +305,21 @@ salesRouter.get(
     if (req.query.customer_id) {
       conditions.push("sales.customer_id = ?");
       params.push(req.query.customer_id);
+    }
+    // One bill by its exact number, however old (the Returns page looks an invoice up this way).
+    const invoiceLookup = String(req.query.invoice ?? "").trim();
+    if (invoiceLookup) {
+      conditions.push("LOWER(sales.invoice) = LOWER(?)");
+      params.push(invoiceLookup);
+    }
+    // A cashier's plain list is the recent window; the whole history needs an admin's password.
+    if (req.user!.role === "staff" && !invoiceLookup && !req.query.customer_id && req.query.status !== "quotation") {
+      if (req.query.window === "all") {
+        approveIfNeeded(req, res, [`sales older than the last ${CASHIER_HISTORY_DAYS} days`], "This sales history");
+      } else {
+        conditions.push("sales.date >= date('now', '+330 minutes', ?)");
+        params.push(`-${CASHIER_HISTORY_DAYS - 1} days`);
+      }
     }
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     const rows = db

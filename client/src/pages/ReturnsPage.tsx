@@ -153,8 +153,9 @@ function RequestReturnTab() {
     if (!value) return;
 
     try {
-      const all = await api.get<Sale[]>("/sales");
-      const match = all.find((s) => s.invoice.toLowerCase() === value.toLowerCase());
+      // The one bill, however old — a cashier's plain sales list only reaches back a week.
+      const found = await api.get<Sale[]>(`/sales?invoice=${encodeURIComponent(value)}`);
+      const match = found[0];
       if (!match) {
         setLookupError("No sale found with that invoice number");
         return;

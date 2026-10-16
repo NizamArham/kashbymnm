@@ -58,6 +58,8 @@ const KIND_FILTER: Record<Kind, (s: Sale) => boolean> = {
 // The list fits the screen on desktop and is read a page at a time. A row is this tall (taller when an
 // exchange tag sits under the invoice number), so the number of rows that fit is worked out
 // from the room on screen. Phones and tablets get stacked cards, a fixed number to a page.
+// How far back a cashier may browse without asking (today and the days before it) — mirrors CASHIER_HISTORY_DAYS on the server.
+const CASHIER_WEEK_DAYS = 7;
 const ROW_HEIGHT = 57;
 const TAGGED_ROW_HEIGHT = 89;
 const TABLE_HEAD_HEIGHT = 37;
@@ -182,12 +184,17 @@ export default function SaleHistoryPage() {
   const [codPaymentMethod, setCodPaymentMethod] = useState<"cash" | "bank_transfer" | "card">("cash");
   const [undoingId, setUndoingId] = useState<number | null>(null);
 
-  const [period, setPeriod] = useState<Period>("month");
+  const [period, setPeriod] = useState<Period>(isAdmin ? "month" : "week");
   const [kind, setKind] = useState<Kind>("all");
   const [search, setSearch] = useState("");
 
   const [startDate, setStartDate] = useState<string | null>(null);
   const [endDate, setEndDate] = useState<string | null>(null);
+
+  // A cashier browses the last week (the server only sends that much). Looking further back — This month, All time,
+  // a date range that reaches past the week — takes an admin's password once; after that the older sales stay loaded
+  // here until the page is left.
+  const [olderUnlocked, setOlderUnlocked] = useState(false);
 
   // Paging. `rowRoom` is how many pixels of rows fit in the table area on screen right now.
   const [page, setPage] = useState(1);
@@ -491,6 +498,36 @@ export default function SaleHistoryPage() {
     ];
   }
 
+  // Re-reads the list after a change. A cashier who has unlocked older sales keeps them (no second password): the
+  // recent week is refreshed, and the one bill that was just changed is re-read on its own.
+  async function refreshSales(touched?: Sale) {
+    const recent = await api.get<Sale[]>("/sales");
+    if (isAdmin || !olderUnlocked) {
+      setSales(recent);
+      return;
+    }
+    const again = touched ? await api.get<Sale[]>(`/sales?invoice=${encodeURIComponent(touched.invoice)}`) : [];
+    setSales((prev) => {
+      const fresh = new Map([...recent, ...again].map((x) => [x.id, x] as const));
+      return [...fresh.values(), ...prev.filter((x) => !fresh.has(x.id))].sort((a, b) => b.id - a.id);
+    });
+  }
+
+  // True when this person may look further back (an admin always; a cashier once an admin has typed their password).
+  async function unlockOlderSales(): Promise<boolean> {
+    if (isAdmin || olderUnlocked) return true;
+    try {
+      const all = await runWithApproval((approval) => api.get<Sale[]>("/sales?window=all", { approval }));
+      setSales(all);
+      setOlderUnlocked(true);
+      return true;
+    } catch (err) {
+      // A cancelled prompt just leaves the view as it was.
+      if (!(err instanceof ApiRequestError && err.code === "needs_approval")) setError(err instanceof ApiRequestError ? err.message : "Couldn't load the older sales");
+      return false;
+    }
+  }
+
   async function handleVoid(sale: Sale) {
     setOpenMenuId(null);
     setError(null);
@@ -504,8 +541,7 @@ export default function SaleHistoryPage() {
     setVoidingId(sale.id);
     try {
       await runWithApproval((approval) => api.put(`/sales/${sale.id}/void`, { reason: reason.trim() || undefined }, { approval }));
-      const refreshed = await api.get<Sale[]>("/sales");
-      setSales(refreshed);
+      await refreshSales(sale);
       setExpanded(null);
     } catch (err) {
       setError(err instanceof ApiRequestError ? err.message : "Failed to void this sale");
@@ -520,7 +556,7 @@ export default function SaleHistoryPage() {
     setWholesaleBusy(true);
     try {
       await api.put(`/sales/${wholesaleSale.id}/wholesale`, { reason: wholesaleReason.trim() || undefined });
-      setSales(await api.get<Sale[]>("/sales"));
+      await refreshSales(wholesaleSale);
       setWholesaleSale(null);
     } catch (err) {
       setWholesaleError(err instanceof ApiRequestError ? err.message : "Failed to mark this sale wholesale");
@@ -535,8 +571,7 @@ export default function SaleHistoryPage() {
     setCodConfirming(true);
     try {
       await api.put(`/sales/${codConfirmSale.id}/confirm-cod`, { payment_method: codPaymentMethod });
-      const refreshed = await api.get<Sale[]>("/sales");
-      setSales(refreshed);
+      await refreshSales(codConfirmSale);
       setCodConfirmSale(null);
     } catch (err) {
       setCodError(err instanceof ApiRequestError ? err.message : "Failed to confirm this payment");
@@ -553,8 +588,7 @@ export default function SaleHistoryPage() {
     setUndoingId(sale.id);
     try {
       await runWithApproval((approval) => api.put(`/sales/${sale.id}/undo-cod`, {}, { approval }));
-      const refreshed = await api.get<Sale[]>("/sales");
-      setSales(refreshed);
+      await refreshSales(sale);
     } catch (err) {
       setError(err instanceof ApiRequestError ? err.message : "Failed to undo this confirmation");
     } finally {
@@ -789,7 +823,9 @@ export default function SaleHistoryPage() {
             <DateRangePicker
               startDate={startDate}
               endDate={endDate}
-              onChange={(s, e) => {
+              onChange={async (s, e) => {
+                // a range that reaches back past the week a cashier may browse asks for an admin's password first
+                if (!isAdmin && s && s < toISODate(new Date(Date.now() - (CASHIER_WEEK_DAYS - 1) * 86400000)) && !(await unlockOlderSales())) return;
                 setStartDate(s);
                 setEndDate(e);
               }}
@@ -815,8 +851,9 @@ export default function SaleHistoryPage() {
         <div className="flex flex-wrap items-center gap-3">
           <TabToggle<Period | "custom">
             value={startDate && endDate ? "custom" : period}
-            onChange={(v) => {
+            onChange={async (v) => {
               if (v === "custom") return;
+              if ((v === "month" || v === "all") && !(await unlockOlderSales())) return;
               setPeriod(v);
               setStartDate(null);
               setEndDate(null);
