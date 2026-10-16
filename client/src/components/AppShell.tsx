@@ -35,6 +35,7 @@ import { useState, useEffect, useRef } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useNavShortcuts, navShortcutHint } from "../lib/navShortcuts";
 import CashierModeControl from "./CashierModeControl";
+import FullscreenToggle from "./FullscreenToggle";
 
 interface MenuSubItem {
   id: string;
@@ -270,6 +271,8 @@ export default function AppShell() {
             <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-gray-400 hover:text-white transition">
               <X size={20} />
             </button>
+            {/* The whole app, full screen — on desktop; a phone's sidebar is a drawer and its browser can't. */}
+            <FullscreenToggle className="hidden lg:flex" />
           </div>
           <p className="text-xs lg:text-sm text-gray-400">{inCashierMode ? "Cashier mode" : isAdmin ? "Admin Console" : "Staff Console"}</p>
         </div>
