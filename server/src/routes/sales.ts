@@ -1382,6 +1382,30 @@ salesRouter.put(
     if (!sale) throw new ApiError(404, "Sale not found");
     if (sale.is_voided) throw new ApiError(409, "This sale has already been voided.");
 
+    // An invoice whose items are in an exchange can't be voided on its own: while the exchange waits, those pieces are
+    // with the customer (voiding would put them back in stock and hand the money back for goods that haven't come
+    // back); once it's done, their value has already been returned to the customer as store credit — voiding the
+    // invoice too would refund it a second time.
+    const swapped = db
+      .prepare(
+        `SELECT ei.status, ns.invoice AS new_invoice
+         FROM online_exchange_items ei
+         JOIN sale_items si ON si.id = ei.old_sale_item_id
+         JOIN online_exchanges ox ON ox.id = ei.exchange_id
+         JOIN sales ns ON ns.id = ox.new_sale_id
+         WHERE si.sale_id = ? AND ei.status IN ('awaiting', 'received')
+         ORDER BY ei.status LIMIT 1`
+      )
+      .get(sale.id) as { status: string; new_invoice: string } | undefined;
+    if (swapped) {
+      throw new ApiError(
+        409,
+        swapped.status === "awaiting"
+          ? `Items on this invoice are being exchanged (replacement ${swapped.new_invoice}) and are still with the customer. Void that replacement order first — that cancels the exchange — then this invoice can be voided.`
+          : `Items on this invoice have already been exchanged (replacement ${swapped.new_invoice}) — their value went back to the customer as store credit, so this invoice can't be voided as well.`
+      );
+    }
+
     const items = db.prepare(`SELECT * FROM sale_items WHERE sale_id = ?`).all(req.params.id) as any[];
 
     const runVoidTransaction = db.transaction(() => {
