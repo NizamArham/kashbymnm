@@ -184,6 +184,17 @@ function exchangeCollectNote(exchange: NonNullable<Sale["exchange"]>): string {
   return `Old item${exchange.items.length === 1 ? "" : "s"} collected on delivery (${invoices})`;
 }
 
+// The figures of a quoted exchange by delivery, to print under the total: what comes off for the old items, the delivery,
+// the customer's pickup share, and what they pay. Null for everything else.
+function exchangeQuoteView(sale: Sale) {
+  const q = sale.status === "quotation" ? sale.exchange_quote : null;
+  if (!q) return null;
+  const names = q.old_items
+    .map((i) => `${i.title ?? "Item"}${[i.size, i.color].filter(Boolean).length ? ` (${[i.size, i.color].filter(Boolean).join(", ")})` : ""}`)
+    .join(", ");
+  return { ...q, note: `Old item${q.old_items.length === 1 ? "" : "s"} collected on delivery: ${names}` };
+}
+
 export function deliveryBreakdown(sale: Sale) {
   if (sale.status === "quotation" || sale.sale_type !== "online") return null;
   const fee = sale.delivery_fee ?? 0;
@@ -196,8 +207,11 @@ export function deliveryBreakdown(sale: Sale) {
   // collected, and the customer's share of the pickup charge rides along in the COD.
   // What they pay at the door is the COD figure, not total + fee.
   const exchange = sale.exchange && sale.exchange.status === "awaiting_pickup" ? sale.exchange : null;
+  // An exchange paid up front (a bank transfer, say): everything taken so far — the part of the order the customer owed,
+  // the delivery fee and their share of the pickup charge.
+  const prepaid = exchange ? (sale.amount_paid ?? 0) + (sale.delivery_fee_paid ?? 0) + (sale.delivery_pickup_prepaid ?? 0) : 0;
   if (sale.delivery_is_free) {
-    return { fee: 0, free: true, note: null as string | null, cod, state, payable: null as number | null, exchange };
+    return { fee: 0, free: true, note: null as string | null, cod, state, payable: null as number | null, exchange, prepaid };
   }
   if (!(fee > 0)) return null;
   return {
@@ -208,6 +222,7 @@ export function deliveryBreakdown(sale: Sale) {
     state,
     payable: (sale.payment_method === "credit" || exchange ? null : sale.total + fee) as number | null,
     exchange,
+    prepaid,
   };
 }
 
@@ -271,6 +286,10 @@ function paymentDisplay(sale: Sale): string {
   // account (any delivery fee still shows on its own line). Only a normal
   // unpaid online order is COD.
   if (sale.payment_method === "credit") return "Credit";
+  // An exchange paid up front is only "partial" until its old items are received — the courier collects nothing for it.
+  if (sale.exchange?.status === "awaiting_pickup" && sale.payment_status === "partial" && (sale.delivery_cod_amount ?? 0) === 0) {
+    return formatPaymentMethod(sale.payment_method);
+  }
   if (sale.sale_type === "online" && sale.payment_status !== "paid") {
     return `COD [${sale.delivery_partner_waybill_code ?? waybillShopCode(sale.delivery_partner)}]`;
   }
@@ -358,7 +377,9 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
       kvRow("Valid Until", (x, yy) => doc.text(formatDate(sale.quotation_valid_until!), x, yy));
     }
   } else {
-    kvRow("Status", (x, yy) => doc.text(formatStatus(sale.payment_status), x, yy));
+    // An exchange waiting for its old items isn't "unpaid" or "partial": its value is covered by what's on its way back.
+    const exchangeWaiting = sale.exchange?.status === "awaiting_pickup" && sale.payment_status !== "paid";
+    kvRow("Status", (x, yy) => doc.text(exchangeWaiting ? "Exchange pending" : formatStatus(sale.payment_status), x, yy));
     kvRow("Payment", (x, yy) => doc.text(paymentDisplay(sale), x, yy));
   }
   kvRow("Invoice", (x, yy) => doc.text(sale.invoice, x, yy));
@@ -499,8 +520,11 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
   const paymentLines = (storeCredit > 0 ? 1 : 0) + (showPaid ? 1 : 0) + (showBalance ? 1 : 0);
 
   const delivery = deliveryBreakdown(sale);
+  const quote = exchangeQuoteView(sale);
   const notice = delivery ? null : deliveryNotice(sale);
-  const deliveryRoom = delivery ? 7 + (delivery.note ? 4.5 : 0) + (delivery.payable !== null ? 7 : 0) + 7 + (delivery.exchange ? 18 : 0) : notice ? 7 : 0;
+  const deliveryRoom =
+    (delivery ? 7 + (delivery.note ? 4.5 : 0) + (delivery.payable !== null ? 7 : 0) + 7 + (delivery.exchange ? 18 + (delivery.prepaid > 0 ? 7 : 0) : 0) : notice ? 7 : 0) +
+    (quote ? 40 : 0);
 
   if (y + 46 + paymentLines * 6.5 + creditSources.length * 4.5 + deliveryRoom > 270) {
     doc.addPage();
@@ -581,6 +605,42 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
     doc.setFontSize(10);
   }
 
+  if (quote) {
+    // A quoted exchange: what comes off for the old items, the delivery and the pickup share, and what to pay.
+    y += 6;
+    doc.setFontSize(9.5);
+    doc.setTextColor(90);
+    doc.text("Old items collected", totalsX, y);
+    doc.text(`- ${amountOnly(quote.applied_amount)}`, rightX, y, { align: "right" });
+    const noteLines = doc.splitTextToSize(quote.note, 70) as string[];
+    doc.setFontSize(7.5);
+    doc.setTextColor(150);
+    for (const line of noteLines.slice(0, 3)) {
+      y += 4.5;
+      doc.text(line, totalsX, y);
+    }
+    y += 6;
+    doc.setFontSize(9.5);
+    doc.setTextColor(90);
+    doc.text("Delivery Charges", totalsX, y);
+    doc.text(quote.is_free_delivery ? "FREE" : `+ ${amountOnly(quote.delivery_fee)}`, rightX, y, { align: "right" });
+    if (quote.pickup_collected > 0) {
+      y += 6;
+      doc.text("Pickup charge (your share)", totalsX, y);
+      doc.text(`+ ${amountOnly(quote.pickup_collected)}`, rightX, y, { align: "right" });
+    }
+    y += 3;
+    doc.setDrawColor(200);
+    doc.line(totalsX, y, rightX, y);
+    y += 6.5;
+    doc.setFontSize(10);
+    doc.setTextColor(20);
+    doc.text("Amount to pay", totalsX, y);
+    doc.setFontSize(12);
+    doc.text(amountLKR(quote.amount_to_pay), rightX, y, { align: "right" });
+    doc.setFontSize(9.5);
+    doc.setTextColor(90);
+  }
   if (delivery) {
     if (delivery.exchange) {
       // The old item's value, taken off once the courier has collected the item.
@@ -603,6 +663,11 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
       y += 6;
       doc.text("Pickup charge (your share)", totalsX, y);
       doc.text(`+ ${amountOnly(delivery.exchange.pickup_collected)}`, rightX, y, { align: "right" });
+    }
+    if (delivery.exchange && delivery.prepaid > 0) {
+      y += 6;
+      doc.text(`Paid (${formatPaymentMethod(sale.payment_method)})`, totalsX, y);
+      doc.text(`- ${amountOnly(delivery.prepaid)}`, rightX, y, { align: "right" });
     }
     if (delivery.note) {
       y += 4.5;
@@ -674,7 +739,8 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
   // out. "Pay Here" only for an actual credit sale with a real
   // balance still owed — not a COD order (collected by the courier,
   // not bank transfer) and not anything already settled.
-  const needsPayHere = sale.payment_method === "credit" && sale.payment_status !== "paid" && amountOwed > 0;
+  // A quoted exchange is paid before it goes out, usually by transfer — so it carries the shop's account too.
+  const needsPayHere = (sale.payment_method === "credit" && sale.payment_status !== "paid" && amountOwed > 0) || (!!quote && quote.amount_to_pay > 0);
   // Needs about 30mm for Total alone, or 42mm with Pay Here — start a
   // fresh page rather than let it run into the footer. A bill with a
   // Balance Due already states its Total and Balance in the totals
@@ -702,6 +768,11 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
       } else {
         kvRow("Delivery Fee", (x, yy) => doc.text(delivery.state === "paid" ? "Paid" : "Collected on delivery", x, yy));
       }
+    } else if (delivery && delivery.exchange) {
+      // An exchange with nothing left to collect at the door (paid up front, or the old items cover it).
+      kvRow("Pay", (x, yy) => doc.text("Nothing on delivery", x, yy));
+    } else if (quote) {
+      kvRow("Pay", (x, yy) => doc.text(`${quote.amount_to_pay.toLocaleString()}LKR`, x, yy));
     } else {
       kvRow("Total", (x, yy) => doc.text(`${sale.total.toLocaleString()}LKR`, x, yy));
     }
@@ -908,6 +979,33 @@ export function generateThermalPdf(sale: Sale): jsPDF {
   // read as a mistake rather than as intended. "Valid until" is the one
   // thing worth printing here instead.
   if (isQuotation) {
+    const quote = exchangeQuoteView(sale);
+    if (quote) {
+      // A quoted exchange: what comes off for the old items, the delivery and the pickup share, and what to pay.
+      doc.text("Old items collected", marginX, y);
+      doc.text(`-${money(quote.applied_amount)}`, widthMm - marginX, y, { align: "right" });
+      y += 4;
+      doc.setFontSize(6);
+      const noteLines = doc.splitTextToSize(quote.note, contentWidth) as string[];
+      doc.text(noteLines.slice(0, 3), marginX, y);
+      y += Math.min(noteLines.length, 3) * 3 + 0.5;
+      doc.setFontSize(7);
+      doc.text("Delivery charges", marginX, y);
+      doc.text(quote.is_free_delivery ? "FREE" : `+${money(quote.delivery_fee)}`, widthMm - marginX, y, { align: "right" });
+      y += 4;
+      if (quote.pickup_collected > 0) {
+        doc.text("Pickup charge (your share)", marginX, y);
+        doc.text(`+${money(quote.pickup_collected)}`, widthMm - marginX, y, { align: "right" });
+        y += 4;
+      }
+      doc.setFont("courier", "bold");
+      doc.setFontSize(8);
+      doc.text("AMOUNT TO PAY", marginX, y);
+      doc.text(money(quote.amount_to_pay), widthMm - marginX, y, { align: "right" });
+      doc.setFont("courier", "normal");
+      doc.setFontSize(7);
+      y += 6;
+    }
     if (sale.quotation_valid_until) {
       doc.text("Valid until", marginX, y);
       doc.text(formatDate(sale.quotation_valid_until), widthMm - marginX, y, { align: "right" });
@@ -915,6 +1013,7 @@ export function generateThermalPdf(sale: Sale): jsPDF {
     }
   } else {
     const { storeCredit, cashPaid, amountOwed, showBalance, showPaid, creditSources } = paymentBreakdown(sale);
+    const delivery = deliveryBreakdown(sale);
     if (storeCredit > 0) {
       doc.text("Store credit", marginX, y);
       doc.text(`-${money(storeCredit)}`, widthMm - marginX, y, { align: "right" });
@@ -933,7 +1032,7 @@ export function generateThermalPdf(sale: Sale): jsPDF {
       doc.text(`Paid (${formatPaymentMethod(sale.payment_method)})`, marginX, y);
       doc.text(`-${money(cashPaid)}`, widthMm - marginX, y, { align: "right" });
       y += 4.5;
-    } else if (storeCredit === 0 && !showBalance) {
+    } else if (storeCredit === 0 && !showBalance && !delivery?.exchange) {
       doc.text(`Paid (${formatPaymentMethod(sale.payment_method)})`, marginX, y);
       doc.text(money(sale.amount_paid), widthMm - marginX, y, { align: "right" });
       y += 6;
@@ -950,7 +1049,6 @@ export function generateThermalPdf(sale: Sale): jsPDF {
       y += 1.5;
     }
 
-    const delivery = deliveryBreakdown(sale);
     if (delivery) {
       if (delivery.exchange) {
         doc.text("Exchange credit", marginX, y);
@@ -969,6 +1067,11 @@ export function generateThermalPdf(sale: Sale): jsPDF {
         doc.text(`+${money(delivery.exchange.pickup_collected)}`, widthMm - marginX, y, { align: "right" });
         y += 4;
       }
+      if (delivery.exchange && delivery.prepaid > 0) {
+        doc.text(`Paid (${formatPaymentMethod(sale.payment_method)})`, marginX, y);
+        doc.text(`-${money(delivery.prepaid)}`, widthMm - marginX, y, { align: "right" });
+        y += 4;
+      }
       if (delivery.note) {
         doc.setFontSize(6);
         doc.text(delivery.note, marginX, y);
@@ -984,11 +1087,14 @@ export function generateThermalPdf(sale: Sale): jsPDF {
       }
       // Whether delivery has been paid, stated outright. Free delivery has no
       // fee to be paid or collected — only what's still to pay on delivery.
-      const showClosing = !delivery.free || delivery.state === "due";
+      const showClosing = !delivery.free || delivery.state === "due" || !!delivery.exchange;
       doc.setFontSize(8);
       if (delivery.state === "due") {
         doc.text("PAY ON DELIVERY", marginX, y);
         doc.text(money(delivery.cod), widthMm - marginX, y, { align: "right" });
+      } else if (delivery.exchange) {
+        doc.text("PAY ON DELIVERY", marginX, y);
+        doc.text("NOTHING", widthMm - marginX, y, { align: "right" });
       } else if (!delivery.free) {
         doc.text("DELIVERY FEE", marginX, y);
         doc.text(delivery.state === "paid" ? "PAID" : "COLLECTED", widthMm - marginX, y, { align: "right" });
@@ -1061,6 +1167,17 @@ export function buildWhatsAppMessage(sale: Sale, businessInfo?: BusinessInfo | n
   }
   lines.push(`*Total: ${money(sale.total)}*`);
   if (isQuotation) {
+    const quote = exchangeQuoteView(sale);
+    if (quote) {
+      lines.push(`Old items collected: -${money(quote.applied_amount)} _(${quote.note.replace(/^Old items? collected on delivery: /, "")})_`);
+      lines.push(quote.is_free_delivery ? "Delivery charges: FREE" : `Delivery charges: +${money(quote.delivery_fee)}`);
+      if (quote.pickup_collected > 0) lines.push(`Pickup charge (your share): +${money(quote.pickup_collected)}`);
+      lines.push(`*Amount to pay: ${money(quote.amount_to_pay)}*`);
+      const bank = shopBankDetails(businessInfo);
+      if (quote.amount_to_pay > 0 && (bank.accountName || bank.accountNumber)) {
+        lines.push(`Pay to: ${[bank.accountName, bank.accountNumber, bank.bankName].filter(Boolean).join(" · ")}`);
+      }
+    }
     if (sale.quotation_valid_until) lines.push(`Valid until: ${formatDate(sale.quotation_valid_until)}`);
     lines.push("");
     lines.push("This is a price quotation, not a tax invoice — reply to confirm and we'll get your order ready for payment.");
@@ -1072,10 +1189,10 @@ export function buildWhatsAppMessage(sale: Sale, businessInfo?: BusinessInfo | n
         lines.push(`_${src.label}${creditSources.length > 1 ? ` (${money(src.amount)})` : ""}_`);
       }
     }
-    if (showPaid) lines.push(`Paid: -${money(cashPaid)} (${formatPaymentMethod(sale.payment_method)})`);
-    else if (storeCredit === 0 && !showBalance) lines.push(`Paid: ${money(sale.amount_paid)} (${formatPaymentMethod(sale.payment_method)})`);
-    if (showBalance) lines.push(`*Balance due: ${money(amountOwed)}*`);
     const delivery = deliveryBreakdown(sale);
+    if (showPaid) lines.push(`Paid: -${money(cashPaid)} (${formatPaymentMethod(sale.payment_method)})`);
+    else if (storeCredit === 0 && !showBalance && !delivery?.exchange) lines.push(`Paid: ${money(sale.amount_paid)} (${formatPaymentMethod(sale.payment_method)})`);
+    if (showBalance) lines.push(`*Balance due: ${money(amountOwed)}*`);
     if (delivery) {
       if (delivery.exchange) {
         lines.push(`Exchange credit: -${money(delivery.exchange.applied_amount)} _(${exchangeCollectNote(delivery.exchange).toLowerCase()})_`);
@@ -1084,9 +1201,11 @@ export function buildWhatsAppMessage(sale: Sale, businessInfo?: BusinessInfo | n
       if (delivery.exchange && delivery.exchange.pickup_collected > 0) {
         lines.push(`Pickup charge (your share): +${money(delivery.exchange.pickup_collected)}`);
       }
+      if (delivery.exchange && delivery.prepaid > 0) lines.push(`Paid: -${money(delivery.prepaid)} (${formatPaymentMethod(sale.payment_method)})`);
       if (delivery.note) lines.push(`_${delivery.note}_`);
       if (delivery.payable !== null) lines.push(`*Total incl. delivery: ${money(delivery.payable)}*`);
       if (delivery.state === "due") lines.push(`*To pay on delivery: ${money(delivery.cod)}*`);
+      else if (delivery.exchange) lines.push("*To pay on delivery: nothing*");
       else if (!delivery.free) lines.push(delivery.state === "paid" ? "Delivery fee: PAID" : "Delivery fee: collected");
     } else {
       const notice = deliveryNotice(sale);

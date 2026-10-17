@@ -35,19 +35,36 @@ const SHARE_OPTIONS: { pct: number; label: string; hint: string }[] = [
   { pct: 100, label: "Customer pays", hint: "The customer pays all of it" },
 ];
 
+// How the customer is paying for the exchange: at the door (COD), or already — by bank transfer, card or cash.
+type Payment = "cod" | "bank_transfer" | "card" | "cash";
+const PAYMENTS: { key: Payment; label: string }[] = [
+  { key: "cod", label: "On delivery" },
+  { key: "bank_transfer", label: "Bank transfer" },
+  { key: "card", label: "Card" },
+  { key: "cash", label: "Cash" },
+];
+
 // An exchange by delivery: the new items go out as a normal online order and the
 // courier brings the old ones back on the same trip. Any number of old items can be
 // swapped, and the new order can hold as many pieces as the customer likes (an extra
 // size, something more). The old items' value comes off the new order once they're
 // received; the pickup charge is split as chosen here.
+//
+// Payment is either collected at the door (COD) or already received — and when it isn't confirmed yet, the exchange
+// is held as a quotation instead (nothing reserved or booked) and turned into the order from the quotation's page.
+// With `quote` set, `sale` IS that quotation and the popup confirms it.
 export default function OnlineExchangeModal({
   sale,
+  quote = false,
   onClose,
   onCreated,
+  onQuoted,
 }: {
   sale: Sale;
+  quote?: boolean;
   onClose: () => void;
   onCreated: (created: { id: number; invoice: string }) => void;
+  onQuoted?: (created: { id: number; invoice: string }) => void;
 }) {
   const { user } = useAuth();
   const { activePartners } = useDeliveryPartners();
@@ -63,8 +80,10 @@ export default function OnlineExchangeModal({
   const [pickup, setPickup] = useState("");
   const [pickupEdited, setPickupEdited] = useState(false);
   const [sharePct, setSharePct] = useState<number | null>(null);
+  const [payment, setPayment] = useState<Payment>("cod");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [filledFromQuote, setFilledFromQuote] = useState(false);
 
   useEffect(() => {
     if (!sale.customer_id) return;
@@ -112,6 +131,37 @@ export default function OnlineExchangeModal({
     return { byKey, options };
   }, [units]);
 
+  // Confirming a quotation: start from what was quoted — the old items, the pieces and their prices, the courier, the
+  // pickup split. Pieces that have since sold out are left off, with a note.
+  useEffect(() => {
+    const q = sale.exchange_quote;
+    if (!quote || !q || filledFromQuote || !eligible || units.length === 0 || couriers.length === 0) return;
+    setFilledFromQuote(true);
+    setOldIds(q.old_sale_item_ids.filter((id) => eligible.some((e) => e.sale_item_id === id)));
+    const byKey = new Map<string, NewLine>();
+    let missing = 0;
+    for (const item of sale.items ?? []) {
+      const key = `${item.product_id}|${item.size ?? ""}|${item.color ?? ""}|${item.original_selling_price ?? ""}`;
+      const list = variants.byKey.get(key);
+      if (!list) {
+        missing += 1;
+        continue;
+      }
+      const price = item.original_selling_price != null && item.unit_price !== item.original_selling_price ? String(item.unit_price) : "";
+      const cur = byKey.get(`${key}|${price}`);
+      byKey.set(`${key}|${price}`, { key, qty: String(Number(cur?.qty ?? 0) + 1), price });
+    }
+    if (byKey.size > 0) setLines(Array.from(byKey.values()));
+    setPartnerCode(q.delivery_partner);
+    setWeight(String(q.package_weight_kg));
+    setFreeDelivery(q.is_free_delivery);
+    setPickup(String(q.pickup_charge));
+    setPickupEdited(true);
+    setSharePct(q.customer_share_pct);
+    if (missing > 0) setError(`${missing} piece${missing === 1 ? "" : "s"} on the quotation ${missing === 1 ? "is" : "are"} no longer in stock — check the new items below.`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quote, sale.exchange_quote, eligible, units, couriers.length, variants]);
+
   const partner = couriers.find((c) => c.code === partnerCode);
   const weightNum = Number(weight) || 0;
   const deliveryFee = calculateDeliveryFee(weightNum, freeDelivery, partner);
@@ -146,7 +196,10 @@ export default function OnlineExchangeModal({
   const pickupCharge = Number(pickup) || 0;
   const customerShare = Math.round((pickupCharge * (sharePct ?? 0)) / 100);
   const weCarry = pickupCharge - customerShare;
-  const toPayAtDoor = Math.max(0, newTotal - applied + deliveryFee + customerShare);
+  // What the customer owes before the old items come back — at the door, or up front if they've already paid.
+  const dueNow = Math.max(0, newTotal - applied + deliveryFee + customerShare);
+  const prepaid = payment !== "cod";
+  const toPayAtDoor = prepaid ? 0 : dueNow;
 
   function toggleOld(id: number) {
     setOldIds((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
@@ -155,33 +208,72 @@ export default function OnlineExchangeModal({
     setLines((cur) => cur.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
   }
 
-  async function submit() {
+  // The same checks whether the exchange is created now or held as a quotation.
+  function checked(): { customerId: number; items: { inventory_id: number; unit_price: number }[]; courier: string } | null {
     setError(null);
-    if (!sale.customer_id || oldItems.length === 0 || pieces === 0) return;
-    if (!partner) return setError("Pick the courier that will deliver it.");
-    if (!(weightNum > 0)) return setError("Enter the parcel weight.");
-    if (sharePct === null) return setError("Choose who pays the pickup charge.");
-    if (overStock) return setError("There isn't enough stock for one of the lines — lower its quantity.");
+    const stop = (message: string) => {
+      setError(message);
+      return null;
+    };
+    if (!sale.customer_id || oldItems.length === 0 || pieces === 0) return null;
+    if (!partner) return stop("Pick the courier that will deliver it.");
+    if (!(weightNum > 0)) return stop("Enter the parcel weight.");
+    if (sharePct === null) return stop("Choose who pays the pickup charge.");
+    if (overStock) return stop("There isn't enough stock for one of the lines — lower its quantity.");
+    const items = chosen.flatMap((c) => c.list.slice(0, c.qty).map((u) => ({ inventory_id: u.id, unit_price: c.price })));
+    return { customerId: sale.customer_id, items, courier: partner.code };
+  }
+
+  const exchangeBody = () => ({
+    old_sale_item_ids: oldItems.map((i) => i.sale_item_id),
+    pickup_charge: pickupCharge,
+    customer_share_pct: sharePct as number,
+  });
+
+  async function submit() {
+    const ok = checked();
+    if (!ok) return;
     setSubmitting(true);
     try {
-      const items = chosen.flatMap((c) =>
-        c.list.slice(0, c.qty).map((u) => ({ inventory_id: u.id, unit_price: c.price }))
-      );
       const created = await api.post<{ id: number; invoice: string }>("/sales", {
-        customer_id: sale.customer_id,
+        customer_id: ok.customerId,
         salesperson: user?.name ?? user?.username,
-        items,
+        items: ok.items,
         sale_type: "online",
-        delivery_partner: partner.code,
+        delivery_partner: ok.courier,
         package_weight_kg: weightNum,
         is_free_delivery: freeDelivery,
-        amount_paid: 0,
-        payment_method: "cash",
-        exchange: { old_sale_item_ids: oldItems.map((i) => i.sale_item_id), pickup_charge: pickupCharge, customer_share_pct: sharePct },
+        // Paid up front: what's due before the old items come back is taken now, so nothing is left for the courier.
+        amount_paid: prepaid ? dueNow : 0,
+        payment_method: prepaid ? payment : "cash",
+        exchange: exchangeBody(),
+        ...(quote ? { quotation_id: sale.id } : {}),
       });
       onCreated(created);
     } catch (err) {
       setError(err instanceof ApiRequestError ? err.message : "Couldn't create the exchange order");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  // Not paid yet, or the payment isn't confirmed: keep the exchange as a quotation. Nothing is reserved, charged or
+  // recorded; it's turned into the order from its own page once the customer has paid.
+  async function holdAsQuote() {
+    const ok = checked();
+    if (!ok) return;
+    setSubmitting(true);
+    try {
+      const created = await api.post<{ id: number; invoice: string }>("/sales/quotations", {
+        customer_id: ok.customerId,
+        salesperson: user?.name ?? user?.username,
+        items: ok.items,
+        sale_type: "online",
+        exchange: { ...exchangeBody(), delivery_partner: ok.courier, package_weight_kg: weightNum, is_free_delivery: freeDelivery },
+      });
+      onQuoted?.(created);
+    } catch (err) {
+      setError(err instanceof ApiRequestError ? err.message : "Couldn't save the quotation");
     } finally {
       setSubmitting(false);
     }
@@ -211,7 +303,7 @@ export default function OnlineExchangeModal({
       height="h-[min(44rem,calc(100dvh-2rem))]"
       flush
       onClose={onClose}
-      title="Exchange by delivery"
+      title={quote ? `Create exchange order — from ${sale.invoice}` : "Exchange by delivery"}
       subtitle={`${sale.customer_name ?? "Customer"} — the courier brings the old items back with the new order`}
       footer={
         <>
@@ -219,6 +311,11 @@ export default function OnlineExchangeModal({
           <Button onClick={onClose} disabled={submitting}>
             Cancel
           </Button>
+          {!quote && onQuoted && (
+            <Button onClick={holdAsQuote} disabled={!ready || submitting} title="Keep it as a quotation until the customer has paid — nothing is reserved or recorded">
+              Hold as quote
+            </Button>
+          )}
           <Button variant="primary" onClick={submit} disabled={!ready || submitting}>
             {submitting ? "Creating…" : "Create exchange order"}
           </Button>
@@ -349,6 +446,25 @@ export default function OnlineExchangeModal({
               ))}
             </div>
 
+            <Label>
+              How is it being paid?{" "}
+              <HelpHint text="On delivery: the courier collects it at the door. Bank transfer, card or cash: it's already been received, so nothing is collected at the door. Not confirmed yet? Use Hold as quote — it's kept without recording anything." />
+            </Label>
+            <div className="mb-3 grid grid-cols-4 gap-1.5">
+              {PAYMENTS.map((p) => (
+                <button
+                  key={p.key}
+                  type="button"
+                  onClick={() => setPayment(p.key)}
+                  className={`rounded-xl border px-1 py-1.5 text-xs font-medium transition ${
+                    payment === p.key ? "border-black bg-black text-white" : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+
             {/* Always the same rows, so the figures update in place and nothing moves. */}
             <div className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm">
               <Row label={`New items${pieces ? ` (${pieces})` : ""}`} value={pieces ? money(newTotal) : "—"} />
@@ -356,7 +472,8 @@ export default function OnlineExchangeModal({
               <Row label="Delivery" value={weightNum ? (freeDelivery ? "Free" : `+ ${money(deliveryFee)}`) : "—"} />
               <Row label="Customer's pickup share" value={sharePct === null ? "—" : customerShare > 0 ? `+ ${money(customerShare)}` : "—"} />
               <div className="my-1.5 border-t border-gray-200" />
-              <Row label="Collected at the door" value={oldItems.length && pieces ? money(toPayAtDoor) : "—"} strong />
+              {prepaid && <Row label={`Paid now (${PAYMENTS.find((p) => p.key === payment)?.label.toLowerCase()})`} value={oldItems.length && pieces ? money(dueNow) : "—"} strong />}
+              <Row label="Collected at the door" value={oldItems.length && pieces ? money(toPayAtDoor) : "—"} strong={!prepaid} muted={prepaid} />
               <div className="mt-1.5 border-t border-gray-100 pt-1.5">
                 <Row
                   label={

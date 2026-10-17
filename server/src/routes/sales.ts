@@ -9,7 +9,14 @@ import { logAudit } from "../lib/auditLog";
 import { getPartner, planDelivery, DeliveryPartnerRow } from "../lib/deliveryPartners";
 import { storeCreditSources } from "../lib/storeCreditSources";
 import { loyaltyBalance } from "../lib/loyalty";
-import { SALE_EXCHANGE_FLAGS_SQL, cancelExchangeForSale, checkExchangeSources, exchangeForSale, exchangesOutOfSale } from "../lib/exchanges";
+import {
+  SALE_EXCHANGE_FLAGS_SQL,
+  cancelExchangeForSale,
+  checkExchangeSources,
+  exchangeForSale,
+  exchangeQuoteSummary,
+  exchangesOutOfSale,
+} from "../lib/exchanges";
 
 export const salesRouter = Router();
 
@@ -127,6 +134,19 @@ const quotationInput = z.object({
   // is purely what prints on the bill so the customer knows by when to
   // confirm and pay.
   valid_days: z.number().int().positive().max(365).default(7),
+  // A quotation for an exchange by delivery: held until the customer confirms (and pays), then made into the real
+  // exchange order from the quotation's own page. Same details as the order itself, plus the courier — they set the
+  // delivery fee that's part of what the customer pays.
+  exchange: z
+    .object({
+      old_sale_item_ids: z.array(z.number().int().positive()).min(1).max(20),
+      pickup_charge: z.number().nonnegative().default(0),
+      customer_share_pct: z.number().int().min(0).max(100).default(0),
+      delivery_partner: z.string().min(1),
+      package_weight_kg: z.number().positive(),
+      is_free_delivery: z.boolean().default(false),
+    })
+    .optional(),
 });
 
 // Validates every item against real stock and computes subtotal/discount/
@@ -326,7 +346,7 @@ salesRouter.get(
       .prepare(
         `SELECT sales.*, customers.name as customer_name, customers.customer_code, customers.phone as customer_phone,
                 deliveries.delivery_partner, delivery_partners.kind as delivery_partner_kind,
-                deliveries.delivery_status as delivery_status,
+                deliveries.delivery_status as delivery_status, deliveries.cod_amount as delivery_cod_amount,
                 ${SALE_EXCHANGE_FLAGS_SQL}
          FROM sales
          LEFT JOIN customers ON customers.id = sales.customer_id
@@ -489,7 +509,7 @@ salesRouter.get(
                 deliveries.delivery_fee, deliveries.is_free_delivery as delivery_is_free,
                 deliveries.delivery_paid_by, deliveries.actual_fare as delivery_actual_fare,
                 deliveries.rider_direct as delivery_rider_direct, deliveries.cod_amount as delivery_cod_amount,
-                deliveries.fee_paid as delivery_fee_paid, deliveries.delivery_status,
+                deliveries.fee_paid as delivery_fee_paid, deliveries.pickup_prepaid as delivery_pickup_prepaid, deliveries.delivery_status,
                 deliveries.tracking_number as delivery_tracking_number
          FROM sales
          LEFT JOIN customers ON customers.id = sales.customer_id
@@ -545,6 +565,7 @@ salesRouter.get(
       items,
       delivery_address,
       exchange: exchangeForSale(sale.id),
+      exchange_quote: sale.status === "quotation" ? exchangeQuoteSummary(sale) : null,
       exchanged_out: exchangesOutOfSale(sale.id),
       store_credit_applied: credit,
       store_credit_sources: credit > 0 ? storeCreditSources(sale.id, sale.customer_id) : [],
@@ -566,11 +587,19 @@ salesRouter.post(
     // tab, another cashier) and this would double-sell it.
     let quotationInvoice: string | null = null;
     if (data.quotation_id) {
-      const quote = db.prepare(`SELECT invoice FROM sales WHERE id = ? AND status = 'quotation'`).get(data.quotation_id) as
-        | { invoice: string }
+      const quote = db.prepare(`SELECT invoice, exchange_draft FROM sales WHERE id = ? AND status = 'quotation'`).get(data.quotation_id) as
+        | { invoice: string; exchange_draft: string | null }
         | undefined;
       if (!quote) {
         throw new ApiError(409, "That quotation is no longer open — it may have already been converted or cancelled.");
+      }
+      // A quoted exchange has to become an exchange order (the old items come back with it) — made any other way
+      // the customer would be billed in full and keep the old items.
+      if (quote.exchange_draft && !data.exchange) {
+        throw new ApiError(409, "This quotation is for an exchange by delivery — confirm it with \"Create exchange order\" on the quotation's page.");
+      }
+      if (!quote.exchange_draft && data.exchange) {
+        throw new ApiError(409, "This quotation isn't for an exchange.");
       }
       quotationInvoice = quote.invoice;
     }
@@ -636,16 +665,38 @@ salesRouter.post(
     // validated against the customer's REAL store credit balance, never
     // trusted as a client-supplied number.
     const deliveryPlan = data.sale_type === "online" ? planDelivery(data, partner) : null;
-    const { storeCreditApplied, productAmountPaid, feePaid, payment_status, change_due, overpaid_amount } = computePaymentOutcome({
-      total,
+
+    // An exchange can be paid up front (a bank transfer, say) instead of at the door. What's due before the old items
+    // come back is the order less their value, plus the delivery fee and the customer's share of the pickup charge —
+    // the same figure a courier would collect. A payment covers the part of the order the customer really owes
+    // first, then the fee, then the pickup share; the old items' value stays "pending return" and goes on the
+    // order when they're received (routes/exchanges.ts), which is what finally settles it.
+    const exchangeCredit = exchangeSources ? exchangeSources.reduce((sum, src) => sum + src.unit_price, 0) : 0;
+    const exchangeApplied = Math.min(exchangeCredit, total);
+    const exchangePickupShare = data.exchange ? Math.round((data.exchange.pickup_charge * data.exchange.customer_share_pct) / 100) : 0;
+    const exchangeDue = exchangeSources ? Math.max(0, total - exchangeApplied + (deliveryPlan?.fee ?? 0) + exchangePickupShare) : 0;
+    if (exchangeSources && data.amount_paid + data.store_credit_applied > exchangeDue + 0.5) {
+      throw new ApiError(400, `That's more than this exchange comes to — Rs. ${exchangeDue.toLocaleString()} is due before the old items come back.`);
+    }
+
+    const { storeCreditApplied, productAmountPaid, feePaid, payment_status: paymentStatusOfDue, change_due, overpaid_amount } = computePaymentOutcome({
+      total: exchangeSources ? total - exchangeApplied : total,
       customer_id: data.customer_id,
       amount_paid: data.amount_paid,
       payment_method: data.payment_method,
       amount_received: data.amount_received,
       keep_cash_overpayment_as_credit: data.keep_cash_overpayment_as_credit,
       store_credit_applied: data.store_credit_applied,
-      fee_payable: deliveryPlan && !data.is_credit_order ? deliveryPlan.fee : 0,
+      fee_payable: deliveryPlan && !data.is_credit_order ? deliveryPlan.fee + exchangePickupShare : 0,
     });
+    // For an exchange the status above is against what's due now; against the whole order it isn't settled until the
+    // old items' value has been put on it, so a fully prepaid exchange reads "partial" until they're received.
+    const payment_status: "paid" | "partial" | "unpaid" =
+      exchangeSources && paymentStatusOfDue === "paid" && exchangeApplied > 0 ? "partial" : paymentStatusOfDue;
+    // Of what was paid beyond the order itself: the delivery fee first, the rest is the pickup share.
+    const feePaidOnDelivery = exchangeSources ? Math.min(feePaid, deliveryPlan?.fee ?? 0) : feePaid;
+    const pickupPaidUpfront = exchangeSources ? Math.max(0, feePaid - feePaidOnDelivery) : 0;
+    const exchangePrepaid = !!exchangeSources && data.amount_paid + storeCreditApplied > 0 && exchangeDue - data.amount_paid - storeCreditApplied <= 0.009;
 
     // A sale settled entirely out of store credit took no money at all.
     // The form's default method ("cash") would otherwise get stored and
@@ -667,7 +718,7 @@ salesRouter.post(
       invoiceCategory = data.is_credit_order || data.payment_method === "credit" ? "SCR" : "STR";
     } else {
       if (data.is_credit_order) invoiceCategory = "OCR";
-      else if (payment_status === "paid") invoiceCategory = "OPS";
+      else if (exchangeSources ? exchangePrepaid : payment_status === "paid") invoiceCategory = "OPS";
       else invoiceCategory = "OCD";
     }
 
@@ -826,8 +877,8 @@ salesRouter.post(
           `INSERT INTO deliveries
              (sale_id, address_id, delivery_status, delivery_partner, package_weight_kg,
               is_free_delivery, delivery_fee, cod_amount, tracking_number, delivery_paid_by, actual_fare, rider_direct, fee_paid,
-              pickup_collected, notes)
-           VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+              pickup_collected, pickup_prepaid, notes)
+           VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).run(
           saleId,
           defaultAddressId,
@@ -842,8 +893,9 @@ salesRouter.post(
           paidBy,
           actualFare,
           riderDirect ? 1 : 0,
-          feePaid,
+          feePaidOnDelivery,
           exchangePlan?.pickupCollected ?? 0,
+          pickupPaidUpfront,
           exchangeSources
             ? `EXCHANGE — collect the old item${exchangeSources.length > 1 ? "s" : ""} from the customer: ${exchangeSources
                 .map(
@@ -924,6 +976,19 @@ salesRouter.post(
       }
     }
 
+    // A quoted exchange has to be one that could be made: an online order for a customer, by a real courier, of
+    // old items that can still be exchanged. (It's checked again when it's confirmed — things can change in between.)
+    let exchangeDraft: string | null = null;
+    if (data.exchange) {
+      if (data.sale_type !== "online") throw new ApiError(400, "An exchange by delivery has to be an online order.");
+      const partner = getPartner(data.exchange.delivery_partner);
+      if (!partner || !partner.is_active || partner.kind !== "courier") {
+        throw new ApiError(400, "Pick the courier that will deliver the replacement and collect the old items.");
+      }
+      checkExchangeSources(data.exchange.old_sale_item_ids, data.customer_id);
+      exchangeDraft = JSON.stringify(data.exchange);
+    }
+
     const priced = priceItems(
       data.items,
       data.manual_discount_type,
@@ -931,7 +996,9 @@ salesRouter.post(
       data.coupon_code,
       req.user
     );
-    approveIfNeeded(req, res, priced.approvalReasons, "This quotation");
+    const quoteApprovals = [...priced.approvalReasons];
+    if (data.exchange?.is_free_delivery) quoteApprovals.push("free delivery");
+    approveIfNeeded(req, res, quoteApprovals, "This quotation");
     const { subtotal, manual_discount, coupon_discount, coupon_code, discount, total, loyalty_points_earned } = priced;
 
     const invoice = nextQuotationCode();
@@ -944,8 +1011,8 @@ salesRouter.post(
         .prepare(
           `INSERT INTO sales
              (invoice, customer_id, salesperson, subtotal, discount, manual_discount, coupon_discount, coupon_code,
-              total, amount_paid, payment_status, sale_type, loyalty_points_earned, status, quotation_valid_until)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'unpaid', ?, ?, 'quotation', ?)`
+              total, amount_paid, payment_status, sale_type, loyalty_points_earned, status, quotation_valid_until, exchange_draft)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'unpaid', ?, ?, 'quotation', ?, ?)`
         )
         .run(
           invoice,
@@ -959,7 +1026,8 @@ salesRouter.post(
           total,
           data.sale_type,
           loyalty_points_earned,
-          validUntil
+          validUntil,
+          exchangeDraft
         );
 
       const saleId = saleResult.lastInsertRowid;
@@ -1005,11 +1073,14 @@ salesRouter.put(
   asyncHandler(async (req, res) => {
     const data = quotationInput.parse(req.body);
 
-    const existing = db.prepare(`SELECT id, status FROM sales WHERE id = ?`).get(req.params.id) as
-      | { id: number; status: string }
+    const existing = db.prepare(`SELECT id, status, exchange_draft FROM sales WHERE id = ?`).get(req.params.id) as
+      | { id: number; status: string; exchange_draft: string | null }
       | undefined;
     if (!existing) throw new ApiError(404, "Quotation not found");
     if (existing.status !== "quotation") throw new ApiError(409, "Only an open quotation can be edited.");
+    if (existing.exchange_draft) {
+      throw new ApiError(409, "This quotation is for an exchange by delivery — cancel it and make a new one to change what's in it.");
+    }
 
     if (data.customer_id) {
       const customer = db.prepare(`SELECT id, is_suspended FROM customers WHERE id = ?`).get(data.customer_id) as
@@ -1350,7 +1421,11 @@ salesRouter.put(
       const feePaidRow = db.prepare(`SELECT COALESCE(SUM(fee_paid), 0) as total FROM deliveries WHERE sale_id = ?`).get(sale.id) as {
         total: number;
       };
-      const cashPortionPaid = sale.amount_paid + feePaidRow.total - creditRedeemed.total;
+      // …and the part of an exchange's pickup share that was paid up front.
+      const pickupPrepaidRow = db.prepare(`SELECT COALESCE(SUM(pickup_prepaid), 0) as total FROM deliveries WHERE sale_id = ?`).get(sale.id) as {
+        total: number;
+      };
+      const cashPortionPaid = sale.amount_paid + feePaidRow.total + pickupPrepaidRow.total - creditRedeemed.total;
       if (cashPortionPaid > 0) {
         db.prepare(
           `INSERT INTO cash_book (transaction_code, type, category, payment_method, reference_id, amount, notes)

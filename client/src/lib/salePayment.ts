@@ -5,7 +5,14 @@ import type { Sale } from "./types";
 // it (usually "cash"), so listing it as "Cash" next to Unpaid reads as a
 // contradiction. Credit orders are not COD, and voided/quotation rows aren't
 // waiting for anything.
-export function isAwaitingCod(sale: Pick<Sale, "sale_type" | "payment_status" | "payment_method" | "is_voided" | "status">): boolean {
+export function isAwaitingCod(
+  sale: Pick<Sale, "sale_type" | "payment_status" | "payment_method" | "is_voided" | "status"> &
+    Partial<Pick<Sale, "exchange_in_status" | "exchange" | "delivery_cod_amount">>
+): boolean {
+  // An exchange paid up front is "partial" only because the old items' value hasn't been put on it yet — the courier
+  // has nothing to collect for it.
+  const exchangeWaiting = sale.exchange_in_status === "awaiting_pickup" || sale.exchange?.status === "awaiting_pickup";
+  if (exchangeWaiting && sale.payment_status === "partial" && (sale.delivery_cod_amount ?? 0) === 0) return false;
   return (
     sale.sale_type === "online" &&
     sale.payment_status !== "paid" &&
@@ -28,7 +35,10 @@ export function saleStatusLabel(sale: Pick<Sale, "payment_status" | "is_voided" 
 // What to show as a sale's "Payment": COD while the delivery is unpaid, the
 // part-payment method plus COD when only some was paid up front, otherwise
 // the method it was actually paid with.
-export function salePaymentLabel(sale: Pick<Sale, "sale_type" | "payment_status" | "payment_method" | "is_voided" | "status">): string {
+export function salePaymentLabel(
+  sale: Pick<Sale, "sale_type" | "payment_status" | "payment_method" | "is_voided" | "status"> &
+    Partial<Pick<Sale, "exchange_in_status" | "exchange" | "delivery_cod_amount">>
+): string {
   const method = sale.payment_method ? sale.payment_method.replace(/_/g, " ") : null;
   if (!isAwaitingCod(sale)) return method ?? "—";
   if (sale.payment_status === "partial" && method) return `${method} + COD`;

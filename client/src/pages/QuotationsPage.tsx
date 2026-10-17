@@ -38,6 +38,11 @@ export default function QuotationsPage() {
   // Reopens the quotation in POS with everything filled in, ready to
   // adjust and then re-save or check out as the real sale.
   function openInPos(sale: Sale) {
+    // A quoted exchange is confirmed on its own page (it can't be rung up in POS — the old items have to come back).
+    if (sale.exchange_draft) {
+      navigate(`/sales/${sale.id}`);
+      return;
+    }
     if (hasDraftInProgress() && !confirm("POS has a sale in progress. Replace it with this quotation?")) return;
     navigate(`/pos?quotation=${sale.id}`);
   }
@@ -96,7 +101,12 @@ export default function QuotationsPage() {
   }
 
   function statusBadge(sale: Sale) {
-    return isExpired(sale) ? <Badge label="expired" tone="warning" /> : <Badge label="open" tone="neutral" />;
+    return (
+      <span className="inline-flex items-center gap-1">
+        {sale.exchange_draft && <Badge label="exchange" tone="neutral" />}
+        {isExpired(sale) ? <Badge label="expired" tone="warning" /> : <Badge label="open" tone="neutral" />}
+      </span>
+    );
   }
 
   return (

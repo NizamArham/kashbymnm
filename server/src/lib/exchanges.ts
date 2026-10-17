@@ -1,5 +1,6 @@
 import { db } from "../db/connection";
 import { ApiError } from "./errors";
+import { getPartner, planDelivery } from "./deliveryPartners";
 
 // An ONLINE exchange: the customer already has one or more items from delivered
 // orders and wants different ones. The replacement order is billed first (as an
@@ -73,6 +74,17 @@ const exchangeColumns = db.prepare(`PRAGMA table_info(online_exchanges)`).all() 
 if (!exchangeColumns.some((c) => c.name === "pickup_booked")) {
   // Set once the courier's pickup charge has been booked against them.
   db.exec(`ALTER TABLE online_exchanges ADD COLUMN pickup_booked INTEGER NOT NULL DEFAULT 0`);
+}
+if (!(db.prepare(`PRAGMA table_info(deliveries)`).all() as { name: string }[]).some((c) => c.name === "pickup_prepaid")) {
+  // The part of the customer's pickup-charge share that was paid up front (a prepaid
+  // exchange) instead of at the door — kept apart from fee_paid (the delivery fee) so
+  // each stays what it says, and so voiding the order gives back everything that was taken.
+  db.exec(`ALTER TABLE deliveries ADD COLUMN pickup_prepaid REAL NOT NULL DEFAULT 0`);
+}
+if (!(db.prepare(`PRAGMA table_info(sales)`).all() as { name: string }[]).some((c) => c.name === "exchange_draft")) {
+  // A quotation for an exchange by delivery keeps the exchange's own details here (JSON): which old items are
+  // coming back, who pays the pickup, which courier. Nothing is reserved or booked until it's confirmed.
+  db.exec(`ALTER TABLE sales ADD COLUMN exchange_draft TEXT`);
 }
 // An exchange made before items had their own rows gets one from its own columns.
 db.exec(`
@@ -283,4 +295,52 @@ export function checkExchangeSources(oldSaleItemIds: number[], customerId: numbe
     }
     return item;
   });
+}
+
+export interface ExchangeDraft {
+  old_sale_item_ids: number[];
+  pickup_charge: number;
+  customer_share_pct: number;
+  delivery_partner: string;
+  package_weight_kg: number;
+  is_free_delivery: boolean;
+}
+
+// What a quoted exchange comes to, worked out the same way the real order will: the old items' value comes off
+// (never more than the total), the delivery fee and the customer's pickup share go on. `amount_to_pay` is what the
+// customer has to put down — by transfer now, or at the door.
+export function exchangeQuoteSummary(sale: { total: number; customer_id: number | null; exchange_draft?: string | null }) {
+  if (!sale.exchange_draft) return null;
+  let draft: ExchangeDraft;
+  try {
+    draft = JSON.parse(sale.exchange_draft);
+  } catch {
+    return null;
+  }
+  const items = draft.old_sale_item_ids.map((id) => {
+    const row = db
+      .prepare(
+        `SELECT si.id AS sale_item_id, si.unit_price, s.invoice AS old_invoice, COALESCE(p.product_title, si.product_snapshot) AS title, i.size, i.color
+         FROM sale_items si JOIN sales s ON s.id = si.sale_id
+         LEFT JOIN inventory i ON i.id = si.inventory_id LEFT JOIN products p ON p.id = i.product_id
+         WHERE si.id = ?`
+      )
+      .get(id) as { sale_item_id: number; unit_price: number; old_invoice: string; title: string | null; size: string | null; color: string | null } | undefined;
+    return row ?? { sale_item_id: id, unit_price: 0, old_invoice: "?", title: null, size: null, color: null };
+  });
+  const credit = items.reduce((sum, i) => sum + i.unit_price, 0);
+  const applied = Math.min(credit, sale.total);
+  const partner = getPartner(draft.delivery_partner);
+  const fee = planDelivery({ package_weight_kg: draft.package_weight_kg, is_free_delivery: draft.is_free_delivery }, partner).fee;
+  const pickupShare = Math.round((draft.pickup_charge * draft.customer_share_pct) / 100);
+  return {
+    ...draft,
+    partner_name: partner?.name ?? draft.delivery_partner,
+    old_items: items,
+    credit_amount: credit,
+    applied_amount: applied,
+    delivery_fee: fee,
+    pickup_collected: pickupShare,
+    amount_to_pay: Math.max(0, sale.total - applied + fee + pickupShare),
+  };
 }

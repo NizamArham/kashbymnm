@@ -254,6 +254,23 @@ export interface SaleExchange {
   closed_at: string | null;
 }
 
+// A quotation for an exchange by delivery: what was quoted and what the customer has to pay to confirm it.
+export interface ExchangeQuote {
+  old_sale_item_ids: number[];
+  delivery_partner: string;
+  partner_name: string;
+  package_weight_kg: number;
+  is_free_delivery: boolean;
+  pickup_charge: number;
+  customer_share_pct: number;
+  old_items: { sale_item_id: number; unit_price: number; old_invoice: string; title: string | null; size: string | null; color: string | null }[];
+  credit_amount: number;
+  applied_amount: number;
+  delivery_fee: number;
+  pickup_collected: number;
+  amount_to_pay: number;
+}
+
 // An exchange that took items out of an invoice — shown on that (old) invoice.
 export interface SaleExchangeOut {
   exchange_id: number;
@@ -335,8 +352,13 @@ export interface Sale {
   delivery_cod_amount?: number | null;
   // How much of that delivery fee was already paid at checkout.
   delivery_fee_paid?: number | null;
+  // For an exchange paid up front: the part of the customer's pickup-charge share that was.
+  delivery_pickup_prepaid?: number | null;
   delivery_status?: DeliveryStatus | null;
   exchange?: SaleExchange | null;
+  // On a quotation for an exchange by delivery (set on the quotation's own page / on lists).
+  exchange_draft?: string | null;
+  exchange_quote?: ExchangeQuote | null;
   // How this invoice figures in an exchange (set on sales lists and searches):
   // its own items are being / were swapped (out), or it is the replacement order (in).
   exchange_out_status?: "awaiting" | "received" | "not_returned" | null;

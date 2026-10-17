@@ -233,10 +233,16 @@ export default function SaleDetailPage() {
                     {cancellingQuotation ? "Cancelling..." : "Cancel"}
                   </Button>
                 )}
-                {isQuotation && (
+                {isQuotation && !sale.exchange_quote && (
                   <Button variant="primary" onClick={openInPos} className="inline-flex items-center gap-1.5">
                     <ShoppingCart size={14} />
                     Edit / Convert to Sale
+                  </Button>
+                )}
+                {isQuotation && sale.exchange_quote && (
+                  <Button variant="primary" onClick={() => setShowExchange(true)} className="inline-flex items-center gap-1.5" title="The customer has confirmed — make it the real exchange order">
+                    <Repeat size={14} />
+                    Create exchange order
                   </Button>
                 )}
                 {canExchange && (
@@ -270,15 +276,71 @@ export default function SaleDetailPage() {
               {sale.quotation_valid_until && (
                 <> Valid until {sale.quotation_valid_until.slice(0, 16).replace("T", " ")}.</>
               )}{" "}
-              Need changes, or the customer confirmed? Use <strong>Edit / Convert to Sale</strong> — it reopens in POS with everything filled in.
+              {sale.exchange_quote ? (
+                <>
+                  This one is for an exchange by delivery. Once the customer has paid or confirmed, press <strong>Create exchange order</strong> — pick how
+                  they paid (bank transfer, card, cash, or on delivery) and it goes out. To change what's in it, cancel it and make a new one.
+                </>
+              ) : (
+                <>
+                  Need changes, or the customer confirmed? Use <strong>Edit / Convert to Sale</strong> — it reopens in POS with everything filled in.
+                </>
+              )}
             </div>
+          )}
+
+          {isQuotation && sale.exchange_quote && (
+            <Card className="mb-4">
+              <p className="mb-1.5 flex items-center gap-1.5 text-sm font-medium text-gray-900">
+                <Repeat size={14} className="text-gray-500" />
+                Exchange by delivery — old items coming back with the delivery
+              </p>
+              <ul className="space-y-0.5 text-sm text-gray-600">
+                {sale.exchange_quote.old_items.map((i) => (
+                  <li key={i.sale_item_id} className="flex flex-wrap items-baseline gap-x-2">
+                    <span className="text-gray-900">
+                      {i.title ?? "Item"}
+                      {[i.size, i.color].filter(Boolean).length > 0 && <span className="text-gray-500"> · {[i.size, i.color].filter(Boolean).join(" / ")}</span>}
+                    </span>
+                    <span className="text-xs text-gray-400">
+                      {i.old_invoice} · worth Rs. {Math.round(i.unit_price).toLocaleString()}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1 border-t border-gray-100 pt-3 text-sm md:grid-cols-4">
+                <div>
+                  <p className="text-xs text-gray-400">Old items come off</p>
+                  <p className="font-medium text-gray-900">− Rs. {Math.round(sale.exchange_quote.applied_amount).toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Delivery ({sale.exchange_quote.partner_name})</p>
+                  <p className="font-medium text-gray-900">{sale.exchange_quote.is_free_delivery ? "Free" : `+ Rs. ${Math.round(sale.exchange_quote.delivery_fee).toLocaleString()}`}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Customer's pickup share</p>
+                  <p className="font-medium text-gray-900">
+                    {sale.exchange_quote.pickup_collected > 0 ? `+ Rs. ${Math.round(sale.exchange_quote.pickup_collected).toLocaleString()}` : "—"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Customer pays</p>
+                  <p className="font-semibold text-gray-900">Rs. {Math.round(sale.exchange_quote.amount_to_pay).toLocaleString()}</p>
+                </div>
+              </div>
+            </Card>
           )}
 
           {showExchange && sale && (
             <OnlineExchangeModal
               sale={sale}
+              quote={isQuotation}
               onClose={() => setShowExchange(false)}
               onCreated={(created) => {
+                setShowExchange(false);
+                navigate(`/sales/${created.id}`);
+              }}
+              onQuoted={(created) => {
                 setShowExchange(false);
                 navigate(`/sales/${created.id}`);
               }}
