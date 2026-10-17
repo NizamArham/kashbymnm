@@ -20,7 +20,7 @@ export interface NavShortcut {
 
 export const NAV_SHORTCUTS: NavShortcut[] = [
   { letter: "d", label: "Dashboard", path: "/", withCtrlCmd: true },
-  { letter: "f", label: "Find", path: "/find", adminOnly: true },
+  { letter: "f", label: "Find", path: "/find" },
   { letter: "a", label: "Analytics", path: "/analytics", adminOnly: true },
   { letter: "p", label: "POS · Checkout", path: "/pos" },
   { letter: "h", label: "Sale History", path: "/sales" },

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, FormEvent, KeyboardEvent, ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search, Package, Receipt, User, Truck, ShoppingBag, UserCog, ArrowRight, Loader2, Landmark, Ticket, Gift, Copy, Check, History, CornerDownLeft } from "lucide-react";
+import { Search, Package, Receipt, User, Truck, ShoppingBag, UserCog, ArrowRight, Loader2, Landmark, Ticket, Gift, Copy, Check, History, CornerDownLeft, X } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { PageHeader, Card, Input, Button, Badge, RefLink } from "../components/ui";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
@@ -498,6 +498,27 @@ export default function FindPage() {
 
   useKeyboardShortcut("/", () => inputRef.current?.focus());
 
+  // A scanner types into whatever has focus. After a click elsewhere (the full-screen button, the page background)
+  // nothing may be focused, and the scan would go nowhere — or its Enter would press a focused button. So when
+  // nothing editable has focus and a character arrives, the box takes it; and it takes focus back when full
+  // screen turns on or off.
+  useEffect(() => {
+    const refocus = () => inputRef.current?.focus();
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1) return;
+      const a = document.activeElement as HTMLElement | null;
+      if (a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.tagName === "SELECT" || a.isContentEditable)) return;
+      if (document.querySelector('[role="dialog"]')) return;
+      inputRef.current?.focus();
+    };
+    document.addEventListener("fullscreenchange", refocus);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("fullscreenchange", refocus);
+      document.removeEventListener("keydown", onKey, true);
+    };
+  }, []);
+
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
@@ -560,13 +581,20 @@ export default function FindPage() {
     lookup(code);
   }
 
+  // Empties the box and the result. Esc does this too, but browsers keep Esc for leaving full screen — so it
+  // has a button as well.
+  function clearAll() {
+    setCode("");
+    setError(null);
+    setResult(null);
+    setHistoryIndex(-1);
+    setSuggestions([]);
+    inputRef.current?.focus();
+  }
+
   function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Escape") {
-      setCode("");
-      setError(null);
-      setResult(null);
-      setHistoryIndex(-1);
-      setSuggestions([]);
+      clearAll();
       return;
     }
     if (e.key === "ArrowUp") {
@@ -728,6 +756,12 @@ export default function FindPage() {
               </div>
             )}
           </div>
+          {(code || result || error) && (
+            <Button type="button" onClick={clearAll} className="inline-flex items-center gap-1.5">
+              <X size={14} />
+              Clear
+            </Button>
+          )}
           <Button type="submit" variant="primary" disabled={loading || !code.trim()} className="inline-flex items-center gap-1.5">
             {loading ? <Loader2 size={14} className="animate-spin" /> : <CornerDownLeft size={14} />}
             Find
