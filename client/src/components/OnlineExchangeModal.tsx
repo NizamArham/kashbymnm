@@ -22,6 +22,7 @@ interface EligibleItem {
 interface NewLine {
   key: string; // the variant (product / size / colour / price) this line takes units of
   qty: string;
+  price: string; // what each piece is billed at; empty = the tag price
 }
 
 const money = (n: number) => `Rs. ${Math.round(n).toLocaleString()}`;
@@ -55,7 +56,7 @@ export default function OnlineExchangeModal({
   const [eligible, setEligible] = useState<EligibleItem[] | null>(null);
   const [units, setUnits] = useState<InventoryUnit[]>([]);
   const [oldIds, setOldIds] = useState<number[]>([]);
-  const [lines, setLines] = useState<NewLine[]>([{ key: "", qty: "1" }]);
+  const [lines, setLines] = useState<NewLine[]>([{ key: "", qty: "1", price: "" }]);
   const [partnerCode, setPartnerCode] = useState("");
   const [weight, setWeight] = useState("1");
   const [freeDelivery, setFreeDelivery] = useState(false);
@@ -121,16 +122,21 @@ export default function OnlineExchangeModal({
     if (!pickupEdited) setPickup(tariffPickup ? String(tariffPickup) : "");
   }, [tariffPickup, pickupEdited]);
 
-  // The pieces the new order will hold, with how many of each variant are in stock.
+  // The pieces the new order will hold, with how many of each variant are in stock, and the
+  // price each is billed at — the tag price unless it's been typed over (an exchange at the
+  // price the customer paid the first time, say).
+  const tagPriceOf = (list: InventoryUnit[]) => list[0].selling_price ?? list[0].product_selling_price ?? 0;
   const chosen = lines
     .map((l) => {
       const list = variants.byKey.get(l.key);
       const qty = Math.max(0, Math.floor(Number(l.qty) || 0));
-      return list && qty > 0 ? { list, qty: Math.min(qty, list.length), wanted: qty } : null;
+      if (!list || qty <= 0) return null;
+      const typed = l.price.trim() === "" ? NaN : Number(l.price);
+      return { list, qty: Math.min(qty, list.length), wanted: qty, price: Number.isFinite(typed) && typed >= 0 ? typed : tagPriceOf(list) };
     })
-    .filter((x): x is { list: InventoryUnit[]; qty: number; wanted: number } => x !== null);
+    .filter((x): x is { list: InventoryUnit[]; qty: number; wanted: number; price: number } => x !== null);
   const pieces = chosen.reduce((sum, c) => sum + c.qty, 0);
-  const newTotal = chosen.reduce((sum, c) => sum + c.qty * (c.list[0].selling_price ?? c.list[0].product_selling_price ?? 0), 0);
+  const newTotal = chosen.reduce((sum, c) => sum + c.qty * c.price, 0);
   const overStock = chosen.some((c) => c.wanted > c.list.length);
 
   const credit = oldItems.reduce((sum, i) => sum + i.unit_price, 0);
@@ -159,7 +165,7 @@ export default function OnlineExchangeModal({
     setSubmitting(true);
     try {
       const items = chosen.flatMap((c) =>
-        c.list.slice(0, c.qty).map((u) => ({ inventory_id: u.id, unit_price: u.selling_price ?? u.product_selling_price ?? 0 }))
+        c.list.slice(0, c.qty).map((u) => ({ inventory_id: u.id, unit_price: c.price }))
       );
       const created = await api.post<{ id: number; invoice: string }>("/sales", {
         customer_id: sale.customer_id,
@@ -249,30 +255,51 @@ export default function OnlineExchangeModal({
             </div>
 
             <Label>
-              New items <HelpHint text="Everything the customer is now buying. It can be more pieces than they're returning — the old items' value comes off the total." />
+              New items <HelpHint text="Everything the customer is now buying. It can be more pieces than they're returning — the old items' value comes off the total. The price box starts empty (the tag price); type one to bill a piece at something else, such as the price they paid before." />
             </Label>
             <div className="space-y-2">
               {lines.map((l, i) => {
                 const list = variants.byKey.get(l.key);
                 const over = list && Number(l.qty) > list.length;
+                const tag = list ? tagPriceOf(list) : 0;
+                const now = l.price.trim() === "" ? tag : Number(l.price) || 0;
+                // The same product, already in this customer's old items, at the price they paid for it.
+                const paid = list ? oldItems.find((o) => o.product_title && o.product_title === list[0].product_title && o.unit_price !== now) : undefined;
                 return (
-                  <div key={i} className="flex items-start gap-2">
-                    <div className="min-w-0 flex-1">
-                      <Dropdown value={l.key} onChange={(v) => updateLine(i, { key: v })} options={variants.options} searchable placeholder="Search the stock…" />
+                  <div key={i}>
+                    <div className="flex items-start gap-2">
+                      <div className="min-w-0 flex-1">
+                        <Dropdown value={l.key} onChange={(v) => updateLine(i, { key: v, price: "" })} options={variants.options} searchable placeholder="Search the stock…" />
+                      </div>
+                      <div className="w-16 flex-shrink-0">
+                        <Input inputMode="numeric" value={l.qty} onChange={(e) => updateLine(i, { qty: e.target.value.replace(/\D/g, "").slice(0, 3) })} className={over ? "!border-red-300" : ""} aria-label="Quantity" />
+                      </div>
+                      <div className="w-28 flex-shrink-0">
+                        <Input
+                          inputMode="decimal"
+                          value={l.price}
+                          placeholder={list ? String(tag) : "Price"}
+                          onChange={(e) => updateLine(i, { price: cleanMoney(e.target.value) })}
+                          aria-label="Price of each piece, in rupees"
+                          title="Price of each piece — leave empty for the tag price"
+                        />
+                      </div>
+                      {lines.length > 1 && (
+                        <button type="button" onClick={() => setLines((cur) => cur.filter((_, idx) => idx !== i))} className="mt-2.5 text-gray-400 hover:text-gray-700" title="Remove this line">
+                          <X size={16} />
+                        </button>
+                      )}
                     </div>
-                    <div className="w-16 flex-shrink-0">
-                      <Input inputMode="numeric" value={l.qty} onChange={(e) => updateLine(i, { qty: e.target.value.replace(/\D/g, "").slice(0, 3) })} className={over ? "!border-red-300" : ""} aria-label="Quantity" />
-                    </div>
-                    {lines.length > 1 && (
-                      <button type="button" onClick={() => setLines((cur) => cur.filter((_, idx) => idx !== i))} className="mt-2.5 text-gray-400 hover:text-gray-700" title="Remove this line">
-                        <X size={16} />
+                    {paid && (
+                      <button type="button" onClick={() => updateLine(i, { price: String(paid.unit_price) })} className="mt-1 text-xs text-gray-500 underline hover:text-gray-800">
+                        Same price they paid before — {money(paid.unit_price)} <span className="text-gray-400">(tag {money(tag)})</span>
                       </button>
                     )}
                   </div>
                 );
               })}
             </div>
-            <button type="button" onClick={() => setLines((cur) => [...cur, { key: "", qty: "1" }])} className="mt-2 mb-5 text-xs text-gray-500 underline hover:text-gray-800">
+            <button type="button" onClick={() => setLines((cur) => [...cur, { key: "", qty: "1", price: "" }])} className="mt-2 mb-5 text-xs text-gray-500 underline hover:text-gray-800">
               + Add another item
             </button>
 
