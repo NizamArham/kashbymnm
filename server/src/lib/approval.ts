@@ -91,5 +91,26 @@ export function approveIfNeeded(req: Request, res: Response, reasons: string[], 
   return approver;
 }
 
+// When items come back to the shop: all in good order needs no one's OK, but a damaged or missing item changes what is owed, so that
+// goes ahead only with an admin (or an admin's password at the till). Used with approveIfNeeded().
+export function arrivalApprovalReasons(outcomes: string[]): string[] {
+  const reasons: string[] = [];
+  if (outcomes.includes("damaged")) reasons.push("a damaged item");
+  if (outcomes.includes("not_returned")) reasons.push("a missing item");
+  return reasons;
+}
+
+// For a request that only needs an admin's yes before it goes ahead (a courier return, a delivery exchange): the admin it is credited to
+// when no one else has to OK it — an admin's own entry, or one made with an admin's password typed at the till. A cashier who sends
+// no password gets null, and their request waits in the approval list instead. Nothing is refused here; a wrong password still is.
+export function recordedByAdmin(req: Request, res: Response, what: string): AuthUser | null {
+  if (req.user!.role === "admin") return req.user!;
+  const approver = approverFor(req);
+  if (!approver) return null;
+  req.approver = approver;
+  recordApproval(req, res, approver, what);
+  return approver;
+}
+
 // Who a decision is credited to: the admin who approved it at the till, else whoever is signed in.
 export const actorOf = (req: Request): AuthUser => req.approver ?? req.user!;

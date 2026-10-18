@@ -42,6 +42,13 @@ function nextWaybillNumber(): string {
   return `WB-${String(nextNum).padStart(5, "0")}`;
 }
 
+// A dispatched parcel the courier couldn't deliver (nobody home, refused, unreachable) is on its way back: still 'dispatched' as far as
+// the order goes, but marked here so it moves to "on the way back" until it reaches the shop and is put to Returned. Additive lazy
+// migration — delivery_status has a fixed list of values that can't be widened on a live table.
+if (!(db.prepare(`PRAGMA table_info(deliveries)`).all() as { name: string }[]).some((c) => c.name === "coming_back_at")) {
+  db.exec(`ALTER TABLE deliveries ADD COLUMN coming_back_at TEXT`);
+}
+
 // GET /api/deliveries — optionally filter by ?status=
 deliveriesRouter.get(
   "/",
@@ -66,6 +73,61 @@ deliveriesRouter.get(
     // Exchanges ride along so a delivery that's also collecting an old item says so.
     const bySale = recentExchangesBySale();
     res.json(rows.map((r) => ({ ...r, exchange: bySale.get(r.sale_id) ?? null })));
+  })
+);
+
+// GET /api/deliveries/coming-back — the dispatched parcels that couldn't be delivered and are on their way back to the shop (an exchange's
+// replacement parcel is one too).
+deliveriesRouter.get(
+  "/coming-back",
+  asyncHandler(async (_req, res) => {
+    const rows = db
+      .prepare(
+        `SELECT d.id, d.sale_id, d.coming_back_at, d.cod_amount, d.waybill_number, d.tracking_number,
+                s.invoice, s.total AS sale_total, c.name AS customer_name,
+                COALESCE(dp.name, d.delivery_partner) AS partner_name
+         FROM deliveries d
+         JOIN sales s ON s.id = d.sale_id
+         LEFT JOIN customers c ON c.id = s.customer_id
+         LEFT JOIN delivery_partners dp ON dp.code = d.delivery_partner
+         WHERE d.coming_back_at IS NOT NULL AND d.delivery_status = 'dispatched'
+         ORDER BY d.coming_back_at DESC`
+      )
+      .all() as any[];
+    const itemsOf = db.prepare(
+      `SELECT COALESCE(p.product_title, si.product_snapshot) AS title, i.size, i.color, si.unit_price
+       FROM sale_items si LEFT JOIN inventory i ON i.id = si.inventory_id LEFT JOIN products p ON p.id = i.product_id
+       WHERE si.sale_id = ?`
+    );
+    res.json(rows.map((r) => ({ ...r, items: itemsOf.all(r.sale_id), exchange: exchangeForSale(r.sale_id) })));
+  })
+);
+
+// PUT /api/deliveries/:id/coming-back — the courier couldn't deliver it (or the customer refused): it's on its way back. No money or
+// stock moves yet; that happens when it reaches the shop and is put to Returned (PUT /:id/return).
+deliveriesRouter.put(
+  "/:id/coming-back",
+  asyncHandler(async (req, res) => {
+    const existing = db.prepare(`SELECT d.*, s.invoice FROM deliveries d JOIN sales s ON s.id = d.sale_id WHERE d.id = ?`).get(req.params.id) as any;
+    if (!existing) throw new ApiError(404, "Delivery not found");
+    if (existing.delivery_status !== "dispatched") throw new ApiError(409, "Only a dispatched parcel can be on its way back.");
+    if (existing.coming_back_at) throw new ApiError(409, "This parcel is already marked as on its way back.");
+    db.prepare(`UPDATE deliveries SET coming_back_at = datetime('now', '+330 minutes') WHERE id = ?`).run(existing.id);
+    logAudit(actorOf(req), "delivery_coming_back", "sale", existing.sale_id, `${existing.invoice}: couldn't be delivered — on its way back to the shop`);
+    res.json(db.prepare(`SELECT * FROM deliveries WHERE id = ?`).get(existing.id));
+  })
+);
+
+// PUT /api/deliveries/:id/coming-back/undo — the courier will try again after all.
+deliveriesRouter.put(
+  "/:id/coming-back/undo",
+  asyncHandler(async (req, res) => {
+    const existing = db.prepare(`SELECT d.*, s.invoice FROM deliveries d JOIN sales s ON s.id = d.sale_id WHERE d.id = ?`).get(req.params.id) as any;
+    if (!existing) throw new ApiError(404, "Delivery not found");
+    if (!existing.coming_back_at) throw new ApiError(409, "This parcel isn't marked as on its way back.");
+    db.prepare(`UPDATE deliveries SET coming_back_at = NULL WHERE id = ?`).run(existing.id);
+    logAudit(actorOf(req), "delivery_coming_back_undo", "sale", existing.sale_id, `${existing.invoice}: back to dispatched — the courier will try again`);
+    res.json(db.prepare(`SELECT * FROM deliveries WHERE id = ?`).get(existing.id));
   })
 );
 

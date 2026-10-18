@@ -322,6 +322,19 @@ courierReconciliationRouter.post("/orders/:id", asyncHandler(async (req, res) =>
   res.json(db.prepare(`SELECT * FROM courier_reconciliations WHERE id = ?`).get(req.params.id));
 }));
 
+// A courier's charge for a job that isn't on one of the shop's own orders — collecting a customer's return, say — booked against
+// them: what they owe the shop goes down by the charge (or what the shop owes them goes up), with the reason on the Couriers page.
+// No money moves, so the cash book isn't touched — the charge is paid or netted off whenever the courier is next settled.
+export function bookCourierCharge(courierPartner: string, charge: number, reason: string, user: { id: number; name?: string | null; username: string }) {
+  if (!(charge > 0)) return;
+  ensureTable();
+  const current = buildSummary().find((row) => row.courier_partner === courierPartner)?.balance ?? 0;
+  const amount = round2(-charge);
+  db.prepare(
+    `INSERT INTO courier_adjustments (courier_partner, amount, reason, balance_before, balance_after, staff_id, staff_name) VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(courierPartner, amount, reason, current, round2(current + amount), user.id, user.name ?? user.username);
+}
+
 // Correct what a courier owes the shop, with a reason. Give EITHER the balance
 // it should be (positive = they owe you, negative = you owe them — straight from
 // their statement) OR an amount to add/take off. The difference is recorded as an

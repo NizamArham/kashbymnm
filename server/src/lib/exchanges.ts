@@ -1,6 +1,7 @@
 import { db } from "../db/connection";
 import { ApiError } from "./errors";
 import { getPartner, planDelivery } from "./deliveryPartners";
+import "./onlineReturns"; // creates the courier-return tables the eligibility check below looks at
 
 // An ONLINE exchange: the customer already has one or more items from delivered
 // orders and wants different ones. The replacement order is billed first (as an
@@ -81,10 +82,27 @@ if (!(db.prepare(`PRAGMA table_info(deliveries)`).all() as { name: string }[]).s
   // each stays what it says, and so voiding the order gives back everything that was taken.
   db.exec(`ALTER TABLE deliveries ADD COLUMN pickup_prepaid REAL NOT NULL DEFAULT 0`);
 }
+if (!(db.prepare(`PRAGMA table_info(online_exchanges)`).all() as { name: string }[]).some((c) => c.name === "return_service")) {
+  // Set when the old items come back SEPARATELY, by another service (post, a bus, a third-party courier) instead of being collected by
+  // the courier delivering the new order. The customer's share of the charge is still collected with the new order; only the courier
+  // isn't charged for a trip it didn't make.
+  db.exec(`ALTER TABLE online_exchanges ADD COLUMN return_service TEXT`);
+}
 if (!(db.prepare(`PRAGMA table_info(sales)`).all() as { name: string }[]).some((c) => c.name === "exchange_draft")) {
   // A quotation for an exchange by delivery keeps the exchange's own details here (JSON): which old items are
   // coming back, who pays the pickup, which courier. Nothing is reserved or booked until it's confirmed.
   db.exec(`ALTER TABLE sales ADD COLUMN exchange_draft TEXT`);
+}
+{
+  // A delivery exchange is a REQUEST first. A cashier's is saved as a payment request flagged 'pending' — its pieces held for the day —
+  // and the order can only be made from it once an admin has approved it ('approved'; 'declined' closes it). An admin's own is approved
+  // on the spot (auto_approved: "recorded by admin"). NULL = not an exchange, nothing to approve.
+  const cols = (db.prepare(`PRAGMA table_info(sales)`).all() as { name: string }[]).map((c) => c.name);
+  if (!cols.includes("approval_status")) db.exec(`ALTER TABLE sales ADD COLUMN approval_status TEXT`);
+  if (!cols.includes("approved_by")) db.exec(`ALTER TABLE sales ADD COLUMN approved_by INTEGER REFERENCES users(id)`);
+  if (!cols.includes("approved_at")) db.exec(`ALTER TABLE sales ADD COLUMN approved_at TEXT`);
+  if (!cols.includes("auto_approved")) db.exec(`ALTER TABLE sales ADD COLUMN auto_approved INTEGER NOT NULL DEFAULT 0`);
+  if (!cols.includes("decision_reason")) db.exec(`ALTER TABLE sales ADD COLUMN decision_reason TEXT`);
 }
 // An exchange made before items had their own rows gets one from its own columns.
 db.exec(`
@@ -252,6 +270,7 @@ export function eligibleExchangeItems(customerId: number) {
     .prepare(
       `SELECT si.id AS sale_item_id, s.id AS sale_id, s.invoice, s.date, si.unit_price,
               COALESCE(p.product_title, si.product_snapshot) AS product_title, i.size, i.color, i.sku,
+              COALESCE(p.allow_returns, 1) AS allow_returns,
               COALESCE(dp.name, d.delivery_partner) AS partner_name, d.delivery_partner, d.address_id, d.package_weight_kg
        FROM sale_items si
        JOIN sales s ON s.id = si.sale_id
@@ -263,6 +282,7 @@ export function eligibleExchangeItems(customerId: number) {
          AND d.delivery_status = 'delivered'
          AND NOT EXISTS (SELECT 1 FROM returns r WHERE r.sale_item_id = si.id)
          AND NOT EXISTS (SELECT 1 FROM online_exchange_items ei WHERE ei.old_sale_item_id = si.id AND ei.status IN ('awaiting', 'received'))
+         AND NOT EXISTS (SELECT 1 FROM online_return_items ri WHERE ri.sale_item_id = si.id AND ri.status IN ('awaiting', 'received'))
        ORDER BY s.date DESC, si.id`
     )
     .all(customerId);
@@ -301,6 +321,8 @@ export interface ExchangeDraft {
   old_sale_item_ids: number[];
   pickup_charge: number;
   customer_share_pct: number;
+  // The service the old items come back with, when it isn't the courier delivering the new order.
+  return_service?: string;
   delivery_partner: string;
   package_weight_kg: number;
   is_free_delivery: boolean;
@@ -320,13 +342,16 @@ export function exchangeQuoteSummary(sale: { total: number; customer_id: number 
   const items = draft.old_sale_item_ids.map((id) => {
     const row = db
       .prepare(
-        `SELECT si.id AS sale_item_id, si.unit_price, s.invoice AS old_invoice, COALESCE(p.product_title, si.product_snapshot) AS title, i.size, i.color
+        `SELECT si.id AS sale_item_id, si.unit_price, s.invoice AS old_invoice, COALESCE(p.product_title, si.product_snapshot) AS title, i.size, i.color,
+                COALESCE(p.allow_returns, 1) AS allow_returns
          FROM sale_items si JOIN sales s ON s.id = si.sale_id
          LEFT JOIN inventory i ON i.id = si.inventory_id LEFT JOIN products p ON p.id = i.product_id
          WHERE si.id = ?`
       )
-      .get(id) as { sale_item_id: number; unit_price: number; old_invoice: string; title: string | null; size: string | null; color: string | null } | undefined;
-    return row ?? { sale_item_id: id, unit_price: 0, old_invoice: "?", title: null, size: null, color: null };
+      .get(id) as
+      | { sale_item_id: number; unit_price: number; old_invoice: string; title: string | null; size: string | null; color: string | null; allow_returns: number }
+      | undefined;
+    return row ?? { sale_item_id: id, unit_price: 0, old_invoice: "?", title: null, size: null, color: null, allow_returns: 1 };
   });
   const credit = items.reduce((sum, i) => sum + i.unit_price, 0);
   const applied = Math.min(credit, sale.total);

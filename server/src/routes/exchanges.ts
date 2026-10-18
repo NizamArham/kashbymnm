@@ -2,7 +2,8 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "../db/connection";
 import { ApiError, asyncHandler } from "../lib/errors";
-import { requireAuth, requireRole } from "../lib/auth";
+import { requireAuth } from "../lib/auth";
+import { approveIfNeeded, arrivalApprovalReasons, actorOf } from "../lib/approval";
 import { logAudit } from "../lib/auditLog";
 import { eligibleExchangeItems, exchangeById, exchangeItems } from "../lib/exchanges";
 import { refundStoreCredit } from "../lib/storeCreditRefund";
@@ -21,6 +22,31 @@ exchangesRouter.get(
     const customerId = Number(req.query.customer_id);
     if (!Number.isInteger(customerId) || customerId <= 0) throw new ApiError(400, "customer_id is required");
     res.json(eligibleExchangeItems(customerId));
+  })
+);
+
+// GET /api/exchanges?status=open|closed|all — exchanges by delivery with the replacement order, its customer and whether it has been
+// delivered: open = still waiting for the old items to come back, closed = settled (received / not returned) or cancelled. Shown
+// next to the returns by delivery as items on their way back to the shop.
+exchangesRouter.get(
+  "/",
+  asyncHandler(async (req, res) => {
+    const status = req.query.status === "closed" ? "closed" : req.query.status === "all" ? "all" : "open";
+    const where = status === "open" ? "WHERE ox.status = 'awaiting_pickup'" : status === "closed" ? "WHERE ox.status <> 'awaiting_pickup'" : "";
+    const rows = db
+      .prepare(
+        `SELECT ox.*, ns.invoice AS new_invoice, c.name AS customer_name, d.delivery_status,
+                COALESCE(dp.name, d.delivery_partner) AS partner_name
+         FROM online_exchanges ox
+         JOIN sales ns ON ns.id = ox.new_sale_id
+         LEFT JOIN customers c ON c.id = ns.customer_id
+         LEFT JOIN deliveries d ON d.sale_id = ns.id
+         LEFT JOIN delivery_partners dp ON dp.code = d.delivery_partner
+         ${where}
+         ORDER BY ox.id DESC`
+      )
+      .all() as any[];
+    res.json(rows.map((r) => ({ ...r, items: exchangeItems(r.id) })));
   })
 );
 
@@ -46,9 +72,16 @@ const receiveInput = z.object({
 // dealt with, the courier's pickup charge is booked against them.
 exchangesRouter.put(
   "/:id/receive",
-  requireRole("admin"),
   asyncHandler(async (req, res) => {
     const data = receiveInput.parse(req.body);
+    // Everything came back in good order: anyone at the shop can book it in. A damaged or missing item changes what is owed, and paying
+    // the difference out (instead of leaving it as store credit) is money leaving, so those need an admin — or an admin's password at the till.
+    approveIfNeeded(
+      req,
+      res,
+      [...arrivalApprovalReasons(data.items.map((o) => o.outcome)), ...(data.leftover?.mode === "refund" ? ["paying out the difference"] : [])],
+      "Receiving the old items of an exchange"
+    );
     const exchange = exchangeById(req.params.id) as any;
     if (!exchange) throw new ApiError(404, "Exchange not found");
     if (exchange.status !== "awaiting_pickup") throw new ApiError(409, `This exchange is already ${exchange.status.replace(/_/g, " ")}.`);
@@ -84,8 +117,8 @@ exchangesRouter.put(
             `INSERT INTO return_requests (sale_item_id, quantity, condition, resolution, credit_expiry_days, reason, requested_by, is_admin_override)
              VALUES (?, 1, ?, 'store_credit_exchange', 45, ?, ?, 0)`
           )
-          .run(item.old_sale_item_id, o.outcome, `Online exchange — replacement invoice ${sale.invoice}`, req.user!.id);
-        const approved = approveReturnRequest(request.lastInsertRowid as number, req.user!, {
+          .run(item.old_sale_item_id, o.outcome, `Online exchange — replacement invoice ${sale.invoice}`, actorOf(req).id);
+        const approved = approveReturnRequest(request.lastInsertRowid as number, actorOf(req), {
           decision_reason: "Collected by the courier with the replacement delivery",
         }) as any;
 
@@ -131,7 +164,9 @@ exchangesRouter.put(
            WHERE id = ?`
         ).run(anyReceived ? "received" : "not_returned", first?.item_condition ?? null, first?.return_id ?? null, data.note ?? null, exchange.id);
         if (!exchange.pickup_booked) {
-          addPickupCharge(delivery, exchange.pickup_charge);
+          // The courier is charged only when it collected the old items; sent back by another service, that service is paid outside
+          // the system and the customer's share was already collected with the new order.
+          if (!exchange.return_service) addPickupCharge(delivery, exchange.pickup_charge);
           db.prepare(`UPDATE online_exchanges SET pickup_booked = 1 WHERE id = ?`).run(exchange.id);
         }
       }
@@ -141,7 +176,7 @@ exchangesRouter.put(
     const came = data.items.filter((o) => o.outcome !== "not_returned").length;
     const missing = data.items.length - came;
     logAudit(
-      req.user!,
+      actorOf(req),
       missing === data.items.length ? "exchange_not_returned" : "exchange_received",
       "sale",
       sale.id,

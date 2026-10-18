@@ -4,6 +4,7 @@ import cors from "cors";
 import { errorHandler } from "./lib/errors";
 
 import { businessInfoRouter } from "./routes/businessInfo";
+import { appSettingsRouter } from "./routes/appSettings";
 import { customersRouter } from "./routes/customers";
 import { suppliersRouter } from "./routes/suppliers";
 import { productsRouter } from "./routes/products";
@@ -28,6 +29,7 @@ import { giftVouchersRouter } from "./routes/giftVouchers";
 import { deliveryPartnersRouter } from "./routes/deliveryPartners";
 import { webhooksRouter } from "./routes/webhooks";
 import { exchangesRouter } from "./routes/exchanges";
+import { returnPickupsRouter } from "./routes/returnPickups";
 import { startCourierSync } from "./lib/courierSync";
 
 const app = express();
@@ -62,6 +64,7 @@ app.get("/api/health", (_req, res) => {
 
 app.use("/api/auth", authRouter);
 app.use("/api/business-info", businessInfoRouter);
+app.use("/api/app-settings", appSettingsRouter);
 app.use("/api/customers", customersRouter);
 app.use("/api/suppliers", suppliersRouter);
 app.use("/api/products", productsRouter);
@@ -84,6 +87,7 @@ app.use("/api/backup", backupRouter);
 app.use("/api/gift-vouchers", giftVouchersRouter);
 app.use("/api/delivery-partners", deliveryPartnersRouter);
 app.use("/api/exchanges", exchangesRouter);
+app.use("/api/return-pickups", returnPickupsRouter);
 // Called by outside services rather than logged-in staff, so each route
 // guards itself (a secret in its address) — see routes/webhooks.ts.
 app.use("/api/webhooks", webhooksRouter);

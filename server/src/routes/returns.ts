@@ -4,13 +4,21 @@ import { db } from "../db/connection";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { nextTransactionCode } from "../lib/codes";
 import { requireAuth, requireRole, AuthUser } from "../lib/auth";
-import { requireAdminOrApproval, actorOf } from "../lib/approval";
+import { requireAdminOrApproval, recordedByAdmin, actorOf } from "../lib/approval";
 import { logAudit } from "../lib/auditLog";
 import { LOYALTY_RATE_PERCENT } from "./sales";
 import { returnsInRange } from "../lib/returnedRevenue";
-import { itemInActiveExchange } from "../lib/exchanges";
+import { exchangeQuoteSummary, itemInActiveExchange } from "../lib/exchanges";
+import { itemInActivePickup, listPickups } from "../lib/onlineReturns";
+import { holdEndOf } from "../lib/stockHolds";
 
 export const returnsRouter = Router();
+
+// A request an admin recorded themselves is approved on the spot — flagged so the history can say "Auto-approved (recorded by admin)"
+// instead of looking like someone else approved it. Rows from before this existed were all decided by hand.
+if (!(db.prepare(`PRAGMA table_info(return_requests)`).all() as { name: string }[]).some((c) => c.name === "auto_approved")) {
+  db.exec(`ALTER TABLE return_requests ADD COLUMN auto_approved INTEGER NOT NULL DEFAULT 0`);
+}
 
 // Staff can submit requests and view history; only admins can approve/decline.
 returnsRouter.use(requireAuth);
@@ -39,6 +47,9 @@ const requestInput = z.object({
   // anything else is a deliberate exception, chosen at request time, not
   // an equally-weighted option.
   credit_expiry_days: z.number().int().positive().default(45),
+  // Only used when an admin records the return themselves (it is approved straight away, so how a refund is paid is decided now).
+  payment_method: z.enum(["cash", "bank_transfer"]).optional(),
+  bank_account_id: z.number().int().positive().optional(),
 });
 
 const decisionInput = z.object({
@@ -88,6 +99,53 @@ returnsRouter.get(
   asyncHandler(async (_req, res) => {
     const rows = db.prepare(`${REQUEST_SELECT} WHERE return_requests.status = 'pending' ORDER BY return_requests.id ASC`).all();
     res.json(rows);
+  })
+);
+
+// GET /api/returns/approvals — everything waiting for an admin's yes, whichever way it came: a return at the shop (in_store), a courier
+// return request (courier), the inspection report of a courier return that has arrived (courier_reports) and a delivery exchange
+// (exchanges). One list to decide from; the Returns page's "To approve" tab.
+returnsRouter.get(
+  "/approvals",
+  asyncHandler(async (_req, res) => {
+    const inStore = db.prepare(`${REQUEST_SELECT} WHERE return_requests.status = 'pending' ORDER BY return_requests.id ASC`).all();
+    const courier = listPickups("pending").reverse();
+    const courierReports = listPickups("report").reverse();
+    const exchangeRows = db
+      .prepare(
+        `SELECT sales.*, customers.name AS customer_name, customers.phone AS customer_phone
+         FROM sales LEFT JOIN customers ON customers.id = sales.customer_id
+         WHERE sales.status = 'quotation' AND sales.exchange_draft IS NOT NULL AND sales.approval_status = 'pending'
+         ORDER BY sales.id ASC`
+      )
+      .all() as any[];
+    const exchanges = exchangeRows.map((r) => ({
+      ...r,
+      hold_until: holdEndOf(r.id),
+      exchange_quote: exchangeQuoteSummary(r),
+      new_items: db
+        .prepare(
+          `SELECT si.unit_price, COALESCE(p.product_title, si.product_snapshot) AS title, i.size, i.color
+           FROM sale_items si LEFT JOIN inventory i ON i.id = si.inventory_id LEFT JOIN products p ON p.id = i.product_id
+           WHERE si.sale_id = ? ORDER BY si.id`
+        )
+        .all(r.id),
+    }));
+    res.json({ in_store: inStore, courier, courier_reports: courierReports, exchanges });
+  })
+);
+
+// GET /api/returns/approvals/count — just how many are waiting, for the badge on the Returns menu item.
+returnsRouter.get(
+  "/approvals/count",
+  asyncHandler(async (_req, res) => {
+    const n = (sql: string) => (db.prepare(sql).get() as { n: number }).n;
+    res.json({
+      count:
+        n(`SELECT COUNT(*) AS n FROM return_requests WHERE status = 'pending'`) +
+        n(`SELECT COUNT(*) AS n FROM online_returns WHERE stage IN ('requested', 'report_pending')`) +
+        n(`SELECT COUNT(*) AS n FROM sales WHERE status = 'quotation' AND exchange_draft IS NOT NULL AND approval_status = 'pending'`),
+    });
   })
 );
 
@@ -149,6 +207,11 @@ returnsRouter.post(
       throw new ApiError(409, "This item is part of an online exchange — it's received from that replacement order, not returned separately.");
     }
 
+    // …and one waiting for a courier to collect it is dealt with there, when it arrives.
+    if (itemInActivePickup(data.sale_item_id)) {
+      throw new ApiError(409, "This item is on its way back by delivery — it's received (and the customer paid back) from that return, not returned separately.");
+    }
+
     const alreadyHandled = db
       .prepare(`SELECT id FROM return_requests WHERE sale_item_id = ? AND status IN ('pending','approved')`)
       .get(data.sale_item_id);
@@ -173,23 +236,38 @@ returnsRouter.post(
       );
     }
 
-    const result = db
-      .prepare(
-        `INSERT INTO return_requests (sale_item_id, condition, resolution, exchange_inventory_id, credit_expiry_days, reason, requested_by, is_admin_override)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        data.sale_item_id,
-        data.condition,
-        data.resolution,
-        data.exchange_inventory_id ?? null,
-        data.resolution === "store_credit_exchange" ? data.credit_expiry_days : null,
-        data.reason,
-        req.user!.id,
-        isFinalSale ? 1 : 0
-      );
+    // An admin's own request needs no one else's yes: it is approved in the same step (and rolled back with it if that fails — a refund
+    // by bank transfer with no account chosen, say), flagged as auto-approved. A cashier's waits in the approval list.
+    const approver = recordedByAdmin(req, res, "Recording a return");
+    const requestId = db.transaction(() => {
+      const result = db
+        .prepare(
+          `INSERT INTO return_requests (sale_item_id, condition, resolution, exchange_inventory_id, credit_expiry_days, reason, requested_by, is_admin_override, auto_approved)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          data.sale_item_id,
+          data.condition,
+          data.resolution,
+          data.exchange_inventory_id ?? null,
+          data.resolution === "store_credit_exchange" ? data.credit_expiry_days : null,
+          data.reason,
+          req.user!.id,
+          isFinalSale ? 1 : 0,
+          approver ? 1 : 0
+        );
+      if (approver) {
+        approveReturnRequest(result.lastInsertRowid as number, approver, {
+          // For a no-returns product the reason given is also the override reason.
+          decision_reason: isFinalSale ? data.reason : undefined,
+          payment_method: data.payment_method,
+          bank_account_id: data.bank_account_id,
+        }, { auto: true });
+      }
+      return result.lastInsertRowid;
+    })();
 
-    const created = db.prepare(`${REQUEST_SELECT} WHERE return_requests.id = ?`).get(result.lastInsertRowid);
+    const created = db.prepare(`${REQUEST_SELECT} WHERE return_requests.id = ?`).get(requestId);
     res.status(201).json({ ...(created as object), is_final_sale: isFinalSale });
   })
 );
@@ -203,7 +281,11 @@ export type ReturnDecision = z.infer<typeof decisionInput>;
 // damaged), the money or store credit goes back, loyalty points are reversed.
 // The approve route and an online exchange being received both come through here,
 // so a return means exactly the same thing whichever way it was started.
-export function approveReturnRequest(requestId: number | string, user: AuthUser, data: ReturnDecision) {
+// `deduct` is for a return that came back by delivery: that much of the refund (or store credit) is held back as the customer's share
+// of the delivery charge. It never takes more than the item was going to give back.
+// `deferPayout` is for a refund that is paid later (a courier return waiting for the customer's bank details): the return and its
+// refund amount are recorded now, but the cash book entry is made when the refund is actually paid.
+export function approveReturnRequest(requestId: number | string, user: AuthUser, data: ReturnDecision, opts?: { deduct?: number; deferPayout?: boolean; auto?: boolean }) {
   const request = db.prepare(`SELECT * FROM return_requests WHERE id = ?`).get(requestId) as any;
   if (!request) throw new ApiError(404, "Return request not found");
   if (request.status !== "pending") throw new ApiError(409, `This request has already been ${request.status}.`);
@@ -275,8 +357,10 @@ export function approveReturnRequest(requestId: number | string, user: AuthUser,
     realCashPaid <= 0.009;
   const resolution: string = parcelNeverCollected ? "refund" : request.resolution;
 
-  const refund_amount = resolution === "refund" ? Math.round(saleItem.unit_price * paidFraction) : 0;
-  const ledgerWriteOff = resolution === "refund" ? saleItem.unit_price - refund_amount : 0;
+  const refundBeforeShare = resolution === "refund" ? Math.round(saleItem.unit_price * paidFraction) : 0;
+  const pickupDeduction = Math.max(0, Math.min(opts?.deduct ?? 0, resolution === "refund" ? refundBeforeShare : saleItem.unit_price));
+  const refund_amount = refundBeforeShare - pickupDeduction;
+  const ledgerWriteOff = resolution === "refund" ? saleItem.unit_price - refundBeforeShare : 0;
   // An immediate exchange creates no new sale for the replacement to
   // earn its own points on, so those stay; a refund or a store-credit
   // return doesn't (the replacement is a separate, new sale).
@@ -286,8 +370,8 @@ export function approveReturnRequest(requestId: number | string, user: AuthUser,
   const runApproval = db.transaction(() => {
     const returnResult = db
       .prepare(
-        `INSERT INTO returns (sale_item_id, condition, resolution, refund_amount, exchange_inventory_id, reason)
-         VALUES (?, ?, ?, ?, ?, ?)`
+        `INSERT INTO returns (sale_item_id, condition, resolution, refund_amount, exchange_inventory_id, reason, pickup_deduction)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         request.sale_item_id,
@@ -295,7 +379,8 @@ export function approveReturnRequest(requestId: number | string, user: AuthUser,
         resolution,
         refund_amount,
         request.exchange_inventory_id,
-        request.reason
+        request.reason,
+        pickupDeduction
       );
     const returnId = returnResult.lastInsertRowid;
 
@@ -303,7 +388,7 @@ export function approveReturnRequest(requestId: number | string, user: AuthUser,
     db.prepare(`UPDATE inventory SET status = ? WHERE id = ?`).run(newStatus, saleItem.inventory_id);
 
     if (resolution === "refund") {
-      if (refund_amount > 0) {
+      if (refund_amount > 0 && !opts?.deferPayout) {
         db.prepare(
           `INSERT INTO cash_book (transaction_code, type, category, payment_method, reference_id, amount, notes)
            VALUES (?, 'expense', 'return_refund', ?, ?, ?, ?)`
@@ -351,16 +436,19 @@ export function approveReturnRequest(requestId: number | string, user: AuthUser,
       // source there (see customers.ts / the sale checkout flow).
       const expiryDays = request.credit_expiry_days ?? 45;
       const expiresAt = new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000).toISOString();
-      db.prepare(
-        `INSERT INTO store_credit_transactions (customer_id, amount, reason, reference_id, notes, expires_at)
-         VALUES (?, ?, 'return_exchange', ?, ?, ?)`
-      ).run(
-        saleItem.customer_id,
-        saleItem.unit_price,
-        returnId,
-        `Credit from return on invoice ${saleItem.invoice} — expires in ${expiryDays} days`,
-        expiresAt
-      );
+      const creditAmount = saleItem.unit_price - pickupDeduction;
+      if (creditAmount > 0) {
+        db.prepare(
+          `INSERT INTO store_credit_transactions (customer_id, amount, reason, reference_id, notes, expires_at)
+           VALUES (?, ?, 'return_exchange', ?, ?, ?)`
+        ).run(
+          saleItem.customer_id,
+          creditAmount,
+          returnId,
+          `Credit from return on invoice ${saleItem.invoice}${pickupDeduction > 0 ? ` (less Rs. ${pickupDeduction.toLocaleString()} delivery charge share)` : ""} — expires in ${expiryDays} days`,
+          expiresAt
+        );
+      }
     }
 
     db.prepare(
@@ -378,9 +466,11 @@ export function approveReturnRequest(requestId: number | string, user: AuthUser,
     "return_approve",
     "return_request",
     Number(requestId),
-    `Approved return on invoice ${saleItem.invoice} — ${
+    `${opts?.auto ? "Auto-approved (recorded by admin)" : "Approved"} return on invoice ${saleItem.invoice} — ${
       parcelNeverCollected ? "parcel never collected, nothing paid: written off, no store credit" : request.resolution.replace(/_/g, " ")
-    }${refund_amount > 0 ? ` (Rs. ${refund_amount.toLocaleString()} refunded)` : ""}`
+    }${refund_amount > 0 ? ` (Rs. ${refund_amount.toLocaleString()} ${opts?.deferPayout ? "refund due" : "refunded"})` : ""}${
+      pickupDeduction > 0 ? ` — Rs. ${pickupDeduction.toLocaleString()} held back for the delivery charge` : ""
+    }`
   );
 
   return db.prepare(`${REQUEST_SELECT} WHERE return_requests.id = ?`).get(requestId);
@@ -390,7 +480,13 @@ returnsRouter.put(
   "/requests/:id/approve",
   requireAdminOrApproval("Approving a return"),
   asyncHandler(async (req, res) => {
-    res.json(approveReturnRequest(req.params.id, actorOf(req), decisionInput.parse(req.body)));
+    const decision = decisionInput.parse(req.body);
+    // A no-returns product is taken back only on purpose: the reason for overriding it has to be written down.
+    const asked = db.prepare(`SELECT is_admin_override FROM return_requests WHERE id = ?`).get(req.params.id) as { is_admin_override: number } | undefined;
+    if (asked?.is_admin_override === 1 && !decision.decision_reason?.trim()) {
+      throw new ApiError(400, "An override reason is required for a Final Sale item.");
+    }
+    res.json(approveReturnRequest(req.params.id, actorOf(req), decision));
   })
 );
 

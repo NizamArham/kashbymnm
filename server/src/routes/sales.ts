@@ -4,7 +4,7 @@ import { db } from "../db/connection";
 import { nextInvoiceCode, InvoiceCategory, nextTransactionCode, nextQuotationCode, invoiceCodeFromQuotation } from "../lib/codes";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth, requireRole, AuthUser } from "../lib/auth";
-import { requireAdminOrApproval, approveIfNeeded, actorOf } from "../lib/approval";
+import { requireAdminOrApproval, approveIfNeeded, recordedByAdmin, actorOf } from "../lib/approval";
 import { logAudit } from "../lib/auditLog";
 import { getPartner, planDelivery, DeliveryPartnerRow } from "../lib/deliveryPartners";
 import { storeCreditSources } from "../lib/storeCreditSources";
@@ -17,6 +17,8 @@ import {
   exchangeQuoteSummary,
   exchangesOutOfSale,
 } from "../lib/exchanges";
+import { pickupsForSale } from "../lib/onlineReturns";
+import { assertNotHeldByAnother, endOfDay, holdEndOf, holdUnits, releaseHold } from "../lib/stockHolds";
 
 export const salesRouter = Router();
 
@@ -113,6 +115,8 @@ const saleInput = z.object({
       old_sale_item_ids: z.array(z.number().int().positive()).min(1).max(20),
       pickup_charge: z.number().nonnegative().default(0),
       customer_share_pct: z.number().int().min(0).max(100).default(0),
+      // The old items come back separately, by this other service, rather than with the courier delivering the new order.
+      return_service: z.string().trim().min(1).max(60).optional(),
     })
     .optional(),
 });
@@ -129,11 +133,13 @@ const quotationInput = z.object({
   manual_discount_value: z.number().nonnegative().optional(),
   coupon_code: z.string().optional(),
   sale_type: z.enum(["in_store", "online"]).default("in_store"),
-  // How many days this quote is good for, counted from today — a
-  // quotation has no real "expiry" mechanism (nothing is reserved), this
-  // is purely what prints on the bill so the customer knows by when to
-  // confirm and pay.
+  // How many days this request is good for, counted from today — purely what prints on the bill so the customer knows
+  // by when to pay. Pieces are only kept back when hold_stock is set (below).
   valid_days: z.number().int().positive().max(365).default(7),
+  // Keep the pieces for this customer until the end of today (free) so they aren't sold to someone else while the
+  // customer is paying. The request is then good until the end of today too, whatever valid_days says. A hold ends by
+  // itself — see lib/stockHolds.ts.
+  hold_stock: z.boolean().default(false),
   // A quotation for an exchange by delivery: held until the customer confirms (and pays), then made into the real
   // exchange order from the quotation's own page. Same details as the order itself, plus the courier — they set the
   // delivery fee that's part of what the customer pays.
@@ -142,6 +148,7 @@ const quotationInput = z.object({
       old_sale_item_ids: z.array(z.number().int().positive()).min(1).max(20),
       pickup_charge: z.number().nonnegative().default(0),
       customer_share_pct: z.number().int().min(0).max(100).default(0),
+      return_service: z.string().trim().min(1).max(60).optional(),
       delivery_partner: z.string().min(1),
       package_weight_kg: z.number().positive(),
       is_free_delivery: z.boolean().default(false),
@@ -171,7 +178,9 @@ function priceItems(
   manualDiscountType: "percent" | "fixed" | undefined,
   manualDiscountValue: number | undefined,
   couponCodeInput: string | undefined,
-  actor?: AuthUser
+  actor?: AuthUser,
+  // The payment request these items belong to, when one is being edited or paid: pieces held for it are free for it.
+  ownQuoteId?: number | null
 ): ItemPricing {
   const approvalReasons = new Set<string>();
   const inventoryRows = items.map((item) => {
@@ -185,6 +194,8 @@ function priceItems(
         `Inventory unit ${item.inventory_id} (SKU ${row.sku}) is already sold and cannot be sold again`
       );
     }
+    // A piece held for someone else's payment request isn't ours to sell until that hold ends.
+    assertNotHeldByAnother(row.id, ownQuoteId);
     // A cashier sells at the listed price or lower; going above it (a special order, a corrected
     // tag) needs an admin's password.
     if (actor && actor.role !== "admin" && item.unit_price > row.selling_price) {
@@ -347,6 +358,8 @@ salesRouter.get(
         `SELECT sales.*, customers.name as customer_name, customers.customer_code, customers.phone as customer_phone,
                 deliveries.delivery_partner, delivery_partners.kind as delivery_partner_kind,
                 deliveries.delivery_status as delivery_status, deliveries.cod_amount as delivery_cod_amount,
+                (SELECT MAX(hi.held_until) FROM inventory hi
+                  WHERE hi.held_for_sale_id = sales.id AND hi.held_until > datetime('now', '+330 minutes')) AS hold_until,
                 ${SALE_EXCHANGE_FLAGS_SQL}
          FROM sales
          LEFT JOIN customers ON customers.id = sales.customer_id
@@ -376,7 +389,7 @@ salesRouter.get(
       )
       .get(req.params.id) as any;
     if (!sale) throw new ApiError(404, "Sale not found");
-    if (sale.status === "quotation") throw new ApiError(409, "A quotation has no profit yet — nothing has been sold.");
+    if (sale.status === "quotation") throw new ApiError(409, "A payment request has no profit yet — nothing has been sold.");
     if (sale.is_voided) return res.json({ invoice: sale.invoice, voided: true });
 
     const rows = db
@@ -464,7 +477,7 @@ salesRouter.get(
         .get(sale.id) as { pickup_charge: number } | undefined;
       if (cameBack) note = "The parcel came back, so no delivery fee was collected.";
       else if (waitingExchange && waitingExchange.pickup_charge > 0)
-        note = `The courier's Rs. ${waitingExchange.pickup_charge.toLocaleString()} pickup charge for the old item only counts once it's received.`;
+        note = `The Rs. ${waitingExchange.pickup_charge.toLocaleString()} return charge for the old item only counts once it's received.`;
       else if (delivery.is_free_delivery && !note) note = "Free delivery — you paid the courier.";
       deliveryView = {
         partner: delivery.partner_name ?? null,
@@ -566,7 +579,10 @@ salesRouter.get(
       delivery_address,
       exchange: exchangeForSale(sale.id),
       exchange_quote: sale.status === "quotation" ? exchangeQuoteSummary(sale) : null,
+      // For a payment request: when the hold on its pieces ends (null if it isn't holding any).
+      hold_until: sale.status === "quotation" ? holdEndOf(sale.id) : null,
       exchanged_out: exchangesOutOfSale(sale.id),
+      return_pickups: pickupsForSale(sale.id),
       store_credit_applied: credit,
       store_credit_sources: credit > 0 ? storeCreditSources(sale.id, sale.customer_id) : [],
     });
@@ -586,21 +602,27 @@ salesRouter.post(
     // was already converted/cancelled from somewhere else (another
     // tab, another cashier) and this would double-sell it.
     let quotationInvoice: string | null = null;
+    // Where that quotation stands on approval (an exchange request): null = nothing to approve, or it predates approvals.
+    let quoteApproval: string | null = null;
     if (data.quotation_id) {
-      const quote = db.prepare(`SELECT invoice, exchange_draft FROM sales WHERE id = ? AND status = 'quotation'`).get(data.quotation_id) as
-        | { invoice: string; exchange_draft: string | null }
-        | undefined;
+      const quote = db
+        .prepare(`SELECT invoice, exchange_draft, approval_status FROM sales WHERE id = ? AND status = 'quotation'`)
+        .get(data.quotation_id) as { invoice: string; exchange_draft: string | null; approval_status: string | null } | undefined;
       if (!quote) {
-        throw new ApiError(409, "That quotation is no longer open — it may have already been converted or cancelled.");
+        throw new ApiError(409, "That payment request is no longer open — it may have already been converted or cancelled.");
       }
       // A quoted exchange has to become an exchange order (the old items come back with it) — made any other way
       // the customer would be billed in full and keep the old items.
       if (quote.exchange_draft && !data.exchange) {
-        throw new ApiError(409, "This quotation is for an exchange by delivery — confirm it with \"Create exchange order\" on the quotation's page.");
+        throw new ApiError(409, "This payment request is for an exchange by delivery — confirm it with \"Create exchange order\" on its own page.");
       }
       if (!quote.exchange_draft && data.exchange) {
-        throw new ApiError(409, "This quotation isn't for an exchange.");
+        throw new ApiError(409, "This payment request isn't for an exchange.");
       }
+      if (quote.approval_status === "declined") {
+        throw new ApiError(409, "An admin declined this exchange request — it can't be made into an order.");
+      }
+      quoteApproval = quote.approval_status;
       quotationInvoice = quote.invoice;
     }
 
@@ -648,13 +670,16 @@ salesRouter.post(
     // available) and compute subtotal/discount/total — shared with the
     // quotation endpoint below so a quoted price is always exactly what
     // a real checkout of the same cart would charge.
-    const priced = priceItems(data.items, data.manual_discount_type, data.manual_discount_value, data.coupon_code, req.user);
+    const priced = priceItems(data.items, data.manual_discount_type, data.manual_discount_value, data.coupon_code, req.user, data.quotation_id);
     const { subtotal, manual_discount, coupon_discount, coupon_code, discount, total } = priced;
     // Things a cashier can't do alone — credit, a big discount, free delivery, a price above the tag —
     // go ahead only when an admin types their password for this sale.
     const approvalReasons = [...priced.approvalReasons];
     if (isCredit) approvalReasons.push("selling on credit");
     if (data.sale_type === "online" && (data.is_free_delivery || data.delivery_paid_by === "shop")) approvalReasons.push("free delivery");
+    // A delivery exchange goes ahead only once an admin has said yes to it: its request was approved (from the approval list), or an admin
+    // is making it — or typing their password here, which is the same thing done on the spot.
+    if (data.exchange && (data.quotation_id ? quoteApproval === "pending" : true)) approvalReasons.push("a delivery exchange that hasn't been approved");
     approveIfNeeded(req, res, approvalReasons, "This sale");
     // Wholesale orders, and customers marked as never earning points, get
     // none — the sale is simply recorded without any.
@@ -896,7 +921,9 @@ salesRouter.post(
           feePaidOnDelivery,
           exchangePlan?.pickupCollected ?? 0,
           pickupPaidUpfront,
-          exchangeSources
+          exchangeSources && data.exchange?.return_service
+            ? `EXCHANGE — the old item${exchangeSources.length > 1 ? "s come" : " comes"} back separately (${data.exchange.return_service}); nothing to collect on this delivery`
+            : exchangeSources
             ? `EXCHANGE — collect the old item${exchangeSources.length > 1 ? "s" : ""} from the customer: ${exchangeSources
                 .map(
                   (s) =>
@@ -910,8 +937,8 @@ salesRouter.post(
           const exchangeId = db
             .prepare(
               `INSERT INTO online_exchanges
-                 (new_sale_id, old_sale_item_id, credit_amount, applied_amount, pickup_charge, customer_share_pct, pickup_collected)
-               VALUES (?, ?, ?, ?, ?, ?, ?)`
+                 (new_sale_id, old_sale_item_id, credit_amount, applied_amount, pickup_charge, customer_share_pct, pickup_collected, return_service)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
             )
             .run(
               saleId,
@@ -920,7 +947,8 @@ salesRouter.post(
               exchangePlan.applied,
               exchangePlan.pickupCharge,
               exchangePlan.sharePct,
-              exchangePlan.pickupCollected
+              exchangePlan.pickupCollected,
+              data.exchange?.return_service ?? null
             ).lastInsertRowid;
           for (const it of exchangePlan.items) {
             db.prepare(
@@ -935,6 +963,7 @@ salesRouter.post(
       // ever applied, so deleting it (cascading to its items) leaves
       // nothing to reverse.
       if (data.quotation_id) {
+        releaseHold(data.quotation_id);
         db.prepare(`DELETE FROM sales WHERE id = ? AND status = 'quotation'`).run(data.quotation_id);
       }
 
@@ -972,7 +1001,7 @@ salesRouter.post(
         | undefined;
       if (!customer) throw new ApiError(400, "Referenced customer does not exist");
       if (customer.is_suspended) {
-        throw new ApiError(409, "This customer is suspended and can't be attached to a new quotation until reactivated.");
+        throw new ApiError(409, "This customer is suspended and can't be attached to a new payment request until reactivated.");
       }
     }
 
@@ -998,21 +1027,28 @@ salesRouter.post(
     );
     const quoteApprovals = [...priced.approvalReasons];
     if (data.exchange?.is_free_delivery) quoteApprovals.push("free delivery");
-    approveIfNeeded(req, res, quoteApprovals, "This quotation");
+    approveIfNeeded(req, res, quoteApprovals, "This payment request");
+    // A delivery exchange is a request: an admin's own is approved on the spot, a cashier's waits for an admin's yes.
+    const exchangeApprover = data.exchange ? recordedByAdmin(req, res, "Recording a delivery exchange") : null;
+    const exchangeNeedsApproval = !!data.exchange && !exchangeApprover;
     const { subtotal, manual_discount, coupon_discount, coupon_code, discount, total, loyalty_points_earned } = priced;
 
     const invoice = nextQuotationCode();
-    const { d: validUntil } = db
-      .prepare(`SELECT datetime('now', '+330 minutes', '+' || ? || ' days') as d`)
-      .get(data.valid_days) as { d: string };
+    // Holding the pieces makes it a same-day request: good, and held, until the end of today.
+    // (An exchange still waiting for approval always holds its pieces for the day, so they aren't sold meanwhile.)
+    const holdUntil = data.hold_stock || exchangeNeedsApproval ? endOfDay() : null;
+    const validUntil =
+      holdUntil ??
+      (db.prepare(`SELECT datetime('now', '+330 minutes', '+' || ? || ' days') as d`).get(data.valid_days) as { d: string }).d;
 
     const runQuotationTransaction = db.transaction(() => {
       const saleResult = db
         .prepare(
           `INSERT INTO sales
              (invoice, customer_id, salesperson, subtotal, discount, manual_discount, coupon_discount, coupon_code,
-              total, amount_paid, payment_status, sale_type, loyalty_points_earned, status, quotation_valid_until, exchange_draft)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'unpaid', ?, ?, 'quotation', ?, ?)`
+              total, amount_paid, payment_status, sale_type, loyalty_points_earned, status, quotation_valid_until, exchange_draft,
+              approval_status, approved_by, approved_at, auto_approved)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'unpaid', ?, ?, 'quotation', ?, ?, ?, ?, CASE WHEN ? IS NULL THEN NULL ELSE datetime('now', '+330 minutes') END, ?)`
         )
         .run(
           invoice,
@@ -1027,7 +1063,11 @@ salesRouter.post(
           data.sale_type,
           loyalty_points_earned,
           validUntil,
-          exchangeDraft
+          exchangeDraft,
+          data.exchange ? (exchangeApprover ? "approved" : "pending") : null,
+          exchangeApprover?.id ?? null,
+          exchangeApprover?.id ?? null,
+          exchangeApprover ? 1 : 0
         );
 
       const saleId = saleResult.lastInsertRowid;
@@ -1044,11 +1084,21 @@ salesRouter.post(
            VALUES (?, ?, 1, ?, ?)`
         ).run(saleId, item.inventory_id, item.unit_price, item.unit_price);
       }
+      if (holdUntil) holdUnits(Number(saleId), data.items.map((i) => i.inventory_id), holdUntil);
 
       return saleId;
     });
 
     const saleId = runQuotationTransaction();
+    if (data.exchange) {
+      logAudit(
+        exchangeApprover ?? req.user!,
+        "exchange_requested",
+        "sale",
+        Number(saleId),
+        `${invoice}: delivery exchange ${exchangeApprover ? "recorded — Auto-approved (recorded by admin)" : "requested — waiting for approval"}`
+      );
+    }
 
     const created = db
       .prepare(
@@ -1076,10 +1126,10 @@ salesRouter.put(
     const existing = db.prepare(`SELECT id, status, exchange_draft FROM sales WHERE id = ?`).get(req.params.id) as
       | { id: number; status: string; exchange_draft: string | null }
       | undefined;
-    if (!existing) throw new ApiError(404, "Quotation not found");
-    if (existing.status !== "quotation") throw new ApiError(409, "Only an open quotation can be edited.");
+    if (!existing) throw new ApiError(404, "Payment request not found");
+    if (existing.status !== "quotation") throw new ApiError(409, "Only an open payment request can be edited.");
     if (existing.exchange_draft) {
-      throw new ApiError(409, "This quotation is for an exchange by delivery — cancel it and make a new one to change what's in it.");
+      throw new ApiError(409, "This payment request is for an exchange by delivery — cancel it and make a new one to change what's in it.");
     }
 
     if (data.customer_id) {
@@ -1088,7 +1138,7 @@ salesRouter.put(
         | undefined;
       if (!customer) throw new ApiError(400, "Referenced customer does not exist");
       if (customer.is_suspended) {
-        throw new ApiError(409, "This customer is suspended and can't be attached to a quotation until reactivated.");
+        throw new ApiError(409, "This customer is suspended and can't be attached to a payment request until reactivated.");
       }
     }
 
@@ -1097,14 +1147,16 @@ salesRouter.put(
       data.manual_discount_type,
       data.manual_discount_value,
       data.coupon_code,
-      req.user
+      req.user,
+      existing.id
     );
-    approveIfNeeded(req, res, priced.approvalReasons, "This quotation");
+    approveIfNeeded(req, res, priced.approvalReasons, "This payment request");
     const { subtotal, manual_discount, coupon_discount, coupon_code, discount, total, loyalty_points_earned } = priced;
 
-    const { d: validUntil } = db
-      .prepare(`SELECT datetime('now', '+330 minutes', '+' || ? || ' days') as d`)
-      .get(data.valid_days) as { d: string };
+    const holdUntil = data.hold_stock ? endOfDay() : null;
+    const validUntil =
+      holdUntil ??
+      (db.prepare(`SELECT datetime('now', '+330 minutes', '+' || ? || ' days') as d`).get(data.valid_days) as { d: string }).d;
 
     db.transaction(() => {
       db.prepare(
@@ -1134,6 +1186,9 @@ salesRouter.put(
            VALUES (?, ?, 1, ?, ?)`
         ).run(existing.id, item.inventory_id, item.unit_price, item.unit_price);
       }
+      // The whole cart is re-sent, so the hold is too: what it held before is let go, and what it holds now is set again.
+      releaseHold(existing.id);
+      if (holdUntil) holdUnits(existing.id, data.items.map((i) => i.inventory_id), holdUntil);
     })();
 
     const updated = db
@@ -1148,6 +1203,84 @@ salesRouter.put(
   })
 );
 
+// PUT /api/sales/:id/hold — keep (or stop keeping) the pieces of an open payment request for its customer: until the end of
+// today, until the end of tomorrow, or let them go. The request's own "pay by" moves with it. Free; it ends by itself.
+salesRouter.put(
+  "/:id/hold",
+  asyncHandler(async (req, res) => {
+    const { mode } = z.object({ mode: z.enum(["today", "tomorrow", "release"]) }).parse(req.body);
+    const sale = db.prepare(`SELECT id, status FROM sales WHERE id = ?`).get(req.params.id) as { id: number; status: string } | undefined;
+    if (!sale) throw new ApiError(404, "Payment request not found");
+    if (sale.status !== "quotation") throw new ApiError(409, "Only an open payment request can hold pieces.");
+
+    const unitIds = (db.prepare(`SELECT inventory_id FROM sale_items WHERE sale_id = ? AND inventory_id IS NOT NULL`).all(sale.id) as { inventory_id: number }[]).map(
+      (r) => r.inventory_id
+    );
+    db.transaction(() => {
+      if (mode === "release") {
+        releaseHold(sale.id);
+        return;
+      }
+      for (const id of unitIds) {
+        const unit = db.prepare(`SELECT status, sku FROM inventory WHERE id = ?`).get(id) as { status: string; sku: string } | undefined;
+        if (!unit || unit.status !== "available") {
+          throw new ApiError(409, `Piece ${unit?.sku ?? id} on this request has been sold or taken out of stock since — it can't be held.`);
+        }
+        assertNotHeldByAnother(id, sale.id);
+      }
+      const until = endOfDay(mode === "tomorrow" ? 1 : 0);
+      holdUnits(sale.id, unitIds, until);
+      db.prepare(`UPDATE sales SET quotation_valid_until = ? WHERE id = ?`).run(until, sale.id);
+    })();
+    res.json({ hold_until: holdEndOf(sale.id) });
+  })
+);
+
+// PUT /api/sales/:id/approval — an admin's yes or no to a delivery exchange request (or a cashier with an admin's password at the till).
+// Approving lets the order be made from it; declining closes the request, lets its pieces go and keeps the reason on it.
+salesRouter.put(
+  "/:id/approval",
+  requireAdminOrApproval("Approving a delivery exchange"),
+  asyncHandler(async (req, res) => {
+    const data = z
+      .object({ decision: z.enum(["approve", "decline"]), reason: z.string().trim().max(200).optional() })
+      .parse(req.body ?? {});
+    const sale = db.prepare(`SELECT id, invoice, status, exchange_draft, approval_status FROM sales WHERE id = ?`).get(req.params.id) as
+      | { id: number; invoice: string; status: string; exchange_draft: string | null; approval_status: string | null }
+      | undefined;
+    if (!sale) throw new ApiError(404, "Exchange request not found");
+    if (sale.status !== "quotation" || !sale.exchange_draft) throw new ApiError(409, "Only a delivery exchange request can be approved or declined.");
+    if (sale.approval_status !== "pending") throw new ApiError(409, `This request is already ${sale.approval_status ?? "approved"}.`);
+    if (data.decision === "decline" && !data.reason) throw new ApiError(400, "A reason is required to decline a request.");
+    // An old item that is a no-returns product is taken back only on purpose: say why.
+    const noReturns = (exchangeQuoteSummary(db.prepare(`SELECT * FROM sales WHERE id = ?`).get(sale.id) as any)?.old_items ?? []).filter((i) => i.allow_returns === 0);
+    if (data.decision === "approve" && noReturns.length > 0 && !data.reason) {
+      throw new ApiError(400, `${noReturns.map((i) => i.title ?? "An item").join(", ")} ${noReturns.length === 1 ? "is a no-returns product" : "are no-returns products"} — approving needs an override reason.`);
+    }
+
+    db.transaction(() => {
+      if (data.decision === "approve") {
+        db.prepare(
+          `UPDATE sales SET approval_status = 'approved', approved_by = ?, approved_at = datetime('now', '+330 minutes'), auto_approved = 0, decision_reason = ? WHERE id = ?`
+        ).run(actorOf(req).id, data.reason ?? null, sale.id);
+      } else {
+        db.prepare(
+          `UPDATE sales SET approval_status = 'declined', approved_by = ?, approved_at = datetime('now', '+330 minutes'), decision_reason = ? WHERE id = ?`
+        ).run(actorOf(req).id, data.reason!, sale.id);
+        releaseHold(sale.id);
+      }
+    })();
+    logAudit(
+      actorOf(req),
+      data.decision === "approve" ? "exchange_request_approved" : "exchange_request_declined",
+      "sale",
+      sale.id,
+      `${sale.invoice}: delivery exchange ${data.decision === "approve" ? `approved${data.reason ? ` (no-returns override: ${data.reason})` : ""}` : `declined — ${data.reason}`}`
+    );
+    res.json(db.prepare(`SELECT * FROM sales WHERE id = ?`).get(sale.id));
+  })
+);
+
 // DELETE /api/sales/:id/quotation — cancel a quotation that was never
 // converted. Safe to actually delete (cascades to its sale_items) since
 // nothing about it was ever committed anywhere else — no stock, cash
@@ -1158,9 +1291,10 @@ salesRouter.delete(
     const sale = db.prepare(`SELECT id, status FROM sales WHERE id = ?`).get(req.params.id) as
       | { id: number; status: string }
       | undefined;
-    if (!sale) throw new ApiError(404, "Quotation not found");
-    if (sale.status !== "quotation") throw new ApiError(409, "Only a quotation that hasn't been converted can be cancelled this way.");
+    if (!sale) throw new ApiError(404, "Payment request not found");
+    if (sale.status !== "quotation") throw new ApiError(409, "Only a payment request that hasn't been converted can be cancelled this way.");
 
+    releaseHold(sale.id);
     db.prepare(`DELETE FROM sales WHERE id = ?`).run(sale.id);
     res.status(204).send();
   })
@@ -1337,7 +1471,7 @@ salesRouter.put(
     const { reason } = z.object({ reason: z.string().trim().max(200).optional() }).parse(req.body);
     const sale = db.prepare(`SELECT * FROM sales WHERE id = ?`).get(req.params.id) as any;
     if (!sale) throw new ApiError(404, "Sale not found");
-    if (sale.status === "quotation") throw new ApiError(409, "A quotation hasn't earned any points.");
+    if (sale.status === "quotation") throw new ApiError(409, "A payment request hasn't earned any points.");
     if (sale.is_voided) throw new ApiError(409, "This sale was voided — its points were already reversed.");
     if (sale.is_wholesale) throw new ApiError(409, "This sale is already marked wholesale.");
 
@@ -1397,6 +1531,20 @@ salesRouter.put(
          ORDER BY ei.status LIMIT 1`
       )
       .get(sale.id) as { status: string; new_invoice: string } | undefined;
+    const pickedUp = db
+      .prepare(
+        `SELECT oi.status FROM online_return_items oi JOIN sale_items si ON si.id = oi.sale_item_id
+         WHERE si.sale_id = ? AND oi.status IN ('awaiting', 'received') ORDER BY oi.status LIMIT 1`
+      )
+      .get(sale.id) as { status: string } | undefined;
+    if (pickedUp) {
+      throw new ApiError(
+        409,
+        pickedUp.status === "awaiting"
+          ? "Items on this invoice are on their way back by delivery (a return) and are still with the customer — cancel that return first, then this invoice can be voided."
+          : "Items on this invoice have already come back by delivery — they were returned and the customer was paid back, so this invoice can't be voided as well."
+      );
+    }
     if (swapped) {
       throw new ApiError(
         409,
