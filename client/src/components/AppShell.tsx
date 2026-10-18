@@ -280,7 +280,7 @@ export default function AppShell() {
           transform transition-transform duration-300 ease-in-out
           ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} lg:translate-x-0`}
       >
-        <div className="p-4 lg:p-6 border-b border-gray-800 space-y-1 flex-shrink-0">
+        <div className="p-4 lg:p-6 short:lg:p-3 border-b border-gray-800 space-y-1 flex-shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <ShoppingBag size={24} className="text-white" />
@@ -298,7 +298,7 @@ export default function AppShell() {
           <p className="text-xs lg:text-sm text-gray-400">{inCashierMode ? "Cashier mode" : isAdmin ? "Admin Console" : "Staff Console"}</p>
         </div>
 
-        <div className="flex-1 p-3 lg:p-4 space-y-1 lg:space-y-2 overflow-y-auto">
+        <div className="flex-1 p-3 short:lg:p-2 space-y-1 short:lg:space-y-0.5 overflow-y-auto">
           {visibleMenu.map((item) => {
             const Icon = item.icon;
             const active = isParentActive(item);
@@ -311,7 +311,7 @@ export default function AppShell() {
                   <button
                     onClick={() => toggleMenu(item.id)}
                     title={navShortcutHint(item.path)}
-                    className={`w-full flex items-center justify-between gap-2 lg:gap-3 px-3 lg:px-4 py-2 lg:py-3 rounded-xl transition text-sm lg:text-base
+                    className={`w-full flex items-center justify-between gap-2 lg:gap-3 px-3 lg:px-4 py-2 lg:py-2.5 short:lg:py-1.5 rounded-xl transition text-sm lg:text-base
                       ${active ? "bg-white text-black font-medium" : "text-gray-300 hover:bg-gray-900"}`}
                   >
                     <div className="flex items-center gap-2 lg:gap-3">
@@ -325,7 +325,7 @@ export default function AppShell() {
                     to={item.path}
                     onClick={handleLinkClick}
                     title={navShortcutHint(item.path)}
-                    className={`flex items-center gap-2 lg:gap-3 px-3 lg:px-4 py-2 lg:py-3 rounded-xl transition text-sm lg:text-base
+                    className={`flex items-center gap-2 lg:gap-3 px-3 lg:px-4 py-2 lg:py-2.5 short:lg:py-1.5 rounded-xl transition text-sm lg:text-base
                       ${active ? "bg-white text-black font-medium" : "text-gray-300 hover:bg-gray-900"}`}
                   >
                     <Icon size={16} />
@@ -352,7 +352,7 @@ export default function AppShell() {
                           to={sub.path}
                           onClick={handleLinkClick}
                           title={navShortcutHint(sub.path)}
-                          className={`flex items-center gap-2 lg:gap-3 px-3 lg:px-4 py-1.5 lg:py-2 text-xs lg:text-sm rounded-lg transition
+                          className={`flex items-center gap-2 lg:gap-3 px-3 lg:px-4 py-1.5 short:py-1 text-xs lg:text-sm rounded-lg transition
                             ${subActive ? "bg-gray-800 text-white font-medium" : "text-gray-400 hover:text-white hover:bg-gray-800/50"}`}
                         >
                           <SubIcon size={12} />
@@ -371,10 +371,10 @@ export default function AppShell() {
           <Link
             to="/profile"
             onClick={handleLinkClick}
-            className={`mx-3 lg:mx-4 my-2 lg:my-3 flex items-center gap-2 lg:gap-3 px-2 lg:px-3 py-2 rounded-xl transition
+            className={`mx-3 lg:mx-4 my-2 lg:my-3 short:lg:my-1 flex items-center gap-2 lg:gap-3 px-2 lg:px-3 py-2 rounded-xl transition
               ${isOnProfile ? "bg-gray-800" : "hover:bg-gray-900"}`}
           >
-            <div className="w-8 h-8 lg:w-10 lg:h-10 bg-gray-700 rounded-full flex items-center justify-center flex-shrink-0">
+            <div className="w-8 h-8 lg:w-10 lg:h-10 short:lg:w-8 short:lg:h-8 bg-gray-700 rounded-full flex items-center justify-center flex-shrink-0">
               <span className="text-xs lg:text-sm font-medium text-white">{initials}</span>
             </div>
             <div className="flex-1 min-w-0 hidden lg:block">
@@ -382,7 +382,7 @@ export default function AppShell() {
               <p className="text-xs text-gray-500 capitalize">{inCashierMode ? "Cashier mode" : user?.role}</p>
             </div>
           </Link>
-          <div className="px-3 lg:px-4 pb-3 lg:pb-4 flex items-stretch gap-2">
+          <div className="px-3 lg:px-4 pb-3 lg:pb-4 short:lg:pb-2 flex items-stretch gap-2">
             <CashierModeControl onDone={handleLinkClick} />
             <button
               onClick={handleLogout}
