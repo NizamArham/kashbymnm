@@ -104,7 +104,7 @@ export default function ReturnsPage() {
             options={[
               { value: "request", label: "Request a Return" },
               { value: "approve", label: waiting > 0 ? `To approve (${waiting})` : "To approve" },
-              { value: "all", label: "Returns" },
+              { value: "all", label: "In-store returns" },
               { value: "pickups", label: "On the way back" },
             ]}
           />

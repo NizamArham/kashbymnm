@@ -162,7 +162,7 @@ export default function CourierBalanceModal({
         </FormGroup>
 
         <p className="text-xs text-gray-400 mb-3">
-          No money moves — this only corrects what's owed. It's saved with your reason, shown on the Couriers page and in the Audit Log, and can be undone.
+          No money moves — this only corrects what's owed. It's saved with your reason, shown on the Courier settlements page and in the Audit Log, and can be undone.
         </p>
 
         {error && <ErrorText>{error}</ErrorText>}

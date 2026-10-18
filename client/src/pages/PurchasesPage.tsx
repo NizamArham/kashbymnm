@@ -560,7 +560,7 @@ export default function PurchasesPage() {
           { value: "record", label: "Record Purchase" },
           { value: "pending", label: `Awaiting Sorting${pending.length > 0 ? ` (${pending.length})` : ""}` },
           { value: "history", label: "History" },
-          { value: "returns", label: "Returns" },
+          { value: "returns", label: "Supplier returns" },
         ]}
       />
       <div className="mt-5">

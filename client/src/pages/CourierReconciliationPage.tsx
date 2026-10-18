@@ -147,7 +147,7 @@ export default function CourierReconciliationPage() {
   return (
     <div>
       <PageHeader
-        title="Settlements"
+        title="Courier settlements"
         subtitle="Track COD collected, courier charges, weekly settlements, and carry-forward balances."
         action={
           <Button onClick={() => navigate("/couriers/history")} className="inline-flex items-center gap-1.5">

@@ -139,7 +139,7 @@ export default function CourierPaymentRecordsPage() {
     <div>
       <button onClick={() => navigate("/couriers")} className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 mb-3">
         <ArrowLeft size={14} />
-        Couriers
+        Courier settlements
       </button>
 
       <PageHeader title="Payment records" subtitle="What each courier has paid you, and every correction made to their balance." />
