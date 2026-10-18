@@ -352,6 +352,9 @@ export default function DeliveriesPage() {
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // The page opens on the first stage that has orders in it (not always an empty Pending); once that's done — or the
+  // person has picked a tab themselves — it never moves them again.
+  const tabChosen = useRef(false);
 
   const [packingDelivery, setPackingDelivery] = useState<Delivery | null>(null);
   // The order whose courier is being changed from the list itself.
@@ -394,6 +397,34 @@ export default function DeliveriesPage() {
       return saleDate >= startDate && saleDate <= endDate;
     });
   }, [deliveries, activeTab, startDate, endDate]);
+
+  useEffect(() => {
+    if (loading || tabChosen.current) return;
+    tabChosen.current = true;
+    const inRange = (d: Delivery) => {
+      if (!startDate || !endDate || !d.sale_date) return true;
+      const saleDate = d.sale_date.slice(0, 10);
+      return saleDate >= startDate && saleDate <= endDate;
+    };
+    const first = TABS.slice(0, 3).find((tab) => deliveries.some((d) => d.delivery_status === tab.key && onThePipeline(d) && inRange(d)));
+    if (first) setActiveTab(first.key);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, deliveries]);
+
+  // The stage chips are one strip that scrolls sideways when the screen is too narrow for them all; the one that's
+  // selected is kept in view, and a soft fade on the right says there is more.
+  const chipStrip = useRef<HTMLDivElement>(null);
+  const [moreChipsRight, setMoreChipsRight] = useState(false);
+  const checkChipScroll = () => {
+    const el = chipStrip.current;
+    if (el) setMoreChipsRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+  };
+  useEffect(() => {
+    chipStrip.current?.querySelector<HTMLElement>("[data-active-chip]")?.scrollIntoView({ inline: "center", block: "nearest" });
+    checkChipScroll();
+    window.addEventListener("resize", checkChipScroll);
+    return () => window.removeEventListener("resize", checkChipScroll);
+  }, [activeTab, showPickups, loading]);
 
   const returnedCount = deliveries.filter((d) => d.delivery_status === "returned").length;
   const cancelledCount = deliveries.filter((d) => d.delivery_status === "cancelled").length;
@@ -664,7 +695,8 @@ export default function DeliveriesPage() {
         }
       />
 
-      <div className="flex items-center gap-2 mb-5 flex-wrap">
+      <div className="relative mb-5">
+      <div ref={chipStrip} onScroll={checkChipScroll} className="flex items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {TABS.map((tab) => {
           const Icon = tab.icon;
           const count = deliveries.filter((d) => d.delivery_status === tab.key && onThePipeline(d)).length;
@@ -672,12 +704,14 @@ export default function DeliveriesPage() {
           return (
             <button
               key={tab.key}
+              data-active-chip={isActive ? "" : undefined}
               onClick={() => {
+                tabChosen.current = true;
                 setShowPickups(false);
                 setActiveTab(tab.key);
                 setExpandedId(null);
               }}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition ${
+              className={`flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-2 rounded-xl text-sm font-medium transition ${
                 isActive ? "bg-black text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
               }`}
             >
@@ -687,14 +721,16 @@ export default function DeliveriesPage() {
             </button>
           );
         })}
-        <div className="w-px h-6 bg-gray-200 mx-1" />
+        <div className="w-px h-6 flex-shrink-0 bg-gray-200 mx-1" />
         <button
+          data-active-chip={!showPickups && activeTab === "returned" ? "" : undefined}
           onClick={() => {
+            tabChosen.current = true;
             setShowPickups(false);
             setActiveTab("returned");
             setExpandedId(null);
           }}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition ${
+          className={`flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-2 rounded-xl text-sm font-medium transition ${
             !showPickups && activeTab === "returned" ? "bg-red-600 text-white" : "bg-red-50 text-red-600 hover:bg-red-100"
           }`}
         >
@@ -703,12 +739,14 @@ export default function DeliveriesPage() {
           <span className={`text-xs px-1.5 py-0.5 rounded-full ${activeTab === "returned" ? "bg-white/20" : "bg-white"}`}>{returnedCount}</span>
         </button>
         <button
+          data-active-chip={!showPickups && activeTab === "cancelled" ? "" : undefined}
           onClick={() => {
+            tabChosen.current = true;
             setShowPickups(false);
             setActiveTab("cancelled");
             setExpandedId(null);
           }}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition ${
+          className={`flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-2 rounded-xl text-sm font-medium transition ${
             !showPickups && activeTab === "cancelled" ? "bg-gray-700 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
           }`}
         >
@@ -716,14 +754,16 @@ export default function DeliveriesPage() {
           Cancelled
           <span className={`text-xs px-1.5 py-0.5 rounded-full ${!showPickups && activeTab === "cancelled" ? "bg-white/20" : "bg-white"}`}>{cancelledCount}</span>
         </button>
-        <div className="w-px h-6 bg-gray-200 mx-1" />
+        <div className="w-px h-6 flex-shrink-0 bg-gray-200 mx-1" />
         <button
+          data-active-chip={showPickups ? "" : undefined}
           onClick={() => {
+            tabChosen.current = true;
             setShowPickups(true);
             setExpandedId(null);
           }}
           title="Items coming back to the shop — customers' returns and the old items of exchanges"
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition ${
+          className={`flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-2 rounded-xl text-sm font-medium transition ${
             showPickups ? "bg-black text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
           }`}
         >
@@ -731,6 +771,8 @@ export default function DeliveriesPage() {
           Returns on the way
           <span className={`text-xs px-1.5 py-0.5 rounded-full ${showPickups ? "bg-white/20" : "bg-white text-gray-500"}`}>{openPickups}</span>
         </button>
+      </div>
+      {moreChipsRight && <div className="pointer-events-none absolute right-0 top-0 h-full w-10 bg-gradient-to-l from-white to-transparent" />}
       </div>
 
       {error && <ErrorText>{error}</ErrorText>}
