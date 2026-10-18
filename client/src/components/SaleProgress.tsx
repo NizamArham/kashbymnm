@@ -19,31 +19,56 @@ interface Step {
 const money = (n: number) => `Rs. ${Math.round(n).toLocaleString()}`;
 const METHOD: Record<string, string> = { cash: "Cash", bank_transfer: "Bank transfer", card: "Card", credit: "On credit" };
 
+// "2026-10-18T18:43:00" / "2026-10-18 18:43:07" -> comparable text
+const stamp = (v: string | null | undefined) => (v ? v.replace("T", " ") : null);
+
 function steps(sale: Sale): Step[] | null {
   const status = sale.delivery_status;
   if (sale.sale_type !== "online" || !status) return null;
   const rank = ({ pending: 0, packed: 1, dispatched: 2, delivered: 3 } as Record<string, number>)[status] ?? 0;
-  const lastPaid = [...(sale.payments ?? [])].reverse().find((p) => p.type === "income")?.entry_date ?? null;
   const paid = sale.payment_status === "paid";
+  // When it became fully paid: the last payment the cash book has against the bill (a courier's settlement leaves none).
+  const paidAt = paid ? stamp([...(sale.payments ?? [])].reverse().find((p) => p.type === "income")?.entry_date) : null;
 
-  const list: Step[] = [{ key: "ordered", label: "Ordered", note: whenLabel(sale.date.replace("T", " ")), state: "done" }];
+  // The delivery stages, in the one order they can happen...
+  const stages: (Step & { at: string | null })[] = [];
   if (status === "returned" || status === "cancelled") {
-    list.push({ key: status, label: status === "returned" ? "Returned" : "Cancelled", note: null, state: "bad" });
+    stages.push({ key: status, label: status === "returned" ? "Returned" : "Cancelled", note: null, state: "bad", at: null });
   } else {
-    const at = [null, sale.delivery_packed_at, sale.delivery_dispatched_at, sale.delivery_delivered_at];
+    const at = [null, stamp(sale.delivery_packed_at), stamp(sale.delivery_dispatched_at), stamp(sale.delivery_delivered_at)];
     ["Packed", "Dispatched", "Delivered"].forEach((label, i) =>
-      list.push({ key: label.toLowerCase(), label, note: rank >= i + 1 && at[i + 1] ? whenLabel(at[i + 1]!) : null, state: rank >= i + 1 ? "done" : "todo" })
+      stages.push({ key: label.toLowerCase(), label, note: rank >= i + 1 && at[i + 1] ? whenLabel(at[i + 1]!) : null, state: rank >= i + 1 ? "done" : "todo", at: rank >= i + 1 ? at[i + 1] : null })
     );
   }
-  list.push({
+
+  const payStep: Step = {
     key: "paid",
     label: "Paid",
-    note: paid ? (lastPaid ? whenLabel(lastPaid) : null) : sale.payment_status === "partial" ? `${money(sale.amount_paid)} of ${money(sale.total)}` : sale.payment_method === "credit" ? "On credit" : null,
+    note: paid ? (paidAt ? whenLabel(paidAt) : null) : sale.payment_status === "partial" ? `${money(sale.amount_paid)} of ${money(sale.total)}` : sale.payment_method === "credit" ? "On credit" : null,
     state: paid ? "done" : "todo",
-  });
+  };
+
+  // ...and Paid goes where it happened. Paid up front it comes right after Ordered, before the parcel is even packed; paid on
+  // delivery it comes last. Until it's paid it waits at the end. A payment with no time on it (a courier's settlement) can only
+  // have come after the parcel was delivered, so it follows the last stage that has happened.
+  let paidIndex = stages.length;
+  if (paid) {
+    const later = stages.findIndex((st) => st.state !== "todo" && st.at && paidAt && st.at > paidAt);
+    if (later >= 0) paidIndex = later;
+    else {
+      const todoFrom = stages.findIndex((st) => st.state === "todo");
+      paidIndex = todoFrom >= 0 ? todoFrom : stages.length;
+    }
+    if (status === "returned" || status === "cancelled") paidIndex = 0; // paid, then the parcel came back
+  }
+  const list: Step[] = [{ key: "ordered", label: "Ordered", note: whenLabel(sale.date.replace("T", " ")), state: "done" }, ...stages];
+  // A parcel that came back (or was cancelled) with nothing ever paid on it has no payment step to show.
+  const nothingToPay = (status === "returned" || status === "cancelled") && !(sale.amount_paid > 0);
+  if (!nothingToPay) list.splice(1 + paidIndex, 0, payStep);
+
   // The first thing not yet done is where it is now (a returned / cancelled parcel has nothing further to do).
   if (status !== "returned" && status !== "cancelled") {
-    const next = list.find((s) => s.state === "todo");
+    const next = list.find((st) => st.state === "todo");
     if (next) next.state = "current";
   }
   return list;
