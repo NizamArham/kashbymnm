@@ -5,7 +5,7 @@ import { api, ApiRequestError } from "../lib/api";
 import { Customer, CustomerAddress, BankAccount, CustomerGender } from "../lib/types";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { PageHeader, Card, Table, Th, Td, Input, Button, EmptyState, ErrorText, SuccessText, Label, FormGroup, Dropdown, DatePicker, HelpHint, TabToggle, SortHeader, Badge, Modal } from "../components/ui";
+import { PageHeader, Card, Table, Th, Td, Input, Button, EmptyState, ErrorText, SuccessText, Label, FormGroup, Dropdown, DatePicker, HelpHint, TabToggle, SortHeader, Badge, Modal, ActionMenu } from "../components/ui";
 import { CityPicker } from "../components/CityPicker";
 import LoyaltyAdjustModal from "../components/LoyaltyAdjustModal";
 import StoreCreditRefundModal from "../components/StoreCreditRefundModal";
@@ -1057,69 +1057,64 @@ export default function ViewCustomersPage() {
 
                             {expandedTab === "overview" && (
                               <div className="bg-white border border-gray-200 rounded-xl p-4">
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                                  <div>
+                                {/* Four numbers, and under each the one button (or menu) that is about it. */}
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-5 text-sm">
+                                  <div className="flex flex-col">
                                     <p className="text-xs text-gray-400">Loyalty points</p>
                                     <p className="text-gray-900 font-medium">{expandedDetail.loyalty_points}</p>
-                                    <button
-                                      onClick={() => navigate(`/customers/${expandedDetail.id}/loyalty-history`)}
-                                      className="inline-flex items-center gap-1 text-xs text-black underline hover:no-underline mt-1"
-                                    >
-                                      <Star size={12} />
-                                      View points transactions
-                                    </button>
-                                    {expandedDetail.loyalty_points >= 500 && (
-                                      <button
-                                        onClick={() => openRedeem(expandedDetail)}
-                                        className="inline-flex items-center gap-1 text-xs text-black underline hover:no-underline mt-1 ml-3"
-                                      >
-                                        <Star size={12} />
-                                        Redeem
-                                      </button>
-                                    )}
-                                    {expandedDetail.phone && (
-                                      <a
-                                        href={whatsappMessageLink(expandedDetail.phone, loyaltyPointsMessage(expandedDetail.name, expandedDetail.loyalty_points))}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        title="Opens WhatsApp with their points balance typed in, ready to send"
-                                        className="inline-flex items-center gap-1 text-xs text-black underline hover:no-underline mt-1 ml-3"
-                                      >
-                                        <MessageCircle size={12} />
-                                        Send points
-                                      </a>
-                                    )}
-                                    {isAdmin && (
-                                      <button
-                                        onClick={() => setLoyaltyTarget(expandedDetail)}
-                                        className="inline-flex items-center gap-1 text-xs text-black underline hover:no-underline mt-1 ml-3"
-                                      >
-                                        <Pencil size={12} />
-                                        Adjust
-                                      </button>
-                                    )}
                                     {expandedDetail.loyalty_blocked === 1 && (
                                       <p className="text-xs text-gray-500 mt-1">
                                         Doesn't earn points{expandedDetail.loyalty_block_reason ? ` — ${expandedDetail.loyalty_block_reason}` : ""}
                                       </p>
                                     )}
+                                    <div className="mt-auto pt-3">
+                                      <ActionMenu
+                                        label="Points"
+                                        icon={<Star size={12} />}
+                                        align="left"
+                                        triggerClassName="w-full"
+                                        items={[
+                                          { label: "Points history", icon: <Star size={14} />, onClick: () => navigate(`/customers/${expandedDetail.id}/loyalty-history`) },
+                                          ...(expandedDetail.loyalty_points >= 500
+                                            ? [{ label: "Redeem points", icon: <Star size={14} />, onClick: () => openRedeem(expandedDetail) }]
+                                            : []),
+                                          // Opens WhatsApp with their points balance typed in, ready to send.
+                                          ...(expandedDetail.phone
+                                            ? [
+                                                {
+                                                  label: "Send points on WhatsApp",
+                                                  icon: <MessageCircle size={14} />,
+                                                  onClick: () =>
+                                                    window.open(
+                                                      whatsappMessageLink(expandedDetail.phone!, loyaltyPointsMessage(expandedDetail.name, expandedDetail.loyalty_points)),
+                                                      "_blank",
+                                                      "noopener,noreferrer"
+                                                    ),
+                                                },
+                                              ]
+                                            : []),
+                                          ...(isAdmin ? [{ label: "Adjust points", icon: <Pencil size={14} />, onClick: () => setLoyaltyTarget(expandedDetail) }] : []),
+                                        ]}
+                                      />
+                                    </div>
                                   </div>
-                                  <div>
+
+                                  <div className="flex flex-col">
                                     <p className="text-xs text-gray-400">Balance due</p>
                                     <p className="text-gray-900 font-medium">
                                       {expandedDetail.balance_due > 0 ? `Rs. ${expandedDetail.balance_due.toLocaleString()}` : "Settled"}
                                     </p>
-                                    {expandedDetail.balance_due > 0 && (
-                                      <button
-                                        onClick={() => openPayment(expandedDetail)}
-                                        className="inline-flex items-center gap-1 text-xs text-black underline hover:no-underline mt-1"
-                                      >
-                                        <Wallet size={12} />
-                                        Record Payment
-                                      </button>
-                                    )}
+                                    <div className="mt-auto pt-3">
+                                      {expandedDetail.balance_due > 0 && (
+                                        <Button variant="primary" size="sm" onClick={() => openPayment(expandedDetail)} className="w-full inline-flex items-center justify-center gap-1.5">
+                                          <Wallet size={12} />
+                                          Record payment
+                                        </Button>
+                                      )}
+                                    </div>
                                   </div>
-                                  <div>
+
+                                  <div className="flex flex-col">
                                     <p className="text-xs text-gray-400">Store credit</p>
                                     <p className="text-gray-900 font-medium">
                                       {expandedDetail.store_credit_balance > 0
@@ -1157,63 +1152,58 @@ export default function ViewCustomersPage() {
                                         <p className="text-[10px] text-gray-400">Applied automatically at checkout</p>
                                       </div>
                                     )}
-                                    {isAdmin && expandedDetail.store_credit_balance > 0 && (
-                                      <button
-                                        onClick={() => setRefundCreditFor(expandedDetail)}
-                                        className="mt-1.5 text-xs text-black underline hover:no-underline"
-                                        title="Pay some of this store credit back as cash or a bank transfer"
-                                      >
-                                        Refund store credit
-                                      </button>
-                                    )}
-                                    {isAdmin && (
-                                      <button
-                                        onClick={() => setAddCreditFor(expandedDetail)}
-                                        className="mt-1.5 ml-3 text-xs text-black underline hover:no-underline"
-                                        title="Give this customer store credit by hand, with a reason"
-                                      >
-                                        Add store credit
-                                      </button>
-                                    )}
+                                    <div className="mt-auto pt-3">
+                                      {isAdmin && (
+                                        <ActionMenu
+                                          label="Store credit"
+                                          icon={<Wallet size={12} />}
+                                          align="left"
+                                          triggerClassName="w-full"
+                                          items={[
+                                            { label: "Add store credit", icon: <Plus size={14} />, onClick: () => setAddCreditFor(expandedDetail) },
+                                            ...(expandedDetail.store_credit_balance > 0
+                                              ? [{ label: "Refund store credit", icon: <Wallet size={14} />, onClick: () => setRefundCreditFor(expandedDetail) }]
+                                              : []),
+                                          ]}
+                                        />
+                                      )}
+                                    </div>
                                   </div>
-                                  <div>
+
+                                  <div className="flex flex-col">
                                     <p className="text-xs text-gray-400">Last order</p>
                                     <p className="text-gray-900 font-medium">
                                       {expandedDetail.last_order_date ? expandedDetail.last_order_date.slice(0, 10) : "No orders yet"}
                                     </p>
-                                    <button
-                                      onClick={() => navigate(`/customers/${expandedDetail.id}/orders`)}
-                                      className="inline-flex items-center gap-1 text-xs text-black underline hover:no-underline mt-1"
-                                    >
-                                      <ShoppingBag size={12} />
-                                      View order history
-                                    </button>
-                                    <button
-                                      onClick={() => navigate(`/customers/${expandedDetail.id}/payment-history`)}
-                                      className="inline-flex items-center gap-1 text-xs text-black underline hover:no-underline mt-1 ml-3"
-                                    >
-                                      <Receipt size={12} />
-                                      View payment history
-                                    </button>
-                                    <button
-                                      disabled={slippingBalance}
-                                      onClick={async () => {
-                                        setSlippingBalance(true);
-                                        setError(null);
-                                        try {
-                                          await downloadBalanceSlip(expandedDetail.id);
-                                        } catch (err) {
-                                          setError(err instanceof Error ? err.message : "Couldn't create the balance slip");
-                                        } finally {
-                                          setSlippingBalance(false);
-                                        }
-                                      }}
-                                      className="inline-flex items-center gap-1 text-xs text-black underline hover:no-underline mt-1 ml-3 disabled:opacity-50"
-                                      title="Quick slip: what they owe right now, with our bank details"
-                                    >
-                                      <Wallet size={12} />
-                                      {slippingBalance ? "Preparing..." : "Balance slip"}
-                                    </button>
+                                    <div className="mt-auto pt-3">
+                                      <ActionMenu
+                                        label={slippingBalance ? "Preparing..." : "History"}
+                                        icon={<Receipt size={12} />}
+                                        align="left"
+                                        triggerClassName="w-full"
+                                        items={[
+                                          { label: "Order history", icon: <ShoppingBag size={14} />, onClick: () => navigate(`/customers/${expandedDetail.id}/orders`) },
+                                          { label: "Payment history", icon: <Receipt size={14} />, onClick: () => navigate(`/customers/${expandedDetail.id}/payment-history`) },
+                                          {
+                                            // Quick slip: what they owe right now, with our bank details.
+                                            label: "Balance slip",
+                                            icon: <FileText size={14} />,
+                                            onClick: async () => {
+                                              if (slippingBalance) return;
+                                              setSlippingBalance(true);
+                                              setError(null);
+                                              try {
+                                                await downloadBalanceSlip(expandedDetail.id);
+                                              } catch (err) {
+                                                setError(err instanceof Error ? err.message : "Couldn't create the balance slip");
+                                              } finally {
+                                                setSlippingBalance(false);
+                                              }
+                                            },
+                                          },
+                                        ]}
+                                      />
+                                    </div>
                                   </div>
                                 </div>
 
@@ -1235,40 +1225,30 @@ export default function ViewCustomersPage() {
                                   </div>
 
                                   {isAdmin && (
-                                    <div className="flex items-center gap-3 text-xs">
-                                      {expandedDetail.is_suspended === 1 ? (
-                                        <button
-                                          onClick={() => {
-                                            setReactivateTarget(expandedDetail);
-                                            setReactivateReason("");
-                                            setReactivateError(null);
-                                          }}
-                                          className="inline-flex items-center gap-1 text-gray-500 hover:text-black"
-                                        >
-                                          <UserCheck size={12} />
-                                          Reactivate
-                                        </button>
-                                      ) : (
-                                        <button
-                                          onClick={() => {
-                                            setSuspendTarget(expandedDetail);
-                                            setSuspendReason("");
-                                            setSuspendError(null);
-                                          }}
-                                          className="inline-flex items-center gap-1 text-gray-500 hover:text-black"
-                                        >
-                                          <UserX size={12} />
-                                          Suspend
-                                        </button>
-                                      )}
-                                      <button
-                                        onClick={() => openDelete(expandedDetail)}
-                                        className="inline-flex items-center gap-1 text-gray-500 hover:text-red-600"
-                                      >
-                                        <Trash2 size={12} />
-                                        Delete
-                                      </button>
-                                    </div>
+                                    <ActionMenu
+                                      items={[
+                                        expandedDetail.is_suspended === 1
+                                          ? {
+                                              label: "Reactivate customer",
+                                              icon: <UserCheck size={14} />,
+                                              onClick: () => {
+                                                setReactivateTarget(expandedDetail);
+                                                setReactivateReason("");
+                                                setReactivateError(null);
+                                              },
+                                            }
+                                          : {
+                                              label: "Suspend customer",
+                                              icon: <UserX size={14} />,
+                                              onClick: () => {
+                                                setSuspendTarget(expandedDetail);
+                                                setSuspendReason("");
+                                                setSuspendError(null);
+                                              },
+                                            },
+                                        { label: "Delete customer", icon: <Trash2 size={14} />, danger: true, onClick: () => openDelete(expandedDetail) },
+                                      ]}
+                                    />
                                   )}
                                 </div>
                               </div>

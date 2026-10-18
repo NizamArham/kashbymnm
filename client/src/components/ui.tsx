@@ -751,10 +751,23 @@ export function RowActions({ actions }: { actions: RowAction[] }) {
 // The "three dots" button at the end of a row, opening a small list of actions.
 // The list is drawn above everything else (not inside the table), so a table
 // that scrolls or clips its content can't cut it off, and it opens upward when
-// there's no room below.
-export function ActionMenu({ items }: { items: { label: string; icon?: ReactNode; onClick: () => void }[] }) {
+// there's no room below. Give it a `label` and it's a labelled button with a
+// chevron instead ("Points ▾"), for a group of related actions in a panel.
+export function ActionMenu({
+  items,
+  label,
+  icon,
+  align = "right",
+  triggerClassName = "",
+}: {
+  items: { label: string; icon?: ReactNode; onClick: () => void; danger?: boolean }[];
+  label?: string;
+  icon?: ReactNode;
+  align?: "left" | "right";
+  triggerClassName?: string;
+}) {
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ top: number; right: number; up: boolean }>({ top: 0, right: 0, up: false });
+  const [pos, setPos] = useState<{ top: number; right: number; left: number; up: boolean }>({ top: 0, right: 0, left: 0, up: false });
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -764,7 +777,13 @@ export function ActionMenu({ items }: { items: { label: string; icon?: ReactNode
       const r = buttonRef.current.getBoundingClientRect();
       const roomBelow = window.innerHeight - r.bottom;
       const needed = items.length * 38 + 12;
-      setPos({ top: roomBelow < needed ? r.top : r.bottom, right: window.innerWidth - r.right, up: roomBelow < needed });
+      setPos({
+        top: roomBelow < needed ? r.top : r.bottom,
+        right: window.innerWidth - r.right,
+        // A menu that hangs off the left edge of its button mustn't run off the right edge of the screen.
+        left: Math.max(8, Math.min(r.left, window.innerWidth - 216)),
+        up: roomBelow < needed,
+      });
     }
     setOpen((o) => !o);
   }
@@ -792,22 +811,37 @@ export function ActionMenu({ items }: { items: { label: string; icon?: ReactNode
 
   return (
     <>
-      <button
-        ref={buttonRef}
-        type="button"
-        onClick={toggle}
-        title="Actions"
-        aria-label="Actions"
-        className="rounded-lg p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700"
-      >
-        <MoreVertical size={16} />
-      </button>
+      {label ? (
+        <button
+          ref={buttonRef}
+          type="button"
+          onClick={toggle}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          className={`inline-flex items-center justify-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition hover:bg-gray-50 ${triggerClassName}`}
+        >
+          {icon}
+          {label}
+          <ChevronDown size={12} className="text-gray-400" />
+        </button>
+      ) : (
+        <button
+          ref={buttonRef}
+          type="button"
+          onClick={toggle}
+          title="Actions"
+          aria-label="Actions"
+          className="rounded-lg p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700"
+        >
+          <MoreVertical size={16} />
+        </button>
+      )}
       {open &&
         createPortal(
           <div
             ref={menuRef}
             onClick={(e) => e.stopPropagation()}
-            style={{ position: "fixed", right: pos.right, ...(pos.up ? { bottom: window.innerHeight - pos.top + 4 } : { top: pos.top + 4 }) }}
+            style={{ position: "fixed", ...(align === "left" ? { left: pos.left } : { right: pos.right }), ...(pos.up ? { bottom: window.innerHeight - pos.top + 4 } : { top: pos.top + 4 }) }}
             className="z-[80] w-52 rounded-xl border border-gray-200 bg-white py-1 shadow-lg"
           >
             {items.map((item) => (
@@ -818,7 +852,9 @@ export function ActionMenu({ items }: { items: { label: string; icon?: ReactNode
                   setOpen(false);
                   item.onClick();
                 }}
-                className="flex w-full items-center gap-2 px-3.5 py-2 text-left text-sm text-gray-700 transition hover:bg-gray-50"
+                className={`flex w-full items-center gap-2 px-3.5 py-2 text-left text-sm transition ${
+                  item.danger ? "text-red-600 hover:bg-red-50" : "text-gray-700 hover:bg-gray-50"
+                }`}
               >
                 {item.icon}
                 {item.label}
