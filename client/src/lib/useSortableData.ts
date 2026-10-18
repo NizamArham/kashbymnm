@@ -27,6 +27,12 @@ export function useSortableData<T, K extends string>(
     }
   }
 
+  // Jump straight to a key and direction (a filter chip that implies an order).
+  function setSort(key: K, dir: SortDir) {
+    setSortKey(key);
+    setSortDir(dir);
+  }
+
   const sorted = useMemo(() => {
     const copy = [...data];
     copy.sort((a, b) => {
@@ -38,5 +44,5 @@ export function useSortableData<T, K extends string>(
     return copy;
   }, [data, sortKey, sortDir]);
 
-  return { sorted, sortKey, sortDir, toggleSort };
+  return { sorted, sortKey, sortDir, toggleSort, setSort };
 }

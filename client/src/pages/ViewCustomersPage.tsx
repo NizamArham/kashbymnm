@@ -12,6 +12,25 @@ import { findCustomers, CASHIER_SEARCH_MIN_CHARS } from "../lib/customerSearch";
 import { useAdminApproval } from "../components/AdminApproval";
 
 type CustomerSortKey = "priority" | "code" | "name" | "phone" | "loyalty" | "balance" | "last_order";
+// The groups an admin can narrow the list to.
+type Segment = "all" | "owes" | "credit" | "inactive";
+const SEGMENTS: { value: Segment; label: string; hint: string }[] = [
+  { value: "all", label: "All", hint: "Every customer" },
+  { value: "owes", label: "Owes me", hint: "Customers with a balance to pay" },
+  { value: "credit", label: "Has credit", hint: "Customers with store credit to spend" },
+  { value: "inactive", label: "Inactive", hint: "No order in the last 60 days (or never)" },
+];
+const INACTIVE_AFTER_DAYS = 60;
+function isInactive(c: Customer): boolean {
+  if (!c.last_order_date) return true;
+  const last = new Date(c.last_order_date.slice(0, 10) + "T00:00:00").getTime();
+  return Number.isNaN(last) || Date.now() - last > INACTIVE_AFTER_DAYS * 24 * 60 * 60 * 1000;
+}
+const inSegment = (c: Customer, segment: Segment): boolean =>
+  segment === "all" ||
+  (segment === "owes" && (c.balance_due ?? 0) > 0) ||
+  (segment === "credit" && (c.store_credit_balance ?? 0) > 0) ||
+  (segment === "inactive" && isInactive(c));
 
 // Find a customer; clicking one opens their page (/customers/<id>), which is where everything about them lives.
 export default function ViewCustomersPage() {
@@ -26,6 +45,7 @@ export default function ViewCustomersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [segment, setSegment] = useState<Segment>("all");
   const searchInputRef = useRef<HTMLInputElement>(null);
   useKeyboardShortcut("/", () => searchInputRef.current?.focus());
 
@@ -124,6 +144,19 @@ export default function ViewCustomersPage() {
     );
   }, [customers, query, isAdmin]);
 
+  // How many of the searched list fall in each group, and the list narrowed to the chosen one (admin only).
+  const segmentCounts = useMemo(() => {
+    const counts: Record<Segment, number> = { all: 0, owes: 0, credit: 0, inactive: 0 };
+    for (const c of filteredCustomers) for (const seg of SEGMENTS) if (inSegment(c, seg.value)) counts[seg.value]++;
+    return counts;
+  }, [filteredCustomers]);
+  const segmentCustomers = useMemo(
+    () => (isAdmin ? filteredCustomers.filter((c) => inSegment(c, segment)) : filteredCustomers),
+    [filteredCustomers, segment, isAdmin]
+  );
+  const owedTotal = useMemo(() => segmentCustomers.reduce((sum, c) => sum + Math.max(0, c.balance_due ?? 0), 0), [segmentCustomers]);
+  const creditTotal = useMemo(() => segmentCustomers.reduce((sum, c) => sum + Math.max(0, c.store_credit_balance ?? 0), 0), [segmentCustomers]);
+
   // Default order (sortKey "priority"), most actionable first:
   //   1. Pending  — customer owes money (balance_due > 0)
   //   2. Overpaid — has store credit and no debt
@@ -136,8 +169,8 @@ export default function ViewCustomersPage() {
     return 2; // settled
   }
 
-  const { sorted: sortedCustomers, sortKey, sortDir, toggleSort } = useSortableData<Customer, CustomerSortKey>(
-    filteredCustomers,
+  const { sorted: sortedCustomers, sortKey, sortDir, toggleSort, setSort } = useSortableData<Customer, CustomerSortKey>(
+    segmentCustomers,
     (c, key) => {
       switch (key) {
         case "priority":
@@ -213,13 +246,66 @@ export default function ViewCustomersPage() {
         )}
       </Card>
 
+      {isAdmin && !loading && customers.length > 0 && (
+        <>
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            {SEGMENTS.map((seg) => {
+              const active = segment === seg.value;
+              return (
+                <button
+                  key={seg.value}
+                  title={seg.hint}
+                  onClick={() => {
+                    setSegment(seg.value);
+                    // Each group has the order you'd want: biggest debt first, most credit first, longest quiet first.
+                    if (seg.value === "owes") setSort("balance", "asc");
+                    else if (seg.value === "credit") setSort("balance", "desc");
+                    else if (seg.value === "inactive") setSort("last_order", "asc");
+                    else setSort("priority", "asc");
+                  }}
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-sm font-medium transition ${
+                    active ? "bg-black text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  {seg.label}
+                  <span className={`text-xs tabular-nums ${active ? "text-white/70" : "text-gray-400"}`}>{segmentCounts[seg.value]}</span>
+                </button>
+              );
+            })}
+          </div>
+          {segment === "owes" && segmentCustomers.length > 0 && (
+            <p className="mb-3 text-xs text-gray-400">
+              {segmentCustomers.length} customer{segmentCustomers.length === 1 ? "" : "s"} owe <span className="font-medium text-red-600">Rs. {owedTotal.toLocaleString()}</span> in total
+            </p>
+          )}
+          {segment === "credit" && segmentCustomers.length > 0 && (
+            <p className="mb-3 text-xs text-gray-400">
+              {segmentCustomers.length} customer{segmentCustomers.length === 1 ? "" : "s"} hold <span className="font-medium text-green-700">Rs. {creditTotal.toLocaleString()}</span> in store credit
+            </p>
+          )}
+        </>
+      )}
+
       {error && <ErrorText>{error}</ErrorText>}
 
       {loading ? (
         <PageLoader />
-      ) : filteredCustomers.length === 0 ? (
+      ) : segmentCustomers.length === 0 ? (
         isAdmin ? (
-          <EmptyState icon={Users} title={query ? "No matching customers" : "No customers yet"} />
+          <EmptyState
+            icon={Users}
+            title={
+              query
+                ? "No matching customers"
+                : segment === "owes"
+                ? "Nobody owes you anything right now"
+                : segment === "credit"
+                ? "No customer has store credit"
+                : segment === "inactive"
+                ? "Everyone has ordered recently"
+                : "No customers yet"
+            }
+          />
         ) : (
           <EmptyState
             icon={Users}
