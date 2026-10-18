@@ -18,6 +18,7 @@ import { api, ApiRequestError } from "../lib/api";
 import { InventoryUnit } from "../lib/types";
 import { useAuth } from "../context/AuthContext";
 import ProductSalesModal from "../components/ProductSalesModal";
+import ProductsViewToggle from "../components/ProductsViewToggle";
 import {
   buildCategoryTree,
   buildGenderCategoryTree,
@@ -554,12 +555,18 @@ export default function InventoryCategoriesPage() {
         onMouseLeave={() => setHoveredNav(null)}
       >
         <div className="flex items-center gap-6">
-          <button
-            onClick={() => selectGender(ALL)}
-            className="text-2xl font-bold text-gray-900 tracking-tight hover:text-gray-600 transition-colors flex-shrink-0"
-          >
-            Stocks
-          </button>
+          {isAdmin ? (
+            <div className="flex-shrink-0">
+              <ProductsViewToggle current="stock" />
+            </div>
+          ) : (
+            <button
+              onClick={() => selectGender(ALL)}
+              className="text-2xl font-bold text-gray-900 tracking-tight hover:text-gray-600 transition-colors flex-shrink-0"
+            >
+              Stocks
+            </button>
+          )}
 
           <GenderNavTabs
             items={genderNavItems}

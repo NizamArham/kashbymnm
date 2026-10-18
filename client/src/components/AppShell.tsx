@@ -10,7 +10,6 @@ import {
   Truck,
   Landmark,
   Search,
-  Plus,
   Settings,
   ChevronDown,
   ChevronRight,
@@ -26,7 +25,6 @@ import {
   Banknote,
   PackageCheck,
   Send,
-  LayoutGrid,
   BarChart3,
   ClipboardList,
   Tag,
@@ -54,6 +52,8 @@ interface MenuItem {
   icon: any;
   adminOnly?: boolean;
   subItems?: MenuSubItem[];
+  // Other pages that count as being "in" this item (a plain link has no sub-items to say so).
+  alsoActiveOn?: string[];
 }
 
 export default function AppShell() {
@@ -117,11 +117,8 @@ export default function AppShell() {
       label: "Inventory",
       icon: Package,
       path: "/inventory",
-      subItems: [
-        { id: "stocks", label: "Stocks", path: "/inventory", icon: LayoutGrid },
-        { id: "manage-products", label: "Manage Products", path: "/products", icon: Settings, adminOnly: true },
-        { id: "add-product", label: "Add Product", path: "/products/add", icon: Plus, adminOnly: true },
-      ],
+      // Stock / Manage is a switch at the top of the page, and Add product a button on Manage.
+      alsoActiveOn: ["/products"],
     },
     {
       id: "directory",
@@ -248,6 +245,7 @@ export default function AppShell() {
 
   function isParentActive(item: MenuItem): boolean {
     if (item.id === "dashboard") return location.pathname === "/";
+    if (item.alsoActiveOn?.some((p) => location.pathname.startsWith(p))) return true;
     if (item.subItems) return item.subItems.some((sub) => location.pathname === sub.path);
     return location.pathname.startsWith(item.path);
   }

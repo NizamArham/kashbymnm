@@ -34,6 +34,7 @@ import {
   ActionMenu,
 } from "../components/ui";
 import ProductSalesModal from "../components/ProductSalesModal";
+import ProductsViewToggle from "../components/ProductsViewToggle";
 
 const LOW_STOCK_THRESHOLD = 5;
 const removalReasons: RemovalReason[] = ["Damaged", "Gifted", "Staff Use", "Stolen", "Lost", "Other"];
@@ -964,18 +965,15 @@ export default function ManageProductsPage() {
 
   return (
     <div>
-      {/* ================= Header — the same as Stocks ================= */}
+      {/* ================= Header — the same as Stock ================= */}
       <div
         className="sticky top-0 z-20 pb-3 mb-5 bg-white/95 backdrop-blur-sm border-b border-gray-200 relative"
         onMouseLeave={() => setHoveredNav(null)}
       >
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-          <button
-            onClick={() => selectGender(ALL)}
-            className="text-2xl font-bold text-gray-900 tracking-tight hover:text-gray-600 transition-colors flex-shrink-0"
-          >
-            Manage
-          </button>
+          <div className="flex-shrink-0">
+            <ProductsViewToggle current="manage" />
+          </div>
 
           <GenderNavTabs items={genderNavItems} activeValue={activeGender ?? ALL} onHover={setHoveredNav} onSelectGender={selectGender} />
 
@@ -987,7 +985,7 @@ export default function ManageProductsPage() {
               <Input
                 ref={searchInputRef}
                 className="pl-8 pr-7 py-2 text-sm"
-                placeholder="Search product, brand, category…"
+                placeholder="Search product, brand…"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => {
