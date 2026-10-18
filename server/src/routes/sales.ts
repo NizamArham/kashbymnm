@@ -19,6 +19,7 @@ import {
 } from "../lib/exchanges";
 import { pickupsForSale } from "../lib/onlineReturns";
 import { assertNotHeldByAnother, endOfDay, holdEndOf, holdUnits, releaseHold } from "../lib/stockHolds";
+import { LIVE_COD_SQL } from "../lib/deliveryCod";
 
 export const salesRouter = Router();
 
@@ -357,7 +358,7 @@ salesRouter.get(
       .prepare(
         `SELECT sales.*, customers.name as customer_name, customers.customer_code, customers.phone as customer_phone,
                 deliveries.delivery_partner, delivery_partners.kind as delivery_partner_kind,
-                deliveries.delivery_status as delivery_status, deliveries.cod_amount as delivery_cod_amount,
+                deliveries.delivery_status as delivery_status, ${LIVE_COD_SQL} as delivery_cod_amount,
                 (SELECT MAX(hi.held_until) FROM inventory hi
                   WHERE hi.held_for_sale_id = sales.id AND hi.held_until > datetime('now', '+330 minutes')) AS hold_until,
                 ${SALE_EXCHANGE_FLAGS_SQL}
@@ -521,7 +522,7 @@ salesRouter.get(
                 delivery_partners.kind as delivery_partner_kind,
                 deliveries.delivery_fee, deliveries.is_free_delivery as delivery_is_free,
                 deliveries.delivery_paid_by, deliveries.actual_fare as delivery_actual_fare,
-                deliveries.rider_direct as delivery_rider_direct, deliveries.cod_amount as delivery_cod_amount,
+                deliveries.rider_direct as delivery_rider_direct, ${LIVE_COD_SQL} as delivery_cod_amount,
                 deliveries.fee_paid as delivery_fee_paid, deliveries.pickup_prepaid as delivery_pickup_prepaid, deliveries.delivery_status,
                 deliveries.tracking_number as delivery_tracking_number
          FROM sales

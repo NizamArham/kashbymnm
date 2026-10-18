@@ -11,6 +11,7 @@ import { syncCitypak } from "../lib/courierSync";
 import { getPartner, planDelivery, OnDemandPaidBy } from "../lib/deliveryPartners";
 import { logAudit } from "../lib/auditLog";
 import { cancelExchangeForSale, exchangeForSale, recentExchangesBySale, restockSaleUnits } from "../lib/exchanges";
+import { liveCod } from "../lib/deliveryCod";
 
 export const deliveriesRouter = Router();
 
@@ -59,7 +60,7 @@ deliveriesRouter.get(
     const rows = db
       .prepare(
         `SELECT deliveries.*, sales.invoice, sales.date as sale_date, sales.total as sale_total,
-                sales.customer_id as customer_id,
+                sales.amount_paid as sale_amount_paid, sales.customer_id as customer_id,
                 customers.name as customer_name, customers.phone as customer_phone,
                 customer_addresses.address_line1, customer_addresses.address_line2, customer_addresses.city
          FROM deliveries
@@ -72,7 +73,8 @@ deliveriesRouter.get(
       .all(...params) as any[];
     // Exchanges ride along so a delivery that's also collecting an old item says so.
     const bySale = recentExchangesBySale();
-    res.json(rows.map((r) => ({ ...r, exchange: bySale.get(r.sale_id) ?? null })));
+    // An order paid since it was made no longer collects that money on delivery (see lib/deliveryCod).
+    res.json(rows.map((r) => ({ ...r, cod_amount: liveCod(r, { total: r.sale_total, amount_paid: r.sale_amount_paid }), exchange: bySale.get(r.sale_id) ?? null })));
   })
 );
 
@@ -138,7 +140,7 @@ deliveriesRouter.get(
     const row = db
       .prepare(
         `SELECT deliveries.*, sales.invoice, sales.date as sale_date, sales.total as sale_total,
-                sales.customer_id as customer_id,
+                sales.amount_paid as sale_amount_paid, sales.customer_id as customer_id,
                 customers.name as customer_name, customers.phone as customer_phone,
                 customer_addresses.address_line1, customer_addresses.address_line2, customer_addresses.city
          FROM deliveries
@@ -161,7 +163,7 @@ deliveriesRouter.get(
       )
       .all(row.sale_id);
 
-    res.json({ ...row, items, exchange: exchangeForSale(row.sale_id) });
+    res.json({ ...row, cod_amount: liveCod(row, { total: row.sale_total, amount_paid: row.sale_amount_paid }), items, exchange: exchangeForSale(row.sale_id) });
   })
 );
 
@@ -244,7 +246,7 @@ deliveriesRouter.post(
   asyncHandler(async (req, res) => {
     const delivery = db
       .prepare(
-        `SELECT deliveries.*, sales.invoice, sales.customer_id,
+        `SELECT deliveries.*, sales.invoice, sales.customer_id, sales.total as sale_total, sales.amount_paid as sale_amount_paid,
                 customers.name as customer_name, customers.phone as customer_phone,
                 customer_addresses.address_line1, customer_addresses.address_line2, customer_addresses.city
          FROM deliveries
@@ -290,7 +292,7 @@ deliveriesRouter.post(
       // has no exchange flag of its own — the description is what its rider sees).
       description: `${exchangeForSale(delivery.sale_id)?.status === "awaiting_pickup" ? "EXCHANGE - collect the return package. " : ""}Order ${delivery.invoice}`.slice(0, 128),
       weight_g: Math.round(weightKg * 1000),
-      cash_on_delivery_amount: delivery.cod_amount || 0,
+      cash_on_delivery_amount: liveCod(delivery, { total: delivery.sale_total, amount_paid: delivery.sale_amount_paid }) || 0,
       number_of_pieces: 1,
     });
 
@@ -322,7 +324,7 @@ deliveriesRouter.post(
   asyncHandler(async (req, res) => {
     const delivery = db
       .prepare(
-        `SELECT deliveries.*, sales.invoice,
+        `SELECT deliveries.*, sales.invoice, sales.total as sale_total, sales.amount_paid as sale_amount_paid,
                 customers.name as customer_name, customers.phone as customer_phone, customers.phone2 as customer_phone2,
                 customer_addresses.address_line1, customer_addresses.address_line2, customer_addresses.city
          FROM deliveries
@@ -379,7 +381,7 @@ deliveriesRouter.post(
       recipient_address: [delivery.address_line1, delivery.address_line2, postalCodeOf(String(delivery.city))].filter(Boolean).join(", "),
       recipient_city: fardarCityName(String(delivery.city)),
       // What the courier collects on delivery (0 when it's prepaid).
-      amount: delivery.cod_amount || 0,
+      amount: liveCod(delivery, { total: delivery.sale_total, amount_paid: delivery.sale_amount_paid }) || 0,
       exchange: isExchange,
     });
 
@@ -619,7 +621,12 @@ deliveriesRouter.put(
       throw new ApiError(409, "Only packed orders (with a waybill) can be dispatched.");
     }
 
-    db.prepare(`UPDATE deliveries SET delivery_status = 'dispatched', dispatched_at = datetime('now', '+330 minutes') WHERE id = ?`).run(req.params.id);
+    // The courier takes the parcel with whatever it's meant to collect right now — an order the customer has
+    // since paid goes out as paid — and that is the figure settlement works from from here on.
+    const sale = db.prepare(`SELECT total, amount_paid FROM sales WHERE id = ?`).get(existing.sale_id) as { total: number; amount_paid: number };
+    db.prepare(
+      `UPDATE deliveries SET delivery_status = 'dispatched', cod_amount = ?, dispatched_at = datetime('now', '+330 minutes') WHERE id = ?`
+    ).run(liveCod(existing, sale), req.params.id);
     const updated = db.prepare(`SELECT * FROM deliveries WHERE id = ?`).get(req.params.id);
     res.json(updated);
   })
