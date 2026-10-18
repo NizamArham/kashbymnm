@@ -591,7 +591,7 @@ export default function SaleDetailPage() {
                 <p className="text-xs text-gray-400">Bill to</p>
                 <p className="text-gray-900 font-medium">
                   {sale.customer_id && sale.customer_name ? (
-                    <RefLink to={`/customers?open=${sale.customer_id}`}>{sale.customer_name}</RefLink>
+                    <RefLink to={`/customers/${sale.customer_id}`}>{sale.customer_name}</RefLink>
                   ) : (
                     sale.customer_name ?? sale.deleted_customer_snapshot ?? "Walk-in"
                   )}

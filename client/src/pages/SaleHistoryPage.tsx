@@ -142,7 +142,7 @@ function filenameRangeTag(startIso: string, endIso: string): string {
 // sale has a real customer (not a walk-in, and not one that's since been deleted).
 function CustomerName({ sale }: { sale: Sale }) {
   if (sale.customer_id && sale.customer_name) {
-    return <RefLink to={`/customers?open=${sale.customer_id}`}>{sale.customer_name}</RefLink>;
+    return <RefLink to={`/customers/${sale.customer_id}`}>{sale.customer_name}</RefLink>;
   }
   return <>{sale.deleted_customer_snapshot ? `[Deleted: ${sale.deleted_customer_snapshot}]` : "Walk-in"}</>;
 }

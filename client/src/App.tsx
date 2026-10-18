@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useParams } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import AppShell from "./components/AppShell";
@@ -10,9 +10,6 @@ import InventoryCategoriesPage from "./pages/InventoryCategoriesPage";
 import AddProductPage from "./pages/AddProductPage";
 import ManageProductsPage from "./pages/ManageProductsPage";
 import AddCustomerPage from "./pages/AddCustomerPage";
-import CustomerOrderHistoryPage from "./pages/CustomerOrderHistoryPage";
-import CustomerPaymentHistoryPage from "./pages/CustomerPaymentHistoryPage";
-import CustomerLoyaltyHistoryPage from "./pages/CustomerLoyaltyHistoryPage";
 import WaybillGeneratorPage from "./pages/WaybillGeneratorPage";
 import SupplierPaymentHistoryPage from "./pages/SupplierPaymentHistoryPage";
 import ViewCustomersPage from "./pages/ViewCustomersPage";
@@ -52,6 +49,12 @@ function RoleAwareHome() {
   return <DashboardPage />;
 }
 
+// The orders / payment / points histories are tabs on the customer's page now; the old addresses lead there.
+function ToCustomerTab({ tab }: { tab: string }) {
+  const { id } = useParams();
+  return <Navigate to={`/customers/${id}${tab === "orders" ? "" : `?tab=${tab}`}`} replace />;
+}
+
 export default function App() {
   return (
     <AdminApprovalProvider>
@@ -89,9 +92,9 @@ export default function App() {
         <Route path="/products/:id" element={<ProductDetailPage />} />
 
         <Route path="/customers/add" element={<AddCustomerPage />} />
-        <Route path="/customers/:id/orders" element={<CustomerOrderHistoryPage />} />
-        <Route path="/customers/:id/payment-history" element={<CustomerPaymentHistoryPage />} />
-        <Route path="/customers/:id/loyalty-history" element={<CustomerLoyaltyHistoryPage />} />
+        <Route path="/customers/:id/orders" element={<ToCustomerTab tab="orders" />} />
+        <Route path="/customers/:id/payment-history" element={<ToCustomerTab tab="payments" />} />
+        <Route path="/customers/:id/loyalty-history" element={<ToCustomerTab tab="points" />} />
         <Route path="/customers/:id" element={<CustomerProfilePage />} />
         <Route path="/customers" element={<ViewCustomersPage />} />
         <Route
