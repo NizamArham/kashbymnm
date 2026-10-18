@@ -65,6 +65,13 @@ if (!(db.prepare(`PRAGMA table_info(returns)`).all() as { name: string }[]).some
   // What was held back from a refund / credit for the customer's share of a courier pickup (0 for an ordinary return).
   db.exec(`ALTER TABLE returns ADD COLUMN pickup_deduction REAL NOT NULL DEFAULT 0`);
 }
+{
+  // How a refund was paid and, for a bank transfer, to which of the customer's saved accounts — kept on the return itself (as well as in the
+  // cash book) so the customer's history and the refund slip can say it. Empty on returns that were not refunded, and on older ones.
+  const cols = (db.prepare(`PRAGMA table_info(returns)`).all() as { name: string }[]).map((c) => c.name);
+  if (!cols.includes("refund_method")) db.exec(`ALTER TABLE returns ADD COLUMN refund_method TEXT`);
+  if (!cols.includes("refund_account_id")) db.exec(`ALTER TABLE returns ADD COLUMN refund_account_id INTEGER REFERENCES customer_bank_accounts(id)`);
+}
 if (!(db.prepare(`PRAGMA table_info(returns)`).all() as { name: string }[]).some((c) => c.name === "inspection_deduction")) {
   // What an inspection held back from a refund / credit beyond the delivery share (a damaged piece, say) — the proposed amount it approved.
   db.exec(`ALTER TABLE returns ADD COLUMN inspection_deduction REAL NOT NULL DEFAULT 0`);
@@ -150,7 +157,7 @@ const PICKUP_SELECT = `
          CASE WHEN op.delivery_partner <> '' THEN COALESCE(dp.name, op.delivery_partner) ELSE NULLIF(op.service_name, '') END AS partner_name,
          u.name AS requested_by_name, ap.name AS approved_by_name, rb.name AS received_by_name, rp.name AS report_by_name,
          rd.name AS report_decided_by_name, rf.name AS refunded_by_name,
-         CASE WHEN ba.id IS NULL THEN NULL ELSE ba.bank_name || ' · ' || ba.account_number END AS refund_account_label
+         CASE WHEN ba.id IS NULL THEN NULL ELSE ba.bank_name || ' · ****' || substr(ba.account_number, -4) END AS refund_account_label
   FROM online_returns op
   JOIN sales s ON s.id = op.sale_id
   LEFT JOIN customers c ON c.id = op.customer_id

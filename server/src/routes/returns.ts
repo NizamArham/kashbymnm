@@ -11,6 +11,7 @@ import { returnsInRange } from "../lib/returnedRevenue";
 import { exchangeQuoteSummary, itemInActiveExchange } from "../lib/exchanges";
 import { itemInActivePickup, listPickups } from "../lib/onlineReturns";
 import { holdEndOf } from "../lib/stockHolds";
+import { refundEventByKey } from "../lib/refunds";
 
 export const returnsRouter = Router();
 
@@ -70,7 +71,8 @@ const REQUEST_SELECT = `
          products.id as product_id,
          COALESCE(products.allow_returns, 0) as allow_returns,
          requester.name as requested_by_name, decider.name as decided_by_name,
-         returns.refund_amount
+         returns.refund_amount,
+         EXISTS (SELECT 1 FROM cash_book cb WHERE cb.category = 'return_refund' AND cb.reference_id = return_requests.return_id) AS refund_paid
   FROM return_requests
   JOIN sale_items ON sale_items.id = return_requests.sale_item_id
   JOIN sales ON sales.id = sale_items.sale_id
@@ -146,6 +148,18 @@ returnsRouter.get(
         n(`SELECT COUNT(*) AS n FROM online_returns WHERE stage IN ('requested', 'report_pending')`) +
         n(`SELECT COUNT(*) AS n FROM sales WHERE status = 'quotation' AND exchange_draft IS NOT NULL AND approval_status = 'pending'`),
     });
+  })
+);
+
+// GET /api/returns/refund-slips/:key — everything the "Refund payment done" slip needs: who was paid, how (and to which bank account), for
+// which invoice and items, what was held back, the cash-book transaction IDs and who paid. key is "pickup-<id>" (a courier return) or
+// "return-<id>" (a refund at the shop).
+returnsRouter.get(
+  "/refund-slips/:key",
+  asyncHandler(async (req, res) => {
+    const event = refundEventByKey(req.params.key);
+    if (!event) throw new ApiError(404, "No refund payment found for that");
+    res.json(event);
   })
 );
 
@@ -370,8 +384,8 @@ export function approveReturnRequest(requestId: number | string, user: AuthUser,
   const runApproval = db.transaction(() => {
     const returnResult = db
       .prepare(
-        `INSERT INTO returns (sale_item_id, condition, resolution, refund_amount, exchange_inventory_id, reason, pickup_deduction)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO returns (sale_item_id, condition, resolution, refund_amount, exchange_inventory_id, reason, pickup_deduction, refund_method, refund_account_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         request.sale_item_id,
@@ -380,7 +394,10 @@ export function approveReturnRequest(requestId: number | string, user: AuthUser,
         refund_amount,
         request.exchange_inventory_id,
         request.reason,
-        pickupDeduction
+        pickupDeduction,
+        // A refund paid now says how; one paid later (a courier return) is filled in when it is paid.
+        resolution === "refund" && refund_amount > 0 && !opts?.deferPayout ? refundMethod : null,
+        resolution === "refund" && refund_amount > 0 && !opts?.deferPayout && refundMethod === "bank_transfer" ? data.bank_account_id ?? null : null
       );
     const returnId = returnResult.lastInsertRowid;
 

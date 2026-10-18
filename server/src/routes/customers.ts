@@ -10,6 +10,7 @@ import { loyaltyBalance } from "../lib/loyalty";
 import { normalizePhone } from "../lib/phones";
 import { approveIfNeeded } from "../lib/approval";
 import { exchangeForSale } from "../lib/exchanges";
+import { maskAccount, refundEventsForCustomer, returnedEventsForCustomer } from "../lib/refunds";
 import { refundStoreCredit, usableStoreCredit } from "../lib/storeCreditRefund";
 
 export const customersRouter = Router();
@@ -698,7 +699,7 @@ customersRouter.get(
 
     type LedgerEntry = {
       date: string;
-      type: "sale" | "payment" | "cheque" | "credit";
+      type: "sale" | "payment" | "cheque" | "credit" | "refund" | "returned" | "deduction";
       label: string;
       amount: number;
       effect: number;
@@ -722,6 +723,10 @@ customersRouter.get(
       on_delivery?: boolean;
       // Exchange credit waiting for the old item to be collected.
       exchange_pending?: boolean;
+      // A refund paid back to the customer: the key its "Refund payment done" slip is fetched by.
+      refund_key?: string;
+      // When a row's amount isn't a change to the balance (goods returned, money paid out) the word that goes under it instead of a + or −.
+      amount_label?: string;
     };
     const methodLabel = (m: string | null) => {
       const t = (m ?? "").replace(/_/g, " ").trim();
@@ -825,6 +830,82 @@ customersRouter.get(
           };
         }),
     ];
+
+    // A return whose money goes back as a refund reads like this, each its own line with the balance after it:
+    //   Returned        what the goods came to — the shop now owes the customer that (a credit)
+    //   Paid for courier / held back   the customer's share of the delivery charge, and anything an inspection held back, come off it
+    //   Paid out        the rest, paid back (with its slip) — and the balance is settled
+    // They always net to nothing: the goods came back, the money went back. Until the payout, what is owed shows as a credit — that is the
+    // refund still to be paid, not store credit (refund_owed says how much).
+    const itemWhat = (items: { title: string | null; size: string | null; color: string | null }[]) =>
+      items.length === 1
+        ? `${items[0].title ?? "item"}${[items[0].size, items[0].color].filter(Boolean).length ? ` (${[items[0].size, items[0].color].filter(Boolean).join(", ")})` : ""}`
+        : `${items.length} items`;
+    let refundOwed = 0;
+    for (const r of returnedEventsForCustomer(Number(req.params.id))) {
+      if (!r.paid) refundOwed += r.refund_total;
+      const inv = r.invoices.join(", ");
+      entries.push({
+        date: r.date,
+        type: "returned" as const,
+        label: `Returned ${inv} — ${itemWhat(r.items)}`,
+        title: `Returned ${inv} — ${itemWhat(r.items)}`,
+        details: [`Taken back from ${inv}${r.reason ? ` · ${r.reason}` : ""}`, ...(r.paid ? [] : [`Refund of Rs. ${r.refund_total.toLocaleString()} approved — waiting to be paid out`])],
+        amount: r.returned_value,
+        amount_label: "returned",
+        effect: -r.returned_value,
+        sale_id: r.sale_id,
+        sale_invoice: r.invoices[0],
+      });
+      if (r.delivery_share > 0) {
+        entries.push({
+          date: r.date,
+          type: "deduction" as const,
+          label: `Paid for courier — delivery charge taken off the refund (${inv})`,
+          title: `Paid for courier — delivery charge (${inv})`,
+          details: [`The customer's share of what it cost to send ${itemWhat(r.items)} back, held back from the refund`],
+          amount: r.delivery_share,
+          amount_label: "paid for courier",
+          effect: r.delivery_share,
+          sale_id: r.sale_id,
+          sale_invoice: r.invoices[0],
+        });
+      }
+      if (r.inspection_hold > 0) {
+        entries.push({
+          date: r.date,
+          type: "deduction" as const,
+          label: `Held back after inspection (${inv})`,
+          title: `Held back after inspection (${inv})`,
+          details: [`Taken off the refund for ${itemWhat(r.items)} when the parcel was inspected`],
+          amount: r.inspection_hold,
+          amount_label: "held back",
+          effect: r.inspection_hold,
+          sale_id: r.sale_id,
+          sale_invoice: r.invoices[0],
+        });
+      }
+    }
+    for (const r of refundEventsForCustomer(Number(req.params.id))) {
+      const how = r.method === "bank_transfer" ? `bank transfer${r.bank ? ` to ${r.bank.bank_name} ${maskAccount(r.bank.account_number)}` : ""}` : methodLabel(r.method).toLowerCase();
+      entries.push({
+        date: r.paid_at,
+        type: "refund" as const,
+        label: `Paid out — refund for ${r.invoices.join(", ")} (${how})`,
+        title: `Paid out — refund for ${r.invoices.join(", ")}`,
+        details: [
+          `${itemWhat(r.items)} · paid back by ${how}${r.paid_by ? ` · ${r.paid_by}` : ""}`,
+          ...(r.transaction_codes.length > 1 ? [`Transaction IDs ${r.transaction_codes.join(", ")}`] : []),
+        ],
+        amount: r.total,
+        amount_label: "paid out",
+        effect: r.total,
+        transaction_code: r.transaction_codes[0] ?? null,
+        refund_key: r.key,
+        sale_id: r.sale_id,
+        sale_invoice: r.invoices[0],
+      });
+    }
 
     // Payments that were applied straight onto a sale's amount_paid with
     // no line of their own — the main case is a courier settling COD for
@@ -1032,7 +1113,7 @@ customersRouter.get(
     const visible = withBalance
       .filter((e) => !(e.type === "credit" && e.effect === 0 && e.sale_id != null))
       .map((e) => {
-        const kind = e.courier_held ? "courier" : e.on_delivery ? "on_delivery" : e.exchange_pending ? "exchange" : e.type === "credit" ? (e.credit_reason === "return_exchange" ? "return" : "credit") : e.type;
+        const kind = e.courier_held ? "courier" : e.on_delivery ? "on_delivery" : e.exchange_pending ? "exchange" : e.type === "refund" ? "refund" : e.type === "returned" ? "return" : e.type === "deduction" ? "deduction" : e.type === "credit" ? (e.credit_reason === "return_exchange" ? "return" : "credit") : e.type;
         const title = e.title ?? (e.type === "sale" ? e.sale_invoice : e.label.replace(/^Payment \((.+)\)$/, "$1"));
         const details = e.type === "sale" && e.sale_id != null && detailsBySale.has(e.sale_id) ? detailsBySale.get(e.sale_id) : e.details;
         return { ...e, kind, title, ...(details ? { details } : {}) };
@@ -1042,6 +1123,8 @@ customersRouter.get(
       customer,
       entries: visible,
       final_balance: runningBalance,
+      // Refunds approved for returns but not yet paid out: they show in the balance as a credit, which is money to hand back, not store credit.
+      refund_owed: Math.round(refundOwed * 100) / 100,
       // COD still to be collected at the door (orders not yet delivered).
       on_delivery: onWay.map((o) => ({ sale_id: o.id, invoice: o.invoice, partner: o.partner_name, amount: o.amount })),
       // Paid to the courier at delivery, not yet paid over to the shop.

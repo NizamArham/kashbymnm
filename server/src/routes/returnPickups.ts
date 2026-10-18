@@ -582,13 +582,25 @@ returnPickupsRouter.put(
       if (!account) throw new ApiError(400, "That bank account isn't on file for this customer");
     }
     const actor = actorOf(req);
+    const account =
+      data.method === "bank_transfer"
+        ? (db.prepare(`SELECT bank_name, account_number FROM customer_bank_accounts WHERE id = ?`).get(data.bank_account_id) as { bank_name: string; account_number: string })
+        : null;
     let paid = 0;
     db.transaction(() => {
       for (const item of pickup.items.filter((i: any) => i.return_id && i.refund_amount > 0)) {
         db.prepare(
           `INSERT INTO cash_book (transaction_code, type, category, payment_method, reference_id, amount, notes)
            VALUES (?, 'expense', 'return_refund', ?, ?, ?, ?)`
-        ).run(nextTransactionCode(), data.method, item.return_id, item.refund_amount, `Refund for invoice ${pickup.invoice} (courier return)`);
+        ).run(
+          nextTransactionCode(),
+          data.method,
+          item.return_id,
+          item.refund_amount,
+          `Refund to ${pickup.customer_name ?? "customer"} for invoice ${pickup.invoice} (courier return)${account ? ` — ${account.bank_name} ${account.account_number}` : ""}`
+        );
+        // How and where it was paid, on the return itself — the customer's history and the refund slip read it from here.
+        db.prepare(`UPDATE returns SET refund_method = ?, refund_account_id = ? WHERE id = ?`).run(data.method, data.method === "bank_transfer" ? data.bank_account_id : null, item.return_id);
         paid += item.refund_amount;
       }
       db.prepare(
