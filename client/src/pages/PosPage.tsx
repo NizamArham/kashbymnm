@@ -236,16 +236,14 @@ export default function PosPage() {
   });
   const [detailsSettled, setDetailsSettled] = useState(true); // false while the open/close animation runs
   useEffect(() => {
-    setDetailsSettled(false);
-    const t = setTimeout(() => setDetailsSettled(true), 220);
-    return () => clearTimeout(t);
-  }, [detailsOpen]);
-  useEffect(() => {
     if (checkoutError) setDetailsOpen(true);
   }, [checkoutError]);
+  // An online order's details (customer, delivery, payment) have nothing to attach to until something is in the cart, so they stay
+  // out of the way of an empty cart and open by themselves with the first item.
+  const hasItems = cart.length > 0;
   useEffect(() => {
-    if (saleType === "online") setDetailsOpen(true);
-  }, [saleType]);
+    if (saleType === "online" && hasItems) setDetailsOpen(true);
+  }, [saleType, hasItems]);
   // How tall the open details may be: whatever is left once the header, the strip and
   // the totals bar have their share, keeping about two cart rows on screen. null means
   // they fit as they are — then nothing scrolls inside them and dropdowns open freely.
@@ -299,6 +297,16 @@ export default function PosPage() {
   // sale — rather than creating a new, unrelated record.
   const [editingQuotation, setEditingQuotation] = useState<{ id: number; invoice: string } | null>(null);
   const [quotationLoadError, setQuotationLoadError] = useState<string | null>(null);
+
+  // The details are actually on show when they're open — except for an online order with an empty cart (a request being edited
+  // counts as having something to show).
+  const detailsLocked = saleType === "online" && !hasItems && !editingQuotation;
+  const detailsShown = detailsOpen && !detailsLocked;
+  useEffect(() => {
+    setDetailsSettled(false);
+    const t = setTimeout(() => setDetailsSettled(true), 220);
+    return () => clearTimeout(t);
+  }, [detailsShown]);
 
   const subtotal = cart.reduce((sum, line) => sum + line.unit_price * line.units.length, 0);
   const totalCartUnits = cart.reduce((sum, line) => sum + line.units.length, 0);
@@ -1304,6 +1312,248 @@ export default function PosPage() {
     ];
   }
 
+  // The pieces of the sale details, so an online order can put them in the order they are filled in: customer, delivery, payment — with
+  // the optional discount and coupon last (an in-store sale keeps discount, coupon, customer).
+  const discountBlock = (
+                <FormGroup>
+                  <Label>Discount</Label>
+                  <div className="flex gap-2">
+                    <div className="w-24 flex-shrink-0">
+                      <Dropdown
+                        value={discountType}
+                        onChange={(v) => setDiscountType(v as "percent" | "fixed")}
+                        options={[
+                          { value: "fixed", label: "LKR" },
+                          { value: "percent", label: "%" },
+                        ]}
+                      />
+                    </div>
+                    <Input
+                      type="number"
+                      min="0"
+                      max={discountType === "percent" ? 100 : undefined}
+                      value={discountValue}
+                      onChange={(e) => setDiscountValue(e.target.value)}
+                      placeholder="0"
+                    />
+                  </div>
+                  {manualDiscountAmount > 0 && (
+                    <p className="text-xs text-gray-400 mt-1">
+                      Discount applied: Rs. {manualDiscountAmount.toLocaleString()} off
+                    </p>
+                  )}
+                </FormGroup>
+  );
+  const couponBlock = (
+                <FormGroup>
+                  <Label>Coupon code</Label>
+                  {appliedCoupon ? (
+                    <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                      <span className="text-sm text-green-800 font-medium">
+                        {appliedCoupon.code} —{" "}
+                        {appliedCoupon.discount_type === "percent"
+                          ? `${appliedCoupon.discount_value}% off`
+                          : `Rs. ${appliedCoupon.discount_value.toLocaleString()} off`}
+                      </span>
+                      <button onClick={removeCoupon} className="text-xs text-red-500 hover:text-red-700">
+                        Remove
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2">
+                      <Input
+                        value={couponCode}
+                        onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
+                        onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), applyCoupon())}
+                      />
+                      <button
+                        type="button"
+                        onClick={applyCoupon}
+                        disabled={!couponCode.trim() || couponChecking}
+                        className="px-4 py-2 bg-black text-white rounded-xl text-sm font-medium hover:bg-gray-800 transition disabled:opacity-50 flex-shrink-0"
+                      >
+                        {couponChecking ? "Checking..." : "Apply"}
+                      </button>
+                    </div>
+                  )}
+                  {couponError && <ErrorText>{couponError}</ErrorText>}
+                </FormGroup>
+  );
+  const customerBlock = (
+                <div>
+                  <div className="flex items-center justify-between mb-1.5 h-5">
+                    <div className="flex items-center gap-2">
+                      <User size={14} className="text-gray-600" />
+                      <span className="text-sm font-medium text-gray-700">
+                        Customer
+                        {saleType === "online" && (
+                          <>
+                            <span className="text-red-500"> *</span>
+                            <HelpHint
+                              text={
+                                isOnDemand
+                                  ? "A customer is required for online orders. No address is needed for Uber / PickMe-style delivery — the rider is told where to go."
+                                  : "A customer is required for online orders, so delivery can use their saved address."
+                              }
+                            />
+                          </>
+                        )}
+                      </span>
+                    </div>
+                    {selectedCustomer && (
+                      <button onClick={removeCustomer} className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1">
+                        <X size={12} /> Remove
+                      </button>
+                    )}
+                  </div>
+
+                  {!selectedCustomer ? (
+                    <div className="relative" ref={customerBoxRef}>
+                      <div className="relative">
+                        <Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <Input
+                          className="pl-9 pr-9"
+                          placeholder="Search by name or phone..."
+                          value={customerQuery}
+                          onChange={(e) => handleCustomerQueryChange(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && !isAdmin) searchCustomersExactly(customerQuery, 0);
+                          }}
+                          onFocus={() => customerQuery && setCustomerSearchOpen(true)}
+                        />
+                        <button
+                          onClick={openAddCustomer}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700"
+                          title="Add new customer"
+                        >
+                          <UserPlus size={16} />
+                        </button>
+                      </div>
+
+                      {customerSearchOpen && customerQuery.trim().length >= (isAdmin ? 2 : CASHIER_SEARCH_MIN_CHARS) && (
+                        <div className="absolute z-20 bottom-full left-0 right-0 mb-1.5 bg-white border border-gray-200 rounded-xl shadow-lg max-h-56 overflow-y-auto">
+                          {customerResults.length > 0 ? (
+                            <>
+                              {customerResults.slice(0, 6).map((c) => (
+                                <button
+                                  key={c.id}
+                                  onClick={() => selectCustomer(c)}
+                                  className="w-full flex items-center justify-between gap-3 px-3.5 py-2 text-left hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-0"
+                                >
+                                  <div className="min-w-0">
+                                    <p className="text-sm text-gray-900 truncate">{c.name}</p>
+                                    <p className="text-xs text-gray-400">{c.phone ?? c.customer_code}</p>
+                                  </div>
+                                  <span className="text-xs text-amber-600 flex-shrink-0">{c.loyalty_points} pts</span>
+                                </button>
+                              ))}
+                              <button
+                                onClick={openAddCustomer}
+                                className="w-full flex items-center gap-1.5 px-3.5 py-2 text-left text-sm text-gray-900 font-medium hover:bg-gray-50 transition-colors border-t border-gray-100"
+                              >
+                                <UserPlus size={12} />
+                                Add "{customerQuery}" as new customer
+                              </button>
+                            </>
+                          ) : (
+                            <div className="px-3.5 py-3">
+                              <p className="text-xs text-gray-400 mb-2">No matching customers.</p>
+                              <button
+                                onClick={openAddCustomer}
+                                className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-black text-white rounded-xl text-sm hover:bg-gray-800 transition"
+                              >
+                                <UserPlus size={12} />
+                                Add new customer
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="w-full border border-gray-300 rounded-lg bg-gray-50 px-3 py-1.5 flex items-center justify-between">
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <div className="w-7 h-7 bg-black rounded-full flex items-center justify-center flex-shrink-0">
+                          <User size={12} className="text-white" />
+                        </div>
+                        <p className="font-medium text-gray-900 text-sm truncate">{selectedCustomer.name}</p>
+                      </div>
+                      <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+                        <Star size={12} className="text-amber-400" />
+                        <span className="text-sm font-semibold text-amber-700">{selectedCustomer.loyalty_points}</span>
+                        {selectedCustomer.phone && (
+                          <a
+                            href={whatsappMessageLink(selectedCustomer.phone, loyaltyPointsMessage(selectedCustomer.name, selectedCustomer.loyalty_points))}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Send their loyalty points on WhatsApp"
+                            aria-label="Send their loyalty points on WhatsApp"
+                            className="ml-1.5 text-green-600 hover:text-green-700"
+                          >
+                            <MessageCircle size={14} />
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {availableStoreCredit > 0 && (
+                    <div className="mt-2 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+                      <label className="flex items-center gap-2 text-sm text-gray-800 cursor-pointer">
+                        <input type="checkbox" checked={useStoreCredit} onChange={(e) => setUseStoreCredit(e.target.checked)} className="rounded" />
+                        Use store credit — Rs. {availableStoreCredit.toLocaleString()} available
+                      </label>
+                      {useStoreCredit && (
+                        <p className="text-xs text-gray-500 mt-1">Rs. {storeCreditApplied.toLocaleString()} will be applied to this sale.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+  );
+  const deliveryBlock = saleType === "online" && (
+                  <div className="border-t border-gray-100 pt-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <FormGroup>
+                        <Label>Delivery partner</Label>
+                        <Dropdown
+                          value={deliveryPartner}
+                          onChange={(v) => setDeliveryPartner(v as DeliveryPartner)}
+                          placeholder="— Select —"
+                          options={activePartners.map((p) => ({ value: p.code, label: p.name }))}
+                        />
+                      </FormGroup>
+
+                      {isOnDemand ? (
+                        <OnDemandFareInput value={onDemandFare} onChange={fareChange} partnerName={selectedPartner?.name ?? "This partner"} />
+                      ) : (
+                        <FormGroup>
+                          <Label>Package weight (kg)</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.1"
+                            value={packageWeight}
+                            onChange={(e) => setPackageWeight(e.target.value)}
+                            disabled={isFreeDelivery}
+                          />
+                        </FormGroup>
+                      )}
+                    </div>
+
+                    {isOnDemand && <OnDemandPaidByPicker value={onDemandFare} onChange={fareChange} />}
+                  </div>
+  );
+
+  // What an online order still needs before it can be checked out, shown beside the Checkout button.
+  const onlineTodo: string[] =
+    saleType === "online" && hasItems
+      ? [
+          !selectedCustomer ? "Add a customer" : null,
+          !deliveryPartner ? "Choose a delivery partner" : null,
+          isOnDemand && onDemandFareError(onDemandFare, selectedPartner?.name ?? "this partner") ? "Enter the delivery fare" : null,
+        ].filter((x): x is string => !!x)
+      : [];
+
   return (
     <div className="flex-1 min-h-0 flex flex-col p-3 lg:p-4 gap-3 lg:gap-4 overflow-hidden">
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-3 lg:gap-4">
@@ -1562,244 +1812,35 @@ export default function PosPage() {
               short window it scrolls inside itself rather than push the buttons away. */}
           <div
             className="flex-shrink-0 grid transition-[grid-template-rows] duration-200 ease-out"
-            style={{ gridTemplateRows: detailsOpen ? "1fr" : "0fr" }}
-            aria-hidden={!detailsOpen}
+            style={{ gridTemplateRows: detailsShown ? "1fr" : "0fr" }}
+            aria-hidden={!detailsShown}
           >
             <div
               id="pos-sale-details"
               style={detailsMaxHeight !== null ? { maxHeight: detailsMaxHeight } : undefined}
               className={`min-h-0 ${
-                detailsOpen && detailsSettled ? (detailsMaxHeight !== null ? "overflow-y-auto" : "overflow-visible") : "overflow-hidden"
-              } ${!detailsOpen && detailsSettled ? "invisible" : ""}`}
+                detailsShown && detailsSettled ? (detailsMaxHeight !== null ? "overflow-y-auto" : "overflow-visible") : "overflow-hidden"
+              } ${!detailsShown && detailsSettled ? "invisible" : ""}`}
             >
           <div ref={detailsContentRef} className="border-t border-gray-200 bg-white p-4">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 lg:gap-6 items-start">
               <div className="space-y-3">
-                <FormGroup>
-                  <Label>Discount</Label>
-                  <div className="flex gap-2">
-                    <div className="w-24 flex-shrink-0">
-                      <Dropdown
-                        value={discountType}
-                        onChange={(v) => setDiscountType(v as "percent" | "fixed")}
-                        options={[
-                          { value: "fixed", label: "LKR" },
-                          { value: "percent", label: "%" },
-                        ]}
-                      />
+                {saleType === "online" ? (
+                  <>
+                    {customerBlock}
+                    {deliveryBlock}
+                    <div className="space-y-3 border-t border-gray-100 pt-3">
+                      <p className="text-xs text-gray-400">Optional</p>
+                      {discountBlock}
+                      {couponBlock}
                     </div>
-                    <Input
-                      type="number"
-                      min="0"
-                      max={discountType === "percent" ? 100 : undefined}
-                      value={discountValue}
-                      onChange={(e) => setDiscountValue(e.target.value)}
-                      placeholder="0"
-                    />
-                  </div>
-                  {manualDiscountAmount > 0 && (
-                    <p className="text-xs text-gray-400 mt-1">
-                      Discount applied: Rs. {manualDiscountAmount.toLocaleString()} off
-                    </p>
-                  )}
-                </FormGroup>
-
-                <FormGroup>
-                  <Label>Coupon code</Label>
-                  {appliedCoupon ? (
-                    <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-3 py-2">
-                      <span className="text-sm text-green-800 font-medium">
-                        {appliedCoupon.code} —{" "}
-                        {appliedCoupon.discount_type === "percent"
-                          ? `${appliedCoupon.discount_value}% off`
-                          : `Rs. ${appliedCoupon.discount_value.toLocaleString()} off`}
-                      </span>
-                      <button onClick={removeCoupon} className="text-xs text-red-500 hover:text-red-700">
-                        Remove
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex gap-2">
-                      <Input
-                        value={couponCode}
-                        onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
-                        onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), applyCoupon())}
-                      />
-                      <button
-                        type="button"
-                        onClick={applyCoupon}
-                        disabled={!couponCode.trim() || couponChecking}
-                        className="px-4 py-2 bg-black text-white rounded-xl text-sm font-medium hover:bg-gray-800 transition disabled:opacity-50 flex-shrink-0"
-                      >
-                        {couponChecking ? "Checking..." : "Apply"}
-                      </button>
-                    </div>
-                  )}
-                  {couponError && <ErrorText>{couponError}</ErrorText>}
-                </FormGroup>
-
-                <div>
-                  <div className="flex items-center justify-between mb-1.5 h-5">
-                    <div className="flex items-center gap-2">
-                      <User size={14} className="text-gray-600" />
-                      <span className="text-sm font-medium text-gray-700">
-                        Customer
-                        {saleType === "online" && (
-                          <>
-                            <span className="text-red-500"> *</span>
-                            <HelpHint
-                              text={
-                                isOnDemand
-                                  ? "A customer is required for online orders. No address is needed for Uber / PickMe-style delivery — the rider is told where to go."
-                                  : "A customer is required for online orders, so delivery can use their saved address."
-                              }
-                            />
-                          </>
-                        )}
-                      </span>
-                    </div>
-                    {selectedCustomer && (
-                      <button onClick={removeCustomer} className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1">
-                        <X size={12} /> Remove
-                      </button>
-                    )}
-                  </div>
-
-                  {!selectedCustomer ? (
-                    <div className="relative" ref={customerBoxRef}>
-                      <div className="relative">
-                        <Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                        <Input
-                          className="pl-9 pr-9"
-                          placeholder="Search by name or phone..."
-                          value={customerQuery}
-                          onChange={(e) => handleCustomerQueryChange(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" && !isAdmin) searchCustomersExactly(customerQuery, 0);
-                          }}
-                          onFocus={() => customerQuery && setCustomerSearchOpen(true)}
-                        />
-                        <button
-                          onClick={openAddCustomer}
-                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700"
-                          title="Add new customer"
-                        >
-                          <UserPlus size={16} />
-                        </button>
-                      </div>
-
-                      {customerSearchOpen && customerQuery.trim().length >= (isAdmin ? 2 : CASHIER_SEARCH_MIN_CHARS) && (
-                        <div className="absolute z-20 bottom-full left-0 right-0 mb-1.5 bg-white border border-gray-200 rounded-xl shadow-lg max-h-56 overflow-y-auto">
-                          {customerResults.length > 0 ? (
-                            <>
-                              {customerResults.slice(0, 6).map((c) => (
-                                <button
-                                  key={c.id}
-                                  onClick={() => selectCustomer(c)}
-                                  className="w-full flex items-center justify-between gap-3 px-3.5 py-2 text-left hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-0"
-                                >
-                                  <div className="min-w-0">
-                                    <p className="text-sm text-gray-900 truncate">{c.name}</p>
-                                    <p className="text-xs text-gray-400">{c.phone ?? c.customer_code}</p>
-                                  </div>
-                                  <span className="text-xs text-amber-600 flex-shrink-0">{c.loyalty_points} pts</span>
-                                </button>
-                              ))}
-                              <button
-                                onClick={openAddCustomer}
-                                className="w-full flex items-center gap-1.5 px-3.5 py-2 text-left text-sm text-gray-900 font-medium hover:bg-gray-50 transition-colors border-t border-gray-100"
-                              >
-                                <UserPlus size={12} />
-                                Add "{customerQuery}" as new customer
-                              </button>
-                            </>
-                          ) : (
-                            <div className="px-3.5 py-3">
-                              <p className="text-xs text-gray-400 mb-2">No matching customers.</p>
-                              <button
-                                onClick={openAddCustomer}
-                                className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-black text-white rounded-xl text-sm hover:bg-gray-800 transition"
-                              >
-                                <UserPlus size={12} />
-                                Add new customer
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="w-full border border-gray-300 rounded-lg bg-gray-50 px-3 py-1.5 flex items-center justify-between">
-                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                        <div className="w-7 h-7 bg-black rounded-full flex items-center justify-center flex-shrink-0">
-                          <User size={12} className="text-white" />
-                        </div>
-                        <p className="font-medium text-gray-900 text-sm truncate">{selectedCustomer.name}</p>
-                      </div>
-                      <div className="flex items-center gap-1 flex-shrink-0 ml-2">
-                        <Star size={12} className="text-amber-400" />
-                        <span className="text-sm font-semibold text-amber-700">{selectedCustomer.loyalty_points}</span>
-                        {selectedCustomer.phone && (
-                          <a
-                            href={whatsappMessageLink(selectedCustomer.phone, loyaltyPointsMessage(selectedCustomer.name, selectedCustomer.loyalty_points))}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            title="Send their loyalty points on WhatsApp"
-                            aria-label="Send their loyalty points on WhatsApp"
-                            className="ml-1.5 text-green-600 hover:text-green-700"
-                          >
-                            <MessageCircle size={14} />
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {availableStoreCredit > 0 && (
-                    <div className="mt-2 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
-                      <label className="flex items-center gap-2 text-sm text-gray-800 cursor-pointer">
-                        <input type="checkbox" checked={useStoreCredit} onChange={(e) => setUseStoreCredit(e.target.checked)} className="rounded" />
-                        Use store credit — Rs. {availableStoreCredit.toLocaleString()} available
-                      </label>
-                      {useStoreCredit && (
-                        <p className="text-xs text-gray-500 mt-1">Rs. {storeCreditApplied.toLocaleString()} will be applied to this sale.</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {saleType === "online" && (
-                  <div className="border-t border-gray-100 pt-3">
-                    <div className="grid grid-cols-2 gap-3">
-                      <FormGroup>
-                        <Label>Delivery partner</Label>
-                        <Dropdown
-                          value={deliveryPartner}
-                          onChange={(v) => setDeliveryPartner(v as DeliveryPartner)}
-                          placeholder="— Select —"
-                          options={activePartners.map((p) => ({ value: p.code, label: p.name }))}
-                        />
-                      </FormGroup>
-
-                      {isOnDemand ? (
-                        <OnDemandFareInput value={onDemandFare} onChange={fareChange} partnerName={selectedPartner?.name ?? "This partner"} />
-                      ) : (
-                        <FormGroup>
-                          <Label>Package weight (kg)</Label>
-                          <Input
-                            type="number"
-                            min="0"
-                            step="0.1"
-                            value={packageWeight}
-                            onChange={(e) => setPackageWeight(e.target.value)}
-                            disabled={isFreeDelivery}
-                          />
-                        </FormGroup>
-                      )}
-                    </div>
-
-                    {isOnDemand && <OnDemandPaidByPicker value={onDemandFare} onChange={fareChange} />}
-                  </div>
+                  </>
+                ) : (
+                  <>
+                    {discountBlock}
+                    {couponBlock}
+                    {customerBlock}
+                  </>
                 )}
               </div>
 
@@ -2080,16 +2121,17 @@ export default function PosPage() {
             ref={toggleRef}
             type="button"
             onClick={toggleDetails}
-            aria-expanded={detailsOpen}
+            disabled={detailsLocked}
+            aria-expanded={detailsShown}
             aria-controls="pos-sale-details"
-            title={detailsOpen ? "Hide sale details" : "Show sale details — customer, discount, payment"}
-            className="flex-shrink-0 w-full flex items-center justify-between gap-3 px-4 py-2 border-t border-gray-200 bg-gray-50 hover:bg-gray-100 transition-colors text-left"
+            title={detailsLocked ? "Add an item first — then fill in the customer, delivery and payment" : detailsOpen ? "Hide sale details" : "Show sale details — customer, discount, payment"}
+            className={`flex-shrink-0 w-full flex items-center justify-between gap-3 px-4 py-2 border-t border-gray-200 bg-gray-50 transition-colors text-left ${detailsLocked ? "cursor-default" : "hover:bg-gray-100"}`}
           >
             <span className="flex items-center gap-2 min-w-0">
               <span className="text-xs font-medium text-gray-900 flex-shrink-0">Sale details</span>
-              <span className="truncate text-xs text-gray-500">{detailsSummary}</span>
+              <span className="truncate text-xs text-gray-500">{detailsLocked ? "Add an item to fill in the customer, delivery and payment" : detailsSummary}</span>
             </span>
-            <ChevronUp size={16} className={`flex-shrink-0 text-gray-500 transition-transform duration-200 ${detailsOpen ? "rotate-180" : ""}`} />
+            {!detailsLocked && <ChevronUp size={16} className={`flex-shrink-0 text-gray-500 transition-transform duration-200 ${detailsShown ? "rotate-180" : ""}`} />}
           </button>
 
           {/* Pinned to the bottom of the panel: what's owed, and the buttons —
@@ -2126,6 +2168,11 @@ export default function PosPage() {
             <div className="space-y-2">
                 {checkoutError && <ErrorText>{checkoutError}</ErrorText>}
                 {checkoutSuccess && <SuccessText>{checkoutSuccess}</SuccessText>}
+                {onlineTodo.length > 0 && !checkoutError && (
+                  <p className="text-xs text-amber-700">
+                    <span className="font-medium">To finish:</span> {onlineTodo.join(" · ")}
+                  </p>
+                )}
 
                 <div className="flex gap-2">
                   <button onClick={clearCart} className="px-4 py-2 border border-gray-300 rounded-xl hover:bg-gray-50 transition text-sm font-medium">
