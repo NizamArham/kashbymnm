@@ -1,4 +1,4 @@
-import { ReactNode, useState, useRef, useEffect, useLayoutEffect, forwardRef } from "react";
+import { Fragment, ReactNode, useState, useRef, useEffect, useLayoutEffect, forwardRef } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { ChevronDown, ChevronUp, Check, Plus, CalendarDays, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, Minus, X, MoreVertical } from "lucide-react";
@@ -760,7 +760,8 @@ export function ActionMenu({
   align = "right",
   triggerClassName = "",
 }: {
-  items: { label: string; icon?: ReactNode; onClick: () => void; danger?: boolean }[];
+  // `group` puts a small heading above the first item of each run of items that share it ("Points", "Store credit"...).
+  items: { label: string; icon?: ReactNode; onClick: () => void; danger?: boolean; group?: string }[];
   label?: string;
   icon?: ReactNode;
   align?: "left" | "right";
@@ -776,7 +777,7 @@ export function ActionMenu({
     if (!open && buttonRef.current) {
       const r = buttonRef.current.getBoundingClientRect();
       const roomBelow = window.innerHeight - r.bottom;
-      const needed = items.length * 38 + 12;
+      const needed = items.length * 38 + 12 + (items.some((i) => i.group) ? 90 : 0);
       setPos({
         top: roomBelow < needed ? r.top : r.bottom,
         right: window.innerWidth - r.right,
@@ -842,23 +843,27 @@ export function ActionMenu({
             ref={menuRef}
             onClick={(e) => e.stopPropagation()}
             style={{ position: "fixed", ...(align === "left" ? { left: pos.left } : { right: pos.right }), ...(pos.up ? { bottom: window.innerHeight - pos.top + 4 } : { top: pos.top + 4 }) }}
-            className="z-[80] w-52 rounded-xl border border-gray-200 bg-white py-1 shadow-lg"
+            className={`z-[80] rounded-xl border border-gray-200 bg-white py-1 shadow-lg ${items.some((i) => i.group) ? "w-60" : "w-52"}`}
           >
-            {items.map((item) => (
-              <button
-                key={item.label}
-                type="button"
-                onClick={() => {
-                  setOpen(false);
-                  item.onClick();
-                }}
-                className={`flex w-full items-center gap-2 px-3.5 py-2 text-left text-sm transition ${
-                  item.danger ? "text-red-600 hover:bg-red-50" : "text-gray-700 hover:bg-gray-50"
-                }`}
-              >
-                {item.icon}
-                {item.label}
-              </button>
+            {items.map((item, i) => (
+              <Fragment key={item.label}>
+                {item.group && item.group !== items[i - 1]?.group && (
+                  <p className={`px-3.5 pb-1 pt-2 text-xs text-gray-400 ${i > 0 ? "mt-1 border-t border-gray-100" : ""}`}>{item.group}</p>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpen(false);
+                    item.onClick();
+                  }}
+                  className={`flex w-full items-center gap-2 px-3.5 py-2 text-left text-sm transition ${
+                    item.danger ? "text-red-600 hover:bg-red-50" : "text-gray-700 hover:bg-gray-50"
+                  }`}
+                >
+                  {item.icon}
+                  {item.label}
+                </button>
+              </Fragment>
             ))}
           </div>,
           document.body

@@ -16,6 +16,7 @@ import CustomerLoyaltyHistoryPage from "./pages/CustomerLoyaltyHistoryPage";
 import WaybillGeneratorPage from "./pages/WaybillGeneratorPage";
 import SupplierPaymentHistoryPage from "./pages/SupplierPaymentHistoryPage";
 import ViewCustomersPage from "./pages/ViewCustomersPage";
+import CustomerProfilePage from "./pages/CustomerProfilePage";
 import PosPage from "./pages/PosPage";
 import QuotationsPage from "./pages/QuotationsPage";
 import SaleHistoryPage from "./pages/SaleHistoryPage";
@@ -91,6 +92,7 @@ export default function App() {
         <Route path="/customers/:id/orders" element={<CustomerOrderHistoryPage />} />
         <Route path="/customers/:id/payment-history" element={<CustomerPaymentHistoryPage />} />
         <Route path="/customers/:id/loyalty-history" element={<CustomerLoyaltyHistoryPage />} />
+        <Route path="/customers/:id" element={<CustomerProfilePage />} />
         <Route path="/customers" element={<ViewCustomersPage />} />
         <Route
           path="/staff"

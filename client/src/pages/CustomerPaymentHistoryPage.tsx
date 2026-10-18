@@ -129,8 +129,11 @@ function TransactionId({ code }: { code: string }) {
   );
 }
 
-export default function CustomerPaymentHistoryPage() {
-  const { id } = useParams<{ id: string }>();
+// `customerId` set = shown as a tab on the customer's profile page: no Back button and no page title of its own.
+export default function CustomerPaymentHistoryPage({ customerId }: { customerId?: number } = {}) {
+  const params = useParams<{ id: string }>();
+  const id = customerId !== undefined ? String(customerId) : params.id;
+  const embedded = customerId !== undefined;
   const navigate = useNavigate();
 
   const [customer, setCustomer] = useState<Customer | null>(null);
@@ -283,41 +286,70 @@ export default function CustomerPaymentHistoryPage() {
 
   return (
     <div>
-      <button
-        onClick={() => navigate(-1)}
-        className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 mb-3"
-      >
-        <ArrowLeft size={14} />
-        Back
-      </button>
+      {!embedded && (
+        <button
+          onClick={() => navigate(-1)}
+          className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 mb-3"
+        >
+          <ArrowLeft size={14} />
+          Back
+        </button>
+      )}
 
-      <PageHeader
-        title={customer ? `${customer.name}'s payment history` : "Payment history"}
-        subtitle={customer ? `${filteredEntries.length} of ${allEntries.length} record${allEntries.length === 1 ? "" : "s"} shown` : undefined}
-        action={
+      {embedded ? (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm text-gray-500">{customer ? `${filteredEntries.length} of ${allEntries.length} record${allEntries.length === 1 ? "" : "s"} shown` : ""}</p>
           <div className="flex items-center gap-2 flex-wrap">
-            <Button
-              onClick={handleBalanceSlip}
-              disabled={!customer || slipping}
-              className="inline-flex items-center gap-1.5"
-              title="Quick slip: what they owe right now, with our bank details"
-            >
-              <Wallet size={14} />
-              {slipping ? "Preparing..." : "Balance slip"}
-            </Button>
-            <Button
-              variant="primary"
-              onClick={downloadPdf}
-              disabled={!customer || filteredEntries.length === 0}
-              className="inline-flex items-center gap-1.5"
-              title="Download PDF (Ctrl/Cmd+Shift+D)"
-            >
-              <Download size={14} />
-              Download PDF
-            </Button>
-          </div>
-        }
-      />
+              <Button
+                onClick={handleBalanceSlip}
+                disabled={!customer || slipping}
+                className="inline-flex items-center gap-1.5"
+                title="Quick slip: what they owe right now, with our bank details"
+              >
+                <Wallet size={14} />
+                {slipping ? "Preparing..." : "Balance slip"}
+              </Button>
+              <Button
+                variant="primary"
+                onClick={downloadPdf}
+                disabled={!customer || filteredEntries.length === 0}
+                className="inline-flex items-center gap-1.5"
+                title="Download PDF (Ctrl/Cmd+Shift+D)"
+              >
+                <Download size={14} />
+                Download PDF
+              </Button>
+            </div>
+        </div>
+      ) : (
+      <PageHeader
+          title={customer ? `${customer.name}'s payment history` : "Payment history"}
+          subtitle={customer ? `${filteredEntries.length} of ${allEntries.length} record${allEntries.length === 1 ? "" : "s"} shown` : undefined}
+          action={
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button
+                onClick={handleBalanceSlip}
+                disabled={!customer || slipping}
+                className="inline-flex items-center gap-1.5"
+                title="Quick slip: what they owe right now, with our bank details"
+              >
+                <Wallet size={14} />
+                {slipping ? "Preparing..." : "Balance slip"}
+              </Button>
+              <Button
+                variant="primary"
+                onClick={downloadPdf}
+                disabled={!customer || filteredEntries.length === 0}
+                className="inline-flex items-center gap-1.5"
+                title="Download PDF (Ctrl/Cmd+Shift+D)"
+              >
+                <Download size={14} />
+                Download PDF
+              </Button>
+            </div>
+          }
+        />
+      )}
 
       {customer && (
         <Card className="mb-4">

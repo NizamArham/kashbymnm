@@ -22,8 +22,11 @@ function reasonLabel(reason: LoyaltyEntry["reason"]): string {
   return "Adjustment";
 }
 
-export default function CustomerLoyaltyHistoryPage() {
-  const { id } = useParams<{ id: string }>();
+// `customerId` set = shown as a tab on the customer's profile page: no Back button and no page title of its own.
+export default function CustomerLoyaltyHistoryPage({ customerId }: { customerId?: number } = {}) {
+  const params = useParams<{ id: string }>();
+  const id = customerId !== undefined ? String(customerId) : params.id;
+  const embedded = customerId !== undefined;
   const navigate = useNavigate();
 
   const [customer, setCustomer] = useState<Customer | null>(null);
@@ -62,18 +65,24 @@ export default function CustomerLoyaltyHistoryPage() {
 
   return (
     <div>
-      <button
-        onClick={() => navigate(-1)}
-        className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 mb-3"
-      >
-        <ArrowLeft size={14} />
-        Back
-      </button>
+      {!embedded && (
+        <button
+          onClick={() => navigate(-1)}
+          className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 mb-3"
+        >
+          <ArrowLeft size={14} />
+          Back
+        </button>
+      )}
 
-      <PageHeader
-        title={customer ? `${customer.name}'s loyalty points history` : "Loyalty points history"}
-        subtitle={customer ? `${entries.length} transaction${entries.length === 1 ? "" : "s"} · ${customer.loyalty_points} points now` : undefined}
-      />
+      {embedded ? (
+        <p className="mb-3 text-sm text-gray-500">{customer ? `${entries.length} transaction${entries.length === 1 ? "" : "s"} · ${customer.loyalty_points} points now` : ""}</p>
+      ) : (
+        <PageHeader
+          title={customer ? `${customer.name}'s loyalty points history` : "Loyalty points history"}
+          subtitle={customer ? `${entries.length} transaction${entries.length === 1 ? "" : "s"} · ${customer.loyalty_points} points now` : undefined}
+        />
+      )}
 
       {error && <ErrorText>{error}</ErrorText>}
 
