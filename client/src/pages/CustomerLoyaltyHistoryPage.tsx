@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { PageLoader } from "../components/Loader";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Star } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
@@ -77,7 +78,7 @@ export default function CustomerLoyaltyHistoryPage() {
       {error && <ErrorText>{error}</ErrorText>}
 
       {loading ? (
-        <p className="text-sm text-gray-400">Loading...</p>
+        <PageLoader />
       ) : entries.length === 0 ? (
         <EmptyState icon={Star} title="No points activity yet" subtitle="Loyalty points earned or redeemed will show up here." />
       ) : (

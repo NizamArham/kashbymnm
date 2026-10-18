@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { PageLoader } from "../components/Loader";
 import { ClipboardList, Search, AlertTriangle, XCircle, Trash2, UserCog, Ban, PackageMinus, Ticket, Gift, Pencil } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { AuditLogEntry } from "../lib/types";
@@ -145,7 +146,7 @@ export default function AuditLogPage() {
       {error && <ErrorText>{error}</ErrorText>}
 
       {loading ? (
-        <p className="text-sm text-gray-400">Loading...</p>
+        <PageLoader />
       ) : entries.length === 0 ? (
         <EmptyState icon={ClipboardList} title="No activity recorded yet" subtitle="Sensitive actions will show up here as they happen." />
       ) : filtered.length === 0 ? (

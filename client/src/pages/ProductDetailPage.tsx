@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { PageLoader } from "../components/Loader";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Package } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
@@ -45,7 +46,7 @@ export default function ProductDetailPage() {
       {error && <ErrorText>{error}</ErrorText>}
 
       {loading ? (
-        <p className="text-sm text-gray-400">Loading...</p>
+        <PageLoader />
       ) : product ? (
         <>
           <PageHeader title={product.product_title} subtitle={[product.brand, product.category].filter(Boolean).join(" · ")} />

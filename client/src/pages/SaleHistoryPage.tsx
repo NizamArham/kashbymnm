@@ -1,4 +1,5 @@
 import { useEffect, useState, Fragment, useMemo, MouseEvent, useRef, ReactNode } from "react";
+import { PageLoader } from "../components/Loader";
 import { ChevronDown, ChevronRight, Receipt, Printer, MoreVertical, Wallet, Download, FileText, MessageCircle, Star, Repeat, TrendingUp, Search, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiRequestError } from "../lib/api";
@@ -778,7 +779,7 @@ export default function SaleHistoryPage() {
 
   // Shown in place of the list while it loads or when nothing matches.
   const listMessage = loading ? (
-    <p className="text-sm text-gray-400">Loading...</p>
+    <PageLoader />
   ) : filteredSales.length === 0 ? (
     <EmptyState icon={Receipt} title="No sales match these filters" subtitle="Try another period, or clear the filters." />
   ) : null;

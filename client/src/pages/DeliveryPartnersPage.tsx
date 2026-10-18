@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { PageLoader } from "../components/Loader";
 import { Truck, Plus, Pencil, Bike } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { DeliveryPartnerInfo, useDeliveryPartners } from "../lib/delivery";
@@ -237,7 +238,7 @@ export default function DeliveryPartnersPage() {
       {error && <ErrorText>{error}</ErrorText>}
 
       {!loaded ? (
-        <p className="text-sm text-gray-400">Loading...</p>
+        <PageLoader />
       ) : partners.length === 0 ? (
         <EmptyState icon={Truck} title="No delivery partners yet" />
       ) : (

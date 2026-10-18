@@ -1,4 +1,5 @@
 import { useEffect, useState, FormEvent, Fragment } from "react";
+import { PageLoader } from "../components/Loader";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Truck, ChevronDown, ChevronRight, ChevronUp, Pencil, Plus, X } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
@@ -340,7 +341,7 @@ export default function SuppliersPage() {
       {error && <ErrorText>{error}</ErrorText>}
 
       {loading ? (
-        <p className="text-sm text-gray-400">Loading...</p>
+        <PageLoader />
       ) : suppliers.length === 0 ? (
         <EmptyState icon={Truck} title="No suppliers yet" />
       ) : (

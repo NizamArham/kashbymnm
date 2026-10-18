@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, Fragment } from "react";
+import { PageLoader } from "../components/Loader";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Plus } from "lucide-react";
 import {
@@ -802,7 +803,7 @@ export default function SupplierPaymentsPage() {
       )}
 
       {loading ? (
-        <p className="text-sm text-gray-400">Loading...</p>
+        <PageLoader />
       ) : (
         <>
           <p className="text-xs text-gray-400 mb-3">Total owed across all suppliers: Rs. {totalOwed.toLocaleString()}</p>
@@ -876,7 +877,7 @@ export default function SupplierPaymentsPage() {
                                   </div>
 
                                   {ledgerLoading ? (
-                                    <p className="text-sm text-gray-400">Loading...</p>
+                                    <PageLoader />
                                   ) : ledgerError ? (
                                     <ErrorText>{ledgerError}</ErrorText>
                                   ) : ledgerEntries.length === 0 ? (
@@ -950,7 +951,7 @@ export default function SupplierPaymentsPage() {
           {downloadError && <ErrorText>{downloadError}</ErrorText>}
 
           {paymentsLoading ? (
-            <p className="text-sm text-gray-400">Loading...</p>
+            <PageLoader />
           ) : payments.length === 0 ? (
             <EmptyState icon={Landmark} title="No payments recorded in this range" />
           ) : (

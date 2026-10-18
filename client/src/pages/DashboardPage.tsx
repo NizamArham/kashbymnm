@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import Loader from "../components/Loader";
 import { ArrowRight, ShoppingBag, Truck, PackageCheck, RotateCcw, CheckCircle2, XCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
@@ -310,7 +311,7 @@ export default function DashboardPage() {
           </div>
 
           {loading ? (
-            <p className="text-sm text-gray-400">Loading...</p>
+            <Loader size={34} label="" className="py-8" />
           ) : needsAttentionCount === 0 ? (
             <p className="text-sm text-gray-400">Nothing pending. All clear.</p>
           ) : (
@@ -385,7 +386,7 @@ export default function DashboardPage() {
           </div>
 
           {loading ? (
-            <p className="text-sm text-gray-400">Loading...</p>
+            <Loader size={34} label="" className="py-8" />
           ) : !hasCheques ? (
             <p className="text-sm text-gray-400">No cheques due today or tomorrow.</p>
           ) : (
@@ -456,7 +457,7 @@ export default function DashboardPage() {
           </div>
         </div>
         <p className="text-2xl font-semibold text-gray-900 tabular-nums mb-2">Rs. {revenueTotal.toLocaleString()}</p>
-        {loading ? <p className="text-sm text-gray-400 py-10 text-center">Loading...</p> : <RevenueChart data={revenueSeries} />}
+        {loading ? <Loader size={34} label="" className="py-8" /> : <RevenueChart data={revenueSeries} />}
       </Card>
 
       {/* Row 4 — Activity timeline */}
@@ -472,7 +473,7 @@ export default function DashboardPage() {
           </button>
         </div>
         {loading ? (
-          <p className="text-sm text-gray-400">Loading...</p>
+          <Loader size={34} label="" className="py-8" />
         ) : activity.length === 0 ? (
           <EmptyState title="No activity recorded yet." />
         ) : (

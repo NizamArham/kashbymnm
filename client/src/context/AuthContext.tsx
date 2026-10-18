@@ -1,6 +1,8 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { api } from "../lib/api";
 import { AuthUser } from "../lib/types";
+import { clearViewMemory } from "../lib/viewMemory";
+import { clearExchangeDraft } from "../lib/exchangeDraft";
 
 interface AuthContextValue {
   user: AuthUser | null;
@@ -52,6 +54,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   function logout() {
     localStorage.removeItem("mm_token");
     localStorage.removeItem("mm_user");
+    // Where someone was browsing, and an exchange they had open, belong to them — not to whoever logs in next.
+    clearViewMemory();
+    clearExchangeDraft();
     setUser(null);
   }
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { PageLoader } from "../components/Loader";
 import { Package, Clock, Trash2, Download } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Supplier, Purchase, AvailableUnit } from "../lib/types";
@@ -829,7 +830,7 @@ export default function PurchasesPage() {
       )}
 
       {loading ? (
-        <p className="text-sm text-gray-400">Loading...</p>
+        <PageLoader />
       ) : activeTab === "pending" ? (
         pending.length === 0 ? (
           <EmptyState icon={Clock} title="Nothing pending" subtitle="Goods you record as arrived but haven't fully sorted yet will show here." />

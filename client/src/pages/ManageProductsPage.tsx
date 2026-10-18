@@ -9,6 +9,7 @@ import { GenderNavTabs, GenderNavPanel, GenderNavItem } from "../components/Gend
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { useSortableData } from "../lib/useSortableData";
 import { useCopyToClipboard } from "../lib/useCopyToClipboard";
+import { readMemory, useRemembered, useRememberedScroll, writeMemory } from "../lib/viewMemory";
 import {
   Card,
   Table,
@@ -535,13 +536,15 @@ function ManageCategoriesModal({
 
 export default function ManageProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
-  const [searchQuery, setSearchQuery] = useState("");
+  // Where the list was left — the search, the filters, the product that was open and how far it was scrolled — is
+  // remembered for this tab (lib/viewMemory.ts), so leaving for another page and coming back finds it as it was.
+  const [searchQuery, setSearchQuery] = useRemembered("products.q", "");
   const searchInputRef = useRef<HTMLInputElement>(null);
   useKeyboardShortcut("/", () => searchInputRef.current?.focus());
   const navigate = useNavigate();
   // Browsing — the same Men / Women / Kids tabs, category panel and brand filter as Stocks.
-  const [activeGender, setActiveGender] = useState<ProductGender | null>(null);
-  const [selectedFilter, setSelectedFilter] = useState<SelectedFilter>({});
+  const [activeGender, setActiveGender] = useRemembered<ProductGender | null>("products.g", null);
+  const [selectedFilter, setSelectedFilter] = useRemembered<SelectedFilter>("products.f", {});
   const [hoveredNav, setHoveredNav] = useState<string | null>(null);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [inventoryByProduct, setInventoryByProduct] = useState<Record<number, InventoryUnit[]>>({});
@@ -657,6 +660,31 @@ export default function ManageProductsPage() {
       // non-critical
     }
   }
+
+  // The product that was open (and on which tab) when the page was last left — opened again once the list is in.
+  const leftOpen = useRef({ id: readMemory<number>("products.expanded") ?? null, tab: readMemory<ExpandedTab>("products.tab") ?? "stock" });
+  const [viewReady, setViewReady] = useState(false);
+  useEffect(() => {
+    if (loading || viewReady) return;
+    const p = leftOpen.current.id !== null ? products.find((x) => x.id === leftOpen.current.id) : undefined;
+    if (p) {
+      const tab = leftOpen.current.tab;
+      if (tab === "details") {
+        toggleExpand(p);
+        setExpandedTab("details");
+      } else {
+        manageProduct(p, tab);
+      }
+    }
+    setViewReady(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
+  useEffect(() => {
+    if (!viewReady) return; // until the list is in, don't overwrite what's waiting to be restored
+    writeMemory("products.expanded", expandedId);
+    writeMemory("products.tab", expandedId === null ? null : expandedTab);
+  }, [viewReady, expandedId, expandedTab]);
+  useRememberedScroll("products", viewReady);
 
   function toggleExpand(p: Product) {
     if (expandedId === p.id) {

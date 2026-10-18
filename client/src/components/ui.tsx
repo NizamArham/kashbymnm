@@ -165,6 +165,8 @@ export interface DropdownOption {
   value: string;
   label: string;
   sublabel?: string;
+  // Extra text a search also matches (a SKU or barcode, say) without it being shown in the list.
+  keywords?: string;
 }
 
 // Custom-styled dropdown replacing the plain native <select> for a more
@@ -182,6 +184,7 @@ export function Dropdown({
   createNewLabel = "+ Add new",
   size = "md",
   menuClassName = "",
+  onSearchEnter,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -198,6 +201,9 @@ export function Dropdown({
   // Extra classes for the open list — e.g. a minimum width when the trigger
   // itself is narrow (a country-code picker) but the options need room.
   menuClassName?: string;
+  // Searchable only: Enter in the search box (a barcode scanner ends a scan with it). Return true if the text was dealt
+  // with — an exact SKU or barcode, say — and the list closes; otherwise Enter picks the one match, if there is only one.
+  onSearchEnter?: (query: string) => boolean;
 }) {
   const compact = size === "sm";
   const [open, setOpen] = useState(false);
@@ -263,7 +269,8 @@ export function Dropdown({
       ? options.filter(
           (o) =>
             o.label.toLowerCase().includes(query.trim().toLowerCase()) ||
-            o.sublabel?.toLowerCase().includes(query.trim().toLowerCase())
+            o.sublabel?.toLowerCase().includes(query.trim().toLowerCase()) ||
+            o.keywords?.toLowerCase().includes(query.trim().toLowerCase())
         )
       : options;
 
@@ -280,6 +287,18 @@ export function Dropdown({
             onChange={(e) => {
               setQuery(e.target.value);
               if (!open) openPanel();
+            }}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter" || !query.trim()) return;
+              e.preventDefault();
+              if (onSearchEnter?.(query.trim())) {
+                setOpen(false);
+                setQuery("");
+              } else if (filteredOptions.length === 1) {
+                onChange(filteredOptions[0].value);
+                setOpen(false);
+                setQuery("");
+              }
             }}
             placeholder={placeholder}
             className={`w-full ${compact ? "h-7 px-2 pr-6 text-xs rounded-lg" : "px-3.5 py-2.5 pr-8 text-sm rounded-xl"} bg-white border text-gray-900 placeholder:text-gray-400 transition-all duration-200

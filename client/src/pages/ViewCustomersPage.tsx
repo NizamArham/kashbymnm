@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo, Fragment, useRef } from "react";
+import { PageLoader } from "../components/Loader";
 import { Users, Search, Lock, MessageCircle, Pencil, Plus, Star, X, ChevronDown, ChevronRight, Wallet, UserX, UserCheck, Trash2, AlertTriangle, ArrowLeft, Building2, FileText, MoreHorizontal, ShoppingBag, Receipt } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Customer, CustomerAddress, BankAccount, CustomerGender } from "../lib/types";
@@ -947,7 +948,7 @@ export default function ViewCustomersPage() {
       {error && <ErrorText>{error}</ErrorText>}
 
       {loading ? (
-        <p className="text-sm text-gray-400">Loading...</p>
+        <PageLoader />
       ) : filteredCustomers.length === 0 ? (
         isAdmin ? (
           <EmptyState icon={Users} title={query ? "No matching customers" : "No customers yet"} />

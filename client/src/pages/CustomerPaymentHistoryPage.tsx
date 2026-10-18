@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { PageLoader } from "../components/Loader";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Receipt, Download, Copy, Check, Wallet, Truck } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
@@ -376,7 +377,7 @@ export default function CustomerPaymentHistoryPage() {
       {error && <ErrorText>{error}</ErrorText>}
 
       {loading ? (
-        <p className="text-sm text-gray-400">Loading...</p>
+        <PageLoader />
       ) : allEntries.length === 0 ? (
         <EmptyState icon={Receipt} title="No records yet" subtitle="No sales, payments, cheques, or credit on file." />
       ) : filteredEntries.length === 0 ? (

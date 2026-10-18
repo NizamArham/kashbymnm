@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { PageLoader } from "../components/Loader";
 import { ClipboardCheck } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { DailyAttendanceRow, AttendanceStatus } from "../lib/types";
@@ -78,7 +79,7 @@ export default function AttendancePage() {
       )}
 
       {loading ? (
-        <p className="text-sm text-gray-400">Loading...</p>
+        <PageLoader />
       ) : staff.length === 0 ? (
         <div className="text-center py-16 text-gray-400">
           <ClipboardCheck size={40} className="mx-auto mb-2" />

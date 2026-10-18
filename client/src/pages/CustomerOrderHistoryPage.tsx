@@ -1,4 +1,5 @@
 import { useEffect, useState, Fragment } from "react";
+import { PageLoader } from "../components/Loader";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, ChevronDown, ChevronRight, ShoppingBag, MoreVertical, FileText, Receipt as ReceiptIcon, MessageCircle } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
@@ -176,7 +177,7 @@ export default function CustomerOrderHistoryPage() {
       {error && <ErrorText>{error}</ErrorText>}
 
       {loading ? (
-        <p className="text-sm text-gray-400">Loading...</p>
+        <PageLoader />
       ) : sales.length === 0 ? (
         <EmptyState icon={ShoppingBag} title="No orders yet" subtitle="This customer hasn't placed an order." />
       ) : (

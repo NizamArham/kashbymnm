@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, FormEvent, Fragment } from "react";
+import { PageLoader } from "../components/Loader";
 import { Landmark, Pencil, X, Check, Loader2, ArrowLeftRight, Plus, Minus, Wallet, Building2, ArrowUpRight, ArrowDownLeft, ChevronDown, ChevronRight, Download } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { CashBookEntry } from "../lib/types";
@@ -580,7 +581,7 @@ export default function CashBookPage() {
             <div ref={tableBodyRef} className="lg:flex-1 lg:min-h-0 lg:overflow-y-auto">
             {loading ? (
               <div className="p-4">
-                <p className="text-sm text-gray-400">Loading...</p>
+                <PageLoader />
               </div>
             ) : entries.length === 0 ? (
               <div className="p-4">

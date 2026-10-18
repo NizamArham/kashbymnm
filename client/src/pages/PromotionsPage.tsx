@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { PageLoader } from "../components/Loader";
 import { Plus, Ticket, Gift, Pencil, Trash2, Shuffle, Clock, CheckCircle2 } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Coupon, GiftVoucher } from "../lib/types";
@@ -139,7 +140,7 @@ function CouponsTab() {
       {error && <ErrorText>{error}</ErrorText>}
 
       {loading ? (
-        <p className="text-sm text-gray-400">Loading...</p>
+        <PageLoader />
       ) : coupons.length === 0 ? (
         <EmptyState icon={Ticket} title="No coupons yet" subtitle="Create one to offer a discount at checkout." />
       ) : (
@@ -416,7 +417,7 @@ function VouchersTab() {
       {error && <ErrorText>{error}</ErrorText>}
 
       {loading ? (
-        <p className="text-sm text-gray-400">Loading...</p>
+        <PageLoader />
       ) : vouchers.length === 0 ? (
         <EmptyState icon={Gift} title="No gift vouchers yet" subtitle="Issue one to give a customer a fixed Rs. balance to spend." />
       ) : (

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { PageLoader } from "../components/Loader";
 import { ChevronUp, ChevronDown, Download, BarChart3 } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { PageHeader, Card, StatCard, Table, Th, Td, ErrorText, DateRangePicker, Button, EmptyState } from "../components/ui";
@@ -285,7 +286,7 @@ export default function AnalyticsPage() {
       {error && <ErrorText>{error}</ErrorText>}
 
       {loading ? (
-        <p className="text-sm text-gray-400">Loading...</p>
+        <PageLoader />
       ) : !data ? null : (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-[repeat(15,minmax(0,1fr))] gap-3 mb-5">

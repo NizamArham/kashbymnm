@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { PageLoader } from "../components/Loader";
 import { Banknote, Check, Plus, Pencil, Trash2, X, Download } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Supplier } from "../lib/types";
@@ -517,7 +518,7 @@ export default function ChequesPage() {
       {actionError && <ErrorText>{actionError}</ErrorText>}
 
       {loading ? (
-        <p className="text-sm text-gray-400">Loading...</p>
+        <PageLoader />
       ) : activeTab === "issued" ? (
         issuedCheques.length === 0 ? (
           <EmptyState icon={Banknote} title="No self-written cheques recorded" subtitle="Cheques you write directly to a supplier will show here." />

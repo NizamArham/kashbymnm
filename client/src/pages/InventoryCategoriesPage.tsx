@@ -31,6 +31,7 @@ import { GenderNavTabs, GenderNavPanel, GenderNavItem } from "../components/Gend
 import { Button, Card, Input, ErrorText, EmptyState, Modal, Table, Th, Td, Badge, inventoryStatusTone } from "../components/ui";
 import { downloadTabularReport, buildReportFilename, todayLongDate } from "../lib/reportPdf";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
+import { readMemory, useRemembered, useRememberedScroll, writeMemory } from "../lib/viewMemory";
 
 interface SelectedFilter {
   gender?: ProductGender;
@@ -209,7 +210,10 @@ export default function InventoryCategoriesPage() {
   const [error, setError] = useState<string | null>(null);
   const [activeGender, setActiveGender] = useState<ProductGender | null>(null);
   const [selectedFilter, setSelectedFilter] = useState<SelectedFilter>({});
-  const [expandedProductId, setExpandedProductId] = useState<number | null>(null);
+  // Where the list was left — filters and search (kept in the address and remembered below), the open product, the
+  // scroll — is remembered for this tab (lib/viewMemory.ts), so another page and back finds it as it was.
+  const [expandedProductId, setExpandedProductId] = useRemembered<number | null>("inventory.expanded", null);
+  const leftQuery = useRef(readMemory<string>("inventory.qs") ?? "");
   // Set only when a product is picked from the search dropdown — floats
   // that one row to the top of the (still normally sorted) table so
   // it's visible without scrolling, without changing anyone else's
@@ -255,7 +259,8 @@ export default function InventoryCategoriesPage() {
 
   // ---- Restore filters from URL on mount ----
   useEffect(() => {
-    const p = new URLSearchParams(window.location.search);
+    // The address carries the filters; coming back to /inventory plain (from the sidebar) uses what was left.
+    const p = new URLSearchParams(window.location.search || leftQuery.current);
     const g = p.get("g") as ProductGender | null;
     const c = p.get("c");
     const s = p.get("s");
@@ -302,7 +307,9 @@ export default function InventoryCategoriesPage() {
     if (sortDir !== "asc") p.set("sd", sortDir);
     const qs = p.toString();
     window.history.replaceState({}, "", qs ? `?${qs}` : window.location.pathname);
+    writeMemory("inventory.qs", qs);
   }, [selectedFilter, appliedQuery, sortKey, sortDir]);
+  useRememberedScroll("inventory", !loading);
 
   // ---- Click outside closes dropdown + row menu ----
   useEffect(() => {
