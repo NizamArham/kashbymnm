@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { Truck } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Search, Truck } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { ExchangeOnTheWay, ParcelComingBack, ReturnPickup } from "../lib/types";
 import { ExchangeReceiveModal } from "./ExchangeNotice";
@@ -31,6 +31,8 @@ export function shareSummary(p: Pick<ReturnPickup, "pickup_charge" | "customer_s
 // What is on its way back to the shop, one compact row each — courier returns (with the button for whatever step they are at: Mark Received,
 // inspection report or Reject, refund paid), the old items of delivery exchanges, and parcels the courier couldn't deliver. A return or exchange that is
 // still to arrive has two buttons: Mark Received, and Cancel (which asks again, with an optional reason). Used on the Returns page and on Shipping.
+// The Returns page's list can get long, so by default it shows what needs doing plus the last few finished ones; a search box ("/" jumps to it)
+// finds anything, and the chips (Open / Completed / Cancelled / All) or "View all" show the rest.
 export default function ReturnPickupList({ status = "open", onChanged }: { status?: "open" | "closed" | "all"; onChanged?: () => void }) {
   const { runWithApproval } = useAdminApproval();
   const { user } = useAuth();
@@ -46,6 +48,11 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
   // Being cancelled: the second look, with an optional reason.
   const [cancelling, setCancelling] = useState<{ kind: "pickup"; p: ReturnPickup } | { kind: "exchange"; x: ExchangeOnTheWay } | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
+  // Finding things: a search over everything, and which slice of the list is shown ("recent" = what needs doing + the last few finished).
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<ListFilter>("recent");
+  const searchRef = useRef<HTMLInputElement>(null);
+  useKeyboardShortcut("/", () => searchRef.current?.focus(), { enabled: status !== "open" });
 
   const load = useCallback(() => {
     Promise.all([
@@ -135,6 +142,8 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
       const d = entry.d;
       return {
         key: `d${d.id}`,
+        group: "open" as RowGroup,
+        searchText: `${d.invoice} couldn't deliver ${d.customer_name ?? ""} ${d.partner_name ?? ""} ${d.tracking_number ?? ""} ${d.waybill_number ?? ""}`,
         saleId: d.sale_id,
         invoice: d.invoice,
         type: "Couldn't deliver",
@@ -161,6 +170,8 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
       const open = x.status === "awaiting_pickup";
       return {
         key: `x${x.id}`,
+        group: (open ? "open" : x.status === "received" ? "completed" : "cancelled") as RowGroup,
+        searchText: `${x.new_invoice} ${FLOW_LABEL.exchange} ${x.customer_name ?? ""} ${x.partner_name ?? ""} ${x.return_service ?? ""} ${exchangeStage(x)}`,
         saleId: x.new_sale_id,
         invoice: x.new_invoice,
         type: FLOW_LABEL.exchange,
@@ -187,6 +198,8 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
     const toArrive = p.stage === "approved" || p.stage === "on_the_way";
     return {
       key: `p${p.id}`,
+      group: (toArrive || ["received", "report_pending", "refund_due"].includes(p.stage) ? "open" : p.stage === "completed" ? "completed" : "cancelled") as RowGroup,
+      searchText: `${p.invoice} ${FLOW_LABEL.courier} ${p.customer_name ?? ""} ${p.partner_name ?? ""} ${p.tracking_number ?? ""} ${p.reason} ${courierStage(p)}`,
       saleId: p.sale_id,
       invoice: p.invoice,
       type: FLOW_LABEL.courier,
@@ -230,10 +243,68 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
     };
   });
 
+  // What to show. A search looks through everything; otherwise the chosen slice — by default what still needs doing, plus the last few finished.
+  const counts = {
+    open: tableRows.filter((r) => r.group === "open").length,
+    completed: tableRows.filter((r) => r.group === "completed").length,
+    cancelled: tableRows.filter((r) => r.group === "cancelled").length,
+  };
+  const q = query.trim().toLowerCase();
+  let shownRows = tableRows;
+  if (q) {
+    shownRows = tableRows.filter((r) => r.searchText.toLowerCase().includes(q));
+  } else if (status !== "open") {
+    if (filter === "recent") {
+      let finished = 0;
+      shownRows = tableRows.filter((r) => r.group === "open" || ++finished <= RECENT_FINISHED);
+    } else if (filter !== "all") {
+      shownRows = tableRows.filter((r) => r.group === filter);
+    }
+  }
+  const hiddenCount = tableRows.length - shownRows.length;
+  const showControls = status !== "open" && tableRows.length > 0;
+
   if (!rows && !error) return <PageLoader />;
   return (
     <div>
       {error && <ErrorText>{error}</ErrorText>}
+      {showControls && (
+        <div className="mb-3 flex flex-wrap items-center gap-3">
+          <div className="relative w-full sm:w-72">
+            <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <Input
+              ref={searchRef}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => e.key === "Escape" && (setQuery(""), searchRef.current?.blur())}
+              placeholder="Search invoice or customer  ( / )"
+              aria-label="Search returns and exchanges"
+              className="pl-9"
+            />
+          </div>
+          {!q && (
+            <TabToggle
+              value={filter}
+              onChange={setFilter}
+              options={[
+                { value: "recent", label: "Recent" },
+                { value: "open", label: `Open (${counts.open})` },
+                { value: "completed", label: `Completed (${counts.completed})` },
+                { value: "cancelled", label: `Cancelled (${counts.cancelled})` },
+                { value: "all", label: `All (${tableRows.length})` },
+              ]}
+            />
+          )}
+          {q && (
+            <p className="text-xs text-gray-400">
+              {shownRows.length} match{shownRows.length === 1 ? "" : "es"} for "{query.trim()}" —{" "}
+              <button type="button" onClick={() => setQuery("")} className="underline hover:text-gray-700">
+                clear
+              </button>
+            </p>
+          )}
+        </div>
+      )}
       {rows && tableRows.length === 0 && (
         <EmptyState
           icon={Truck}
@@ -241,7 +312,10 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
           subtitle="Parcels the courier couldn't deliver, customers' returns and exchange old items show here until they reach you."
         />
       )}
-      {tableRows.length > 0 && (
+      {tableRows.length > 0 && shownRows.length === 0 && (
+        <EmptyState icon={Search} title={q ? "Nothing matches that" : "Nothing here"} subtitle={q ? "Try an invoice number, a customer's name or the service." : "Try another view."} />
+      )}
+      {shownRows.length > 0 && (
         <Card className="overflow-hidden p-0">
           <div className="hidden grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1fr)_6.5rem_minmax(0,1.6fr)] gap-3 border-b border-gray-100 bg-gray-50/70 px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-gray-400 lg:grid">
             <span>Invoice</span>
@@ -252,7 +326,7 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
             <span>Status</span>
           </div>
           <div className="divide-y divide-gray-100">
-            {tableRows.map((r) => (
+            {shownRows.map((r) => (
               <div
                 key={r.key}
                 className="grid grid-cols-2 items-center gap-x-3 gap-y-1.5 px-4 py-3 text-sm lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1fr)_6.5rem_minmax(0,1.6fr)]"
@@ -279,6 +353,14 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
               </div>
             ))}
           </div>
+          {!q && status !== "open" && filter === "recent" && hiddenCount > 0 && (
+            <div className="border-t border-gray-100 px-4 py-2.5 text-center text-xs text-gray-500">
+              Showing {shownRows.length} of {tableRows.length} —{" "}
+              <button type="button" onClick={() => setFilter("all")} className="font-medium text-gray-900 underline hover:text-gray-600">
+                View all ({tableRows.length})
+              </button>
+            </div>
+          )}
         </Card>
       )}
       {step &&

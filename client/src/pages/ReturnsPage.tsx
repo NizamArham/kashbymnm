@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback, Fragment } from "react";
+import { useState, useEffect, useCallback, useRef, Fragment } from "react";
 import { useNavigate } from "react-router-dom";
 import { PageLoader } from "../components/Loader";
-import { RotateCcw, AlertTriangle, ChevronDown, ChevronRight, Download } from "lucide-react";
+import { RotateCcw, AlertTriangle, ChevronDown, ChevronRight, Download, Search } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Sale, ReturnRequest, ReturnApprovals } from "../lib/types";
 import { useAuth } from "../context/AuthContext";
@@ -614,6 +614,10 @@ function AllReturnsTab({ onDecided }: { onDecided: () => void }) {
 
   // Expand a row in place instead of a modal — shows the full detail, and for a pending request the approve / decline form too.
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  // Jump straight to one: a search over every return, whatever its date or status ("/" focuses it).
+  const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
+  useKeyboardShortcut("/", () => searchRef.current?.focus());
 
   async function load() {
     setLoading(true);
@@ -661,7 +665,14 @@ function AllReturnsTab({ onDecided }: { onDecided: () => void }) {
     );
   }
 
+  const q = query.trim().toLowerCase();
   const filtered = requests.filter((r) => {
+    if (q) {
+      // A search ignores the date range and status chips: it looks through everything.
+      return [r.invoice, r.customer_name, r.deleted_customer_snapshot, r.product_title, r.sku, r.reason, r.requested_by_name, r.decided_by_name, inStoreStage(r), `#${r.id}`]
+        .filter(Boolean)
+        .some((v) => String(v).toLowerCase().includes(q));
+    }
     if (statusFilter !== "all" && r.status !== statusFilter) return false;
     if (!startDate || !endDate) return true;
     const d = r.requested_at.slice(0, 10);
@@ -733,6 +744,18 @@ function AllReturnsTab({ onDecided }: { onDecided: () => void }) {
     <>
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
         <div className="flex gap-2 flex-wrap items-center">
+          <div className="relative w-full sm:w-64">
+            <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <Input
+              ref={searchRef}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => e.key === "Escape" && (setQuery(""), searchRef.current?.blur())}
+              placeholder="Search invoice or customer  ( / )"
+              aria-label="Search returns"
+              className="pl-9"
+            />
+          </div>
           <div className="w-40">
             <Dropdown
               value={statusFilter}
@@ -775,7 +798,11 @@ function AllReturnsTab({ onDecided }: { onDecided: () => void }) {
       </div>
 
       {error && <ErrorText>{error}</ErrorText>}
-      {!loading && <p className="text-xs text-gray-400 mb-3">{filtered.length} request(s) — click a row to see full details</p>}
+      {!loading && (
+        <p className="text-xs text-gray-400 mb-3">
+          {filtered.length} request(s){q ? ` matching "${query.trim()}" — all dates` : ""} — click a row to see full details
+        </p>
+      )}
 
       {loading ? (
         <PageLoader />
