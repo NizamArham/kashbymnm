@@ -750,11 +750,13 @@ export default function CustomerProfilePage() {
                   {customer.phone2 ? ` · ${customer.phone2}` : ""}
                 </p>
               </div>
-              <div className="ml-auto flex flex-wrap items-center gap-2">
+              {/* On a phone the buttons are just their icons, so they fit on one row. */}
+              <div className="flex w-full flex-wrap items-center gap-2 sm:ml-auto sm:w-auto">
                 {customer.balance_due > 0 && (
-                  <Button variant="primary" onClick={() => openPayment(customer)} className="inline-flex items-center gap-1.5">
-                    <Wallet size={14} />
-                    Record payment
+                  <Button variant="primary" title="Record payment" onClick={() => openPayment(customer)} className="inline-flex items-center gap-1.5">
+                    <Wallet size={16} />
+                    <span className="hidden sm:inline">Record payment</span>
+                    <span className="sr-only sm:hidden">Record payment</span>
                   </Button>
                 )}
                 {customer.phone && (
@@ -762,10 +764,12 @@ export default function CustomerProfilePage() {
                     href={whatsappLink(customer.phone)}
                     target="_blank"
                     rel="noopener noreferrer"
+                    title="Message on WhatsApp"
                     className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-green-600 transition hover:bg-gray-50"
                   >
-                    <MessageCircle size={14} />
-                    WhatsApp
+                    <MessageCircle size={16} />
+                    <span className="hidden sm:inline">WhatsApp</span>
+                    <span className="sr-only sm:hidden">WhatsApp</span>
                   </a>
                 )}
                 <ActionMenu
