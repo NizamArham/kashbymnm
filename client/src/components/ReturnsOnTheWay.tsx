@@ -5,13 +5,20 @@ import { ExchangeOnTheWay, ParcelComingBack, ReturnPickup } from "../lib/types";
 import { ExchangeReceiveModal } from "./ExchangeNotice";
 import { CourierReceivedModal, InspectionReportModal, RefundPaidModal, RejectReturnModal } from "./CourierReturnSteps";
 import CancelReasonModal from "./CancelReasonModal";
+import { RefundSlipMenu } from "./RefundSlipButton";
 import { useAuth } from "../context/AuthContext";
 import { FLOW_LABEL, courierNote, courierStage, exchangeStage } from "../lib/returnFlow";
 import { useAdminApproval } from "./AdminApproval";
-import { Button, Card, EmptyState, ErrorText, RefLink } from "./ui";
+import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
+import { Button, Card, EmptyState, ErrorText, Input, RefLink, TabToggle } from "./ui";
 import { PageLoader } from "./Loader";
 
 const money = (n: number) => `Rs. ${Math.round(n).toLocaleString()}`;
+
+type ListFilter = "recent" | "open" | "completed" | "cancelled" | "all";
+type RowGroup = "open" | "completed" | "cancelled";
+// How many finished (completed / cancelled) rows the default view keeps under the ones that still need doing.
+const RECENT_FINISHED = 4;
 
 // Who pays the delivery charge, in a few words.
 export function shareSummary(p: Pick<ReturnPickup, "pickup_charge" | "customer_share_pct" | "customer_share">): string {
@@ -136,6 +143,7 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
         via: d.partner_name ?? "Courier",
         at: d.coming_back_at,
         statusLabel: "On the way back",
+        statusExtra: null,
         actions: (
           <>
             <Button size="sm" variant="primary" onClick={() => parcelReturned(d)} disabled={busyId === -d.id}>
@@ -161,6 +169,7 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
         via: x.return_service ?? x.partner_name ?? "—",
         at: x.created_at,
         statusLabel: exchangeStage(x),
+        statusExtra: null,
         actions: open ? (
           <>
             <Button size="sm" variant="primary" onClick={() => setReceivingExchange(x)}>
@@ -186,6 +195,8 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
       via: p.partner_name ?? "—",
       at: p.created_at,
       statusLabel: courierStage(p),
+      // A completed return whose refund was paid: the "Refund payment done" slip, to print.
+      statusExtra: p.stage === "completed" && p.refunded_at ? <RefundSlipMenu slipKey={`pickup-${p.id}`} /> : null,
       actions: (
         <>
           {toArrive && (
@@ -258,7 +269,11 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
                 <span className="text-xs text-gray-400">{r.at.slice(0, 10)}</span>
                 {/* The status on its own line, the buttons together on the next. */}
                 <div className="col-span-2 lg:col-span-1">
-                  <p className="text-xs text-gray-500">{r.statusLabel}</p>
+                  <p className="flex items-center justify-between gap-2 text-xs text-gray-500">
+                    {r.statusLabel}
+                    {/* The row's three-dot menu, at its far end. */}
+                    {r.statusExtra}
+                  </p>
                   {r.actions && <div className="mt-1.5 flex flex-wrap items-center gap-2">{r.actions}</div>}
                 </div>
               </div>

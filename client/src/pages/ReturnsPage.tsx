@@ -10,10 +10,12 @@ import OnlineExchangeModal from "../components/OnlineExchangeModal";
 import ReturnPickupList from "../components/ReturnsOnTheWay";
 import ReturnApprovalList from "../components/ReturnApprovals";
 import ReturnRequestPanel from "../components/ReturnRequestPanel";
+import { RefundSlipMenu } from "../components/RefundSlipButton";
 import RefundMethodPicker, { useCustomerBankAccounts } from "../components/RefundMethodPicker";
 import { AUTO_APPROVED, FLOW_LABEL, inStoreStage } from "../lib/returnFlow";
 import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
 import { useSortableData } from "../lib/useSortableData";
+import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { useCopyToClipboard } from "../lib/useCopyToClipboard";
 import {
   PageHeader,
@@ -830,7 +832,10 @@ function AllReturnsTab({ onDecided }: { onDecided: () => void }) {
                         </Td>
                         <Td className="max-w-[200px] truncate">{r.reason}</Td>
                         <Td>
-                          <Badge label={inStoreStage(r)} tone={statusTone(r.status)} />
+                          <span className="inline-flex items-center gap-2">
+                            <Badge label={inStoreStage(r)} tone={statusTone(r.status)} />
+                            {r.status === "approved" && r.resolution === "refund" && r.refund_paid === 1 && r.return_id ? <RefundSlipMenu slipKey={`return-${r.return_id}`} /> : null}
+                          </span>
                         </Td>
                         <Td>
                           {r.decided_by_name ?? "—"}
@@ -882,6 +887,7 @@ function AllReturnsTab({ onDecided }: { onDecided: () => void }) {
                     </div>
                     <div className="flex-shrink-0 flex items-center gap-2">
                       <Badge label={inStoreStage(r)} tone={statusTone(r.status)} />
+                      {r.status === "approved" && r.resolution === "refund" && r.refund_paid === 1 && r.return_id ? <RefundSlipMenu slipKey={`return-${r.return_id}`} /> : null}
                       {isExpanded ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-400" />}
                     </div>
                   </div>

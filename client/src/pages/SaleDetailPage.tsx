@@ -16,6 +16,7 @@ import OnlineExchangeModal from "../components/OnlineExchangeModal";
 import ExchangeNotice, { ExchangedOutNotice } from "../components/ExchangeNotice";
 import { shareSummary } from "../components/ReturnsOnTheWay";
 import { ExchangeApprovalBox } from "../components/ReturnApprovals";
+import RefundSlipButton from "../components/RefundSlipButton";
 import { AUTO_APPROVED, FLOW_LABEL, courierNote, courierStage, decidedLine, exchangeRequestStage } from "../lib/returnFlow";
 import { useAuth } from "../context/AuthContext";
 import { clearExchangeDraft, exchangeDraftFor } from "../lib/exchangeDraft";
@@ -476,21 +477,24 @@ export default function SaleDetailPage() {
                 {p.approval_status === "approved" && (
                   <p className="mt-0.5 text-xs text-gray-400">{decidedLine(p.auto_approved === 1, "approved", p.approved_by_name, p.approved_at)}</p>
                 )}
-                {p.report_status === "approved" && p.pickup_charge > 0 && <p className="mt-0.5 text-xs text-gray-500">{shareSummary(p)}</p>}
                 {p.stage === "rejected" && (
                   <p className="mt-0.5 text-xs text-red-600">
                     Rejected after inspection{p.report_decision_reason ? ` — ${p.report_decision_reason}` : ""}. Nothing was refunded.
                   </p>
                 )}
+                {p.report_status === "approved" && p.pickup_charge > 0 && <p className="mt-0.5 text-xs text-gray-500">{shareSummary(p)}</p>}
                 {p.report_status === "approved" && (
                   <p className="mt-0.5 text-xs text-gray-400">
                     {p.report_auto_approved === 1 ? `Inspection report — ${AUTO_APPROVED}` : `Inspection report approved by ${p.report_decided_by_name ?? "an admin"}`}
                   </p>
                 )}
                 {p.stage === "completed" && p.refunded_at && (
-                  <p className="mt-0.5 text-xs text-gray-400">
-                    Refund of Rs. {Math.round(p.refund_due).toLocaleString()} paid by {p.refund_method === "bank_transfer" ? `bank transfer${p.refund_account_label ? ` (${p.refund_account_label})` : ""}` : "cash"} on{" "}
-                    {p.refunded_at.slice(0, 10)}
+                  <p className="mt-1 flex items-center gap-2 text-xs text-gray-400">
+                    <span>
+                      Refund of Rs. {Math.round(p.refund_due).toLocaleString()} paid by {p.refund_method === "bank_transfer" ? `bank transfer${p.refund_account_label ? ` (${p.refund_account_label})` : ""}` : "cash"} on{" "}
+                      {p.refunded_at.slice(0, 10)}
+                    </span>
+                    <RefundSlipButton slipKey={`pickup-${p.id}`} />
                   </p>
                 )}
               </div>

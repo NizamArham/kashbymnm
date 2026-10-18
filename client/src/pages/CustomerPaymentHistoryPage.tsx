@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { PageLoader } from "../components/Loader";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Receipt, Download, Copy, Check, Wallet, Truck } from "lucide-react";
+import RefundSlipButton from "../components/RefundSlipButton";
 import { api, ApiRequestError } from "../lib/api";
 import { Customer } from "../lib/types";
 import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
@@ -11,13 +12,13 @@ import { PageHeader, Card, Table, Th, Td, EmptyState, ErrorText, DateRangePicker
 
 interface LedgerEntry {
   date: string;
-  type: "sale" | "payment" | "cheque" | "credit";
+  type: "sale" | "payment" | "cheque" | "credit" | "refund" | "returned" | "deduction";
   // What the Type column shows. A store credit granted for a return is
   // its own kind so returns stand out from other credit.
   // "courier": a COD order the courier delivered and collected — paid, with the
   // courier until they pay it over.
   // "on_delivery": a COD order still on its way — paid at the door, not owed on account.
-  kind: "sale" | "payment" | "cheque" | "credit" | "return" | "courier" | "on_delivery" | "exchange";
+  kind: "sale" | "payment" | "cheque" | "credit" | "return" | "refund" | "deduction" | "courier" | "on_delivery" | "exchange";
   // The row's short main text; label is the same thing as a sentence.
   title: string;
   label: string;
@@ -31,6 +32,11 @@ interface LedgerEntry {
   details?: string[];
   sale_id?: number;
   sale_invoice?: string;
+  // On a "paid out" row (money paid back for a return): the key its "Refund payment done" slip is fetched by.
+  refund_key?: string;
+  // Rows about a return paid back in money show their amount with this word under it (returned / paid for courier / paid out) instead of a + or −;
+  // the Balance column still moves with them.
+  amount_label?: string;
 }
 
 const money = (n: number) => `Rs. ${n.toLocaleString()}`;
@@ -42,6 +48,8 @@ const PILL: Record<LedgerEntry["kind"], { text: string; tone: BadgeTone }> = {
   payment: { text: "Payment", tone: "success" },
   cheque: { text: "Cheque", tone: "success" },
   return: { text: "Return", tone: "outline" },
+  refund: { text: "Paid out", tone: "outline" },
+  deduction: { text: "Deducted", tone: "outline" },
   credit: { text: "Credit", tone: "outline" },
   courier: { text: "With courier", tone: "success" },
   on_delivery: { text: "On delivery", tone: "outline" },
@@ -128,6 +136,8 @@ export default function CustomerPaymentHistoryPage() {
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [allEntries, setAllEntries] = useState<LedgerEntry[]>([]);
   const [finalBalance, setFinalBalance] = useState(0);
+  // Refunds approved for returns but not paid out yet — part of a credit balance that is money to hand back, not store credit.
+  const [refundOwed, setRefundOwed] = useState(0);
   const [withCourier, setWithCourier] = useState<WithCourier[]>([]);
   const [onDelivery, setOnDelivery] = useState<WithCourier[]>([]);
   const [loading, setLoading] = useState(true);
@@ -144,13 +154,14 @@ export default function CustomerPaymentHistoryPage() {
       setLoading(true);
       setError(null);
       try {
-        const result = await api.get<{ customer: Customer; entries: LedgerEntry[]; final_balance: number; with_courier: WithCourier[]; on_delivery: WithCourier[] }>(
+        const result = await api.get<{ customer: Customer; entries: LedgerEntry[]; final_balance: number; refund_owed?: number; with_courier: WithCourier[]; on_delivery: WithCourier[] }>(
           `/customers/${id}/payment-history`
         );
         if (cancelled) return;
         setCustomer(result.customer);
         setAllEntries(result.entries);
         setFinalBalance(result.final_balance);
+        setRefundOwed(result.refund_owed ?? 0);
         setWithCourier(result.with_courier ?? []);
         setOnDelivery(result.on_delivery ?? []);
       } catch (err) {
@@ -233,7 +244,7 @@ export default function CustomerPaymentHistoryPage() {
           ...(entry.details ?? []).map((line) => (isSale ? `Note: ${line}` : line)),
         ].filter(Boolean);
         return {
-          cells: [entry.date.slice(0, 10), entry.title, PILL[entry.kind].text, signedAmount(entry.effect, true), balanceText(entry.running_balance, false).text],
+          cells: [entry.date.slice(0, 10), entry.title, PILL[entry.kind].text, entry.amount_label ? `${num(entry.amount)} ${entry.amount_label}` : signedAmount(entry.effect, true), balanceText(entry.running_balance, false).text],
           styles: [undefined, undefined, undefined, undefined, undefined],
           ...(detailParts.length > 0 ? { detail: detailParts.join(isSale ? "\n" : "   |   ") } : {}),
         };
@@ -317,7 +328,13 @@ export default function CustomerPaymentHistoryPage() {
                 {headline.text}
               </p>
               <p className="text-xs text-gray-400 mt-0.5">
-                {finalBalance > 0 ? "still to be paid" : finalBalance < 0 ? "available to spend" : "nothing owed"}
+                {refundOwed > 0
+                  ? `includes ${money(refundOwed)} refund still to be paid out`
+                  : finalBalance > 0
+                  ? "still to be paid"
+                  : finalBalance < 0
+                  ? "available to spend"
+                  : "nothing owed"}
               </p>
             </div>
             <div className="sm:px-6">
@@ -426,10 +443,21 @@ export default function CustomerPaymentHistoryPage() {
                       )}
                     </Td>
                     <Td>
-                      <Badge label={pill.text} tone={pill.tone} />
+                      <div className="flex items-center gap-2">
+                        <Badge label={pill.text} tone={pill.tone} />
+                        {entry.refund_key && <RefundSlipButton slipKey={entry.refund_key} />}
+                      </div>
                     </Td>
                     <Td className="text-right tabular-nums whitespace-nowrap font-medium text-gray-900">
-                      {signedAmount(entry.effect)}
+                      {entry.amount_label ? (
+                        // Goods returned, or money paid out for them — it doesn't change what they owe, so it has no + or −.
+                        <>
+                          <div>{num(entry.amount)}</div>
+                          <div className="text-[11px] font-normal text-gray-400">{entry.amount_label}</div>
+                        </>
+                      ) : (
+                        signedAmount(entry.effect)
+                      )}
                     </Td>
                     <Td className={`text-right tabular-nums whitespace-nowrap ${bal.className}`}>{bal.text}</Td>
                   </tr>
@@ -439,7 +467,7 @@ export default function CustomerPaymentHistoryPage() {
           </Table>
           <p className="text-xs text-gray-400 px-4 py-3 border-t border-gray-100">
             <strong className="font-medium text-gray-500">+</strong> adds to what they owe (a sale) · <strong className="font-medium text-gray-500">−</strong> takes
-            away from it (a payment, or store credit for a return) · <strong className="font-medium text-gray-500">Balance</strong> = what's owed after counting that credit.
+            away from it (a payment, or store credit for a return) · a return paid back in money reads <strong className="font-medium text-gray-500">Returned</strong> (what the goods came to — the shop owes them that), then what is <strong className="font-medium text-gray-500">deducted</strong> (the delivery charge), then <strong className="font-medium text-gray-500">Paid out</strong> (with a printable receipt), and the balance is settled · <strong className="font-medium text-gray-500">Balance</strong> = what's owed after counting that credit.
           </p>
         </Card>
       )}

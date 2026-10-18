@@ -573,6 +573,8 @@ export interface ReturnRequest {
   product_id: number | null;
   allow_returns: number;
   refund_amount?: number | null;
+  // 1 once a refund for this return has actually been paid (it is in the cash book) — only then is there a payment slip to print.
+  refund_paid?: number;
 }
 
 export type DeliveryStatus = "pending" | "packed" | "dispatched" | "delivered" | "returned" | "cancelled";
