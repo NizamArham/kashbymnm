@@ -1057,9 +1057,8 @@ export default function ViewCustomersPage() {
 
                             {expandedTab === "overview" && (
                               <div className="bg-white border border-gray-200 rounded-xl p-4">
-                                {/* Four numbers, and under each the one button (or menu) that is about it. */}
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-5 text-sm">
-                                  <div className="flex flex-col">
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-4 text-sm">
+                                  <div>
                                     <p className="text-xs text-gray-400">Loyalty points</p>
                                     <p className="text-gray-900 font-medium">{expandedDetail.loyalty_points}</p>
                                     {expandedDetail.loyalty_blocked === 1 && (
@@ -1067,53 +1066,16 @@ export default function ViewCustomersPage() {
                                         Doesn't earn points{expandedDetail.loyalty_block_reason ? ` — ${expandedDetail.loyalty_block_reason}` : ""}
                                       </p>
                                     )}
-                                    <div className="mt-auto pt-3">
-                                      <ActionMenu
-                                        label="Points"
-                                        icon={<Star size={12} />}
-                                        align="left"
-                                        items={[
-                                          { label: "Points history", icon: <Star size={14} />, onClick: () => navigate(`/customers/${expandedDetail.id}/loyalty-history`) },
-                                          ...(expandedDetail.loyalty_points >= 500
-                                            ? [{ label: "Redeem points", icon: <Star size={14} />, onClick: () => openRedeem(expandedDetail) }]
-                                            : []),
-                                          // Opens WhatsApp with their points balance typed in, ready to send.
-                                          ...(expandedDetail.phone
-                                            ? [
-                                                {
-                                                  label: "Send points on WhatsApp",
-                                                  icon: <MessageCircle size={14} />,
-                                                  onClick: () =>
-                                                    window.open(
-                                                      whatsappMessageLink(expandedDetail.phone!, loyaltyPointsMessage(expandedDetail.name, expandedDetail.loyalty_points)),
-                                                      "_blank",
-                                                      "noopener,noreferrer"
-                                                    ),
-                                                },
-                                              ]
-                                            : []),
-                                          ...(isAdmin ? [{ label: "Adjust points", icon: <Pencil size={14} />, onClick: () => setLoyaltyTarget(expandedDetail) }] : []),
-                                        ]}
-                                      />
-                                    </div>
                                   </div>
 
-                                  <div className="flex flex-col">
+                                  <div>
                                     <p className="text-xs text-gray-400">Balance due</p>
                                     <p className="text-gray-900 font-medium">
                                       {expandedDetail.balance_due > 0 ? `Rs. ${expandedDetail.balance_due.toLocaleString()}` : "Settled"}
                                     </p>
-                                    <div className="mt-auto pt-3">
-                                      {expandedDetail.balance_due > 0 && (
-                                        <Button variant="primary" size="sm" onClick={() => openPayment(expandedDetail)} className="inline-flex items-center gap-1.5">
-                                          <Wallet size={12} />
-                                          Record payment
-                                        </Button>
-                                      )}
-                                    </div>
                                   </div>
 
-                                  <div className="flex flex-col">
+                                  <div>
                                     <p className="text-xs text-gray-400">Store credit</p>
                                     <p className="text-gray-900 font-medium">
                                       {expandedDetail.store_credit_balance > 0
@@ -1151,101 +1113,131 @@ export default function ViewCustomersPage() {
                                         <p className="text-[10px] text-gray-400">Applied automatically at checkout</p>
                                       </div>
                                     )}
-                                    <div className="mt-auto pt-3">
-                                      {isAdmin && (
-                                        <ActionMenu
-                                          label="Store credit"
-                                          icon={<Wallet size={12} />}
-                                          align="left"
-                                          items={[
-                                            { label: "Add store credit", icon: <Plus size={14} />, onClick: () => setAddCreditFor(expandedDetail) },
-                                            ...(expandedDetail.store_credit_balance > 0
-                                              ? [{ label: "Refund store credit", icon: <Wallet size={14} />, onClick: () => setRefundCreditFor(expandedDetail) }]
-                                              : []),
-                                          ]}
-                                        />
-                                      )}
-                                    </div>
                                   </div>
 
-                                  <div className="flex flex-col">
+                                  <div>
                                     <p className="text-xs text-gray-400">Last order</p>
                                     <p className="text-gray-900 font-medium">
                                       {expandedDetail.last_order_date ? expandedDetail.last_order_date.slice(0, 10) : "No orders yet"}
                                     </p>
-                                    <div className="mt-auto pt-3">
-                                      <ActionMenu
-                                        label={slippingBalance ? "Preparing..." : "History"}
-                                        icon={<Receipt size={12} />}
-                                        align="left"
-                                        items={[
-                                          { label: "Order history", icon: <ShoppingBag size={14} />, onClick: () => navigate(`/customers/${expandedDetail.id}/orders`) },
-                                          { label: "Payment history", icon: <Receipt size={14} />, onClick: () => navigate(`/customers/${expandedDetail.id}/payment-history`) },
-                                          {
-                                            // Quick slip: what they owe right now, with our bank details.
-                                            label: "Balance slip",
-                                            icon: <FileText size={14} />,
-                                            onClick: async () => {
-                                              if (slippingBalance) return;
-                                              setSlippingBalance(true);
-                                              setError(null);
-                                              try {
-                                                await downloadBalanceSlip(expandedDetail.id);
-                                              } catch (err) {
-                                                setError(err instanceof Error ? err.message : "Couldn't create the balance slip");
-                                              } finally {
-                                                setSlippingBalance(false);
-                                              }
-                                            },
-                                          },
-                                        ]}
-                                      />
-                                    </div>
                                   </div>
                                 </div>
 
-                                <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-100">
-                                  <div>
-                                    {expandedDetail.phone ? (
-                                      <a
-                                        href={whatsappLink(expandedDetail.phone)}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="inline-flex items-center gap-1.5 text-green-600 hover:text-green-700 font-medium text-sm"
-                                      >
-                                        <MessageCircle size={14} />
-                                        Message on WhatsApp
-                                      </a>
-                                    ) : (
-                                      <p className="text-xs text-gray-300">No phone number on file</p>
-                                    )}
-                                  </div>
-
+                                {/* Everything you can do for this customer, in one row. */}
+                                <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-4">
+                                  {expandedDetail.balance_due > 0 && (
+                                    <Button variant="primary" size="sm" onClick={() => openPayment(expandedDetail)} className="inline-flex items-center gap-1.5">
+                                      <Wallet size={12} />
+                                      Record payment
+                                    </Button>
+                                  )}
+                                  <ActionMenu
+                                    label="Points"
+                                    icon={<Star size={12} />}
+                                    align="left"
+                                    items={[
+                                      { label: "Points history", icon: <Star size={14} />, onClick: () => navigate(`/customers/${expandedDetail.id}/loyalty-history`) },
+                                      ...(expandedDetail.loyalty_points >= 500
+                                        ? [{ label: "Redeem points", icon: <Star size={14} />, onClick: () => openRedeem(expandedDetail) }]
+                                        : []),
+                                      // Opens WhatsApp with their points balance typed in, ready to send.
+                                      ...(expandedDetail.phone
+                                        ? [
+                                            {
+                                              label: "Send points on WhatsApp",
+                                              icon: <MessageCircle size={14} />,
+                                              onClick: () =>
+                                                window.open(
+                                                  whatsappMessageLink(expandedDetail.phone!, loyaltyPointsMessage(expandedDetail.name, expandedDetail.loyalty_points)),
+                                                  "_blank",
+                                                  "noopener,noreferrer"
+                                                ),
+                                            },
+                                          ]
+                                        : []),
+                                      ...(isAdmin ? [{ label: "Adjust points", icon: <Pencil size={14} />, onClick: () => setLoyaltyTarget(expandedDetail) }] : []),
+                                    ]}
+                                  />
                                   {isAdmin && (
                                     <ActionMenu
+                                      label="Store credit"
+                                      icon={<Wallet size={12} />}
+                                      align="left"
                                       items={[
-                                        expandedDetail.is_suspended === 1
-                                          ? {
-                                              label: "Reactivate customer",
-                                              icon: <UserCheck size={14} />,
-                                              onClick: () => {
-                                                setReactivateTarget(expandedDetail);
-                                                setReactivateReason("");
-                                                setReactivateError(null);
-                                              },
-                                            }
-                                          : {
-                                              label: "Suspend customer",
-                                              icon: <UserX size={14} />,
-                                              onClick: () => {
-                                                setSuspendTarget(expandedDetail);
-                                                setSuspendReason("");
-                                                setSuspendError(null);
-                                              },
-                                            },
-                                        { label: "Delete customer", icon: <Trash2 size={14} />, danger: true, onClick: () => openDelete(expandedDetail) },
+                                        { label: "Add store credit", icon: <Plus size={14} />, onClick: () => setAddCreditFor(expandedDetail) },
+                                        ...(expandedDetail.store_credit_balance > 0
+                                          ? [{ label: "Refund store credit", icon: <Wallet size={14} />, onClick: () => setRefundCreditFor(expandedDetail) }]
+                                          : []),
                                       ]}
                                     />
+                                  )}
+                                  <ActionMenu
+                                    label={slippingBalance ? "Preparing..." : "History"}
+                                    icon={<Receipt size={12} />}
+                                    align="left"
+                                    items={[
+                                      { label: "Order history", icon: <ShoppingBag size={14} />, onClick: () => navigate(`/customers/${expandedDetail.id}/orders`) },
+                                      { label: "Payment history", icon: <Receipt size={14} />, onClick: () => navigate(`/customers/${expandedDetail.id}/payment-history`) },
+                                      {
+                                        // Quick slip: what they owe right now, with our bank details.
+                                        label: "Balance slip",
+                                        icon: <FileText size={14} />,
+                                        onClick: async () => {
+                                          if (slippingBalance) return;
+                                          setSlippingBalance(true);
+                                          setError(null);
+                                          try {
+                                            await downloadBalanceSlip(expandedDetail.id);
+                                          } catch (err) {
+                                            setError(err instanceof Error ? err.message : "Couldn't create the balance slip");
+                                          } finally {
+                                            setSlippingBalance(false);
+                                          }
+                                        },
+                                      },
+                                    ]}
+                                  />
+                                  {expandedDetail.phone ? (
+                                    <a
+                                      href={whatsappLink(expandedDetail.phone)}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-green-600 transition hover:bg-gray-50"
+                                    >
+                                      <MessageCircle size={12} />
+                                      WhatsApp
+                                    </a>
+                                  ) : (
+                                    <span className="text-xs text-gray-300">No phone number on file</span>
+                                  )}
+
+                                  {isAdmin && (
+                                    <div className="ml-auto">
+                                      <ActionMenu
+                                        items={[
+                                          expandedDetail.is_suspended === 1
+                                            ? {
+                                                label: "Reactivate customer",
+                                                icon: <UserCheck size={14} />,
+                                                onClick: () => {
+                                                  setReactivateTarget(expandedDetail);
+                                                  setReactivateReason("");
+                                                  setReactivateError(null);
+                                                },
+                                              }
+                                            : {
+                                                label: "Suspend customer",
+                                                icon: <UserX size={14} />,
+                                                onClick: () => {
+                                                  setSuspendTarget(expandedDetail);
+                                                  setSuspendReason("");
+                                                  setSuspendError(null);
+                                                },
+                                              },
+                                          { label: "Delete customer", icon: <Trash2 size={14} />, danger: true, onClick: () => openDelete(expandedDetail) },
+                                        ]}
+                                      />
+                                    </div>
                                   )}
                                 </div>
                               </div>
