@@ -211,16 +211,17 @@ export function generateRefundSlip(slip: RefundSlipData, businessInfo: BusinessI
   y += 12;
   doc.setFontSize(12);
   kvRow("Refunded", (x, yy) => doc.text(`${slip.total.toLocaleString()}LKR`, x, yy));
-  // Where a transfer went — only enough to show on an invoice: the last four digits, and on the next line just the bank. (No holder name,
-  // branch or full number on paper.)
+  // Where a transfer went — the account's name, then only the last four digits of its number, then the bank. (No branch or full number on
+  // paper.)
   if (slip.method === "bank_transfer" && slip.bank) {
-    kvRow("Paid Into", (x, yy) => doc.text(maskAccount(slip.bank!.account_number), x, yy));
+    kvRow("Paid Into", (x, yy) => doc.text(slip.bank!.account_name, x, yy));
     doc.setTextColor(20);
+    doc.text(maskAccount(slip.bank.account_number), valueX, y);
+    y += 5.8;
     doc.text(slip.bank.bank_name, valueX, y);
     y += 5.8;
   }
-  // The shop, not the person — who paid is in the footer.
-  kvRow("Paid By", (x, yy) => doc.text(businessName, x, yy));
+  // (Who paid is in the footer, as on the invoice — no "Paid By" row here.)
 
   y += 4;
   doc.setFont("helvetica", "italic");
