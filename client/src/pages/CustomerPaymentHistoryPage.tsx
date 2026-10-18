@@ -284,6 +284,31 @@ export default function CustomerPaymentHistoryPage({ customerId }: { customerId?
 
   useKeyboardShortcut("d", downloadPdf, { ctrlOrCmd: true, shift: true, enabled: !!customer && filteredEntries.length > 0 });
 
+  const dateRangeRow = (
+    <div className="flex items-center gap-3 flex-wrap">
+      <p className="text-xs text-gray-500">Date range</p>
+      <DateRangePicker startDate={startDate} endDate={endDate} onChange={(s, e) => { setStartDate(s); setEndDate(e); }} />
+      <button
+        onClick={() => {
+          setStartDate(ninetyDaysAgoISO());
+          setEndDate(toISODate(new Date()));
+        }}
+        className="text-xs text-gray-400 hover:text-gray-700 underline"
+      >
+        Reset to last 90 days
+      </button>
+      <button
+        onClick={() => {
+          setStartDate(null);
+          setEndDate(null);
+        }}
+        className="text-xs text-gray-400 hover:text-gray-700 underline"
+      >
+        Show everything
+      </button>
+    </div>
+  );
+
   return (
     <div>
       {!embedded && (
@@ -351,7 +376,31 @@ export default function CustomerPaymentHistoryPage({ customerId }: { customerId?
         />
       )}
 
-      {customer && (
+      {/* As a tab on the profile the three numbers are already at the top of the page, so only the explanations remain. */}
+      {customer && embedded && (courierTotal > 0 || onDeliveryTotal > 0 || refundOwed > 0 || (credit > 0 && owed > 0)) && (
+        <div className="mb-3 space-y-1.5 text-xs text-gray-600">
+          {refundOwed > 0 && <p>Balance includes {money(refundOwed)} refund still to be paid out.</p>}
+          {courierTotal > 0 && (
+            <p className="flex items-start gap-1.5">
+              <Check size={13} className="mt-px flex-shrink-0 text-emerald-600" />
+              <span>{courierSentence}</span>
+            </p>
+          )}
+          {onDeliveryTotal > 0 && (
+            <p className="flex items-start gap-1.5">
+              <Truck size={13} className="mt-px flex-shrink-0 text-gray-500" />
+              <span>{onDeliverySentence}</span>
+            </p>
+          )}
+          {credit > 0 && owed > 0 && (
+            <p className="text-gray-400">
+              Balance = {money(owed)} owed − {money(credit)} store credit. The credit comes off automatically at the next payment or invoice.
+            </p>
+          )}
+        </div>
+      )}
+
+      {customer && !embedded && (
         <Card className="mb-4">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-0 sm:divide-x sm:divide-gray-100">
             <div className="sm:pr-6">
@@ -398,30 +447,7 @@ export default function CustomerPaymentHistoryPage({ customerId }: { customerId?
         </Card>
       )}
 
-      <Card className="mb-4">
-        <div className="flex items-center gap-3 flex-wrap">
-          <p className="text-xs text-gray-500">Date range</p>
-          <DateRangePicker startDate={startDate} endDate={endDate} onChange={(s, e) => { setStartDate(s); setEndDate(e); }} />
-          <button
-            onClick={() => {
-              setStartDate(ninetyDaysAgoISO());
-              setEndDate(toISODate(new Date()));
-            }}
-            className="text-xs text-gray-400 hover:text-gray-700 underline"
-          >
-            Reset to last 90 days
-          </button>
-          <button
-            onClick={() => {
-              setStartDate(null);
-              setEndDate(null);
-            }}
-            className="text-xs text-gray-400 hover:text-gray-700 underline"
-          >
-            Show everything
-          </button>
-        </div>
-      </Card>
+      {embedded ? <div className="mb-3">{dateRangeRow}</div> : <Card className="mb-4">{dateRangeRow}</Card>}
 
       {error && <ErrorText>{error}</ErrorText>}
 

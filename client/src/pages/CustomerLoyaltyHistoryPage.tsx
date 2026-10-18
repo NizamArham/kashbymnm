@@ -76,7 +76,7 @@ export default function CustomerLoyaltyHistoryPage({ customerId }: { customerId?
       )}
 
       {embedded ? (
-        <p className="mb-3 text-sm text-gray-500">{customer ? `${entries.length} transaction${entries.length === 1 ? "" : "s"} · ${customer.loyalty_points} points now` : ""}</p>
+        <p className="mb-3 text-sm text-gray-500">{`${entries.length} transaction${entries.length === 1 ? "" : "s"}`}</p>
       ) : (
         <PageHeader
           title={customer ? `${customer.name}'s loyalty points history` : "Loyalty points history"}
