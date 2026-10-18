@@ -1072,7 +1072,6 @@ export default function ViewCustomersPage() {
                                         label="Points"
                                         icon={<Star size={12} />}
                                         align="left"
-                                        triggerClassName="w-full"
                                         items={[
                                           { label: "Points history", icon: <Star size={14} />, onClick: () => navigate(`/customers/${expandedDetail.id}/loyalty-history`) },
                                           ...(expandedDetail.loyalty_points >= 500
@@ -1106,7 +1105,7 @@ export default function ViewCustomersPage() {
                                     </p>
                                     <div className="mt-auto pt-3">
                                       {expandedDetail.balance_due > 0 && (
-                                        <Button variant="primary" size="sm" onClick={() => openPayment(expandedDetail)} className="w-full inline-flex items-center justify-center gap-1.5">
+                                        <Button variant="primary" size="sm" onClick={() => openPayment(expandedDetail)} className="inline-flex items-center gap-1.5">
                                           <Wallet size={12} />
                                           Record payment
                                         </Button>
@@ -1158,7 +1157,6 @@ export default function ViewCustomersPage() {
                                           label="Store credit"
                                           icon={<Wallet size={12} />}
                                           align="left"
-                                          triggerClassName="w-full"
                                           items={[
                                             { label: "Add store credit", icon: <Plus size={14} />, onClick: () => setAddCreditFor(expandedDetail) },
                                             ...(expandedDetail.store_credit_balance > 0
@@ -1180,7 +1178,6 @@ export default function ViewCustomersPage() {
                                         label={slippingBalance ? "Preparing..." : "History"}
                                         icon={<Receipt size={12} />}
                                         align="left"
-                                        triggerClassName="w-full"
                                         items={[
                                           { label: "Order history", icon: <ShoppingBag size={14} />, onClick: () => navigate(`/customers/${expandedDetail.id}/orders`) },
                                           { label: "Payment history", icon: <Receipt size={14} />, onClick: () => navigate(`/customers/${expandedDetail.id}/payment-history`) },
