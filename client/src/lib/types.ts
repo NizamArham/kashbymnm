@@ -407,6 +407,16 @@ export interface SaleExchangeOut {
   }[];
 }
 
+export interface SalePaymentEntry {
+  id: number;
+  entry_date: string;
+  type: "income" | "expense";
+  amount: number;
+  payment_method: string | null;
+  notes: string | null;
+  transaction_code: string | null;
+}
+
 export interface Sale {
   id: number;
   invoice: string;
@@ -473,6 +483,13 @@ export interface Sale {
   // For an exchange paid up front: the part of the customer's pickup-charge share that was.
   delivery_pickup_prepaid?: number | null;
   delivery_status?: DeliveryStatus | null;
+  // When each stage of the delivery happened (single-sale GET only).
+  delivery_waybill_number?: string | null;
+  delivery_packed_at?: string | null;
+  delivery_dispatched_at?: string | null;
+  delivery_delivered_at?: string | null;
+  // The cash book's entries against this bill (single-sale GET only).
+  payments?: SalePaymentEntry[];
   exchange?: SaleExchange | null;
   // On a quotation for an exchange by delivery (set on the quotation's own page / on lists).
   exchange_draft?: string | null;

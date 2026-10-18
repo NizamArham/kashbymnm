@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, Fragment } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { PageLoader } from "../components/Loader";
 import { RotateCcw, AlertTriangle, ChevronDown, ChevronRight, Download, Search } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
@@ -180,7 +180,18 @@ function RequestReturnTab({ onRequested }: { onRequested: () => void }) {
   const [how, setHow] = useState<"shop" | "courier">("shop");
   const [showExchange, setShowExchange] = useState(false);
 
-  async function handleLookup() {
+  // "Return or exchange items" on an invoice's own page lands here with the bill already found.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const invoice = searchParams.get("invoice");
+    if (!invoice) return;
+    setInvoiceQuery(invoice);
+    setSearchParams({}, { replace: true });
+    handleLookup(invoice);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleLookup(invoiceOverride?: string) {
     setLookupError(null);
     setHow("shop");
     setSale(null);
@@ -190,7 +201,7 @@ function RequestReturnTab({ onRequested }: { onRequested: () => void }) {
     setSubmitSuccess(null);
     setRefundMethod("cash");
     setRefundAccountId("");
-    const value = invoiceQuery.trim();
+    const value = (invoiceOverride ?? invoiceQuery).trim();
     if (!value) return;
 
     try {
@@ -338,7 +349,7 @@ function RequestReturnTab({ onRequested }: { onRequested: () => void }) {
             onChange={(e) => setInvoiceQuery(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleLookup()}
           />
-          <Button variant="primary" onClick={handleLookup}>
+          <Button variant="primary" onClick={() => handleLookup()}>
             Find
           </Button>
         </div>

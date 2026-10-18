@@ -1,7 +1,7 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { PageLoader } from "../components/Loader";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Receipt, Printer, FileText, MessageCircle, ShoppingCart, XCircle, Repeat, TrendingUp, ChevronDown, ChevronRight, PackageCheck } from "lucide-react";
+import { ArrowLeft, Receipt, Printer, FileText, MessageCircle, ShoppingCart, XCircle, Repeat, TrendingUp, ChevronDown, ChevronRight, PackageCheck, Wallet, Truck, Undo2 } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Sale } from "../lib/types";
 import { downloadA4Pdf, downloadThermalPdf, sendWhatsAppBill, groupSaleItemsForDisplay } from "../lib/receipts";
@@ -20,14 +20,10 @@ import RefundSlipButton from "../components/RefundSlipButton";
 import { AUTO_APPROVED, FLOW_LABEL, courierNote, courierStage, decidedLine, exchangeRequestStage } from "../lib/returnFlow";
 import { useAuth } from "../context/AuthContext";
 import { clearExchangeDraft, exchangeDraftFor } from "../lib/exchangeDraft";
-
-// "2026-10-17 23:59:59" -> "17 Oct, 11:59 pm"
-function whenLabel(stamp: string): string {
-  const d = new Date(stamp.replace(" ", "T"));
-  return Number.isNaN(d.getTime())
-    ? stamp.slice(0, 16)
-    : d.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true });
-}
+import { whenLabel } from "../lib/whenLabel";
+import SaleProgress from "../components/SaleProgress";
+import ConfirmCodModal from "../components/ConfirmCodModal";
+import { useAdminApproval } from "../components/AdminApproval";
 
 export default function SaleDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -42,6 +38,9 @@ export default function SaleDetailPage() {
   const { user } = useAuth();
   const [showExchange, setShowExchange] = useState(false);
   const [showProfit, setShowProfit] = useState(false);
+  const [showCod, setShowCod] = useState(false);
+  const [undoingCod, setUndoingCod] = useState(false);
+  const { runWithApproval } = useAdminApproval();
   // Products folded into one row on a big (wholesale) bill, and which of them are opened up.
   const [openProducts, setOpenProducts] = useState<Set<string>>(new Set());
   const [reloadKey, setReloadKey] = useState(0);
@@ -52,6 +51,44 @@ export default function SaleDetailPage() {
   const canExchange =
     !!sale && !isQuotation && !sale.is_voided && sale.sale_type === "online" && sale.delivery_status === "delivered" && !!sale.customer_id;
   const [cancellingQuotation, setCancellingQuotation] = useState(false);
+
+  // Money still to come in on an order the shop (or an on-demand rider) delivers itself can be marked collected right here;
+  // an order a courier delivers is settled with that courier instead.
+  const weCollect = !!sale && !sale.is_voided && !isQuotation && sale.invoice.startsWith("OCD") && (!sale.delivery_partner || sale.delivery_partner_kind === "on_demand");
+  const canMarkPaid = weCollect && sale!.payment_status !== "paid";
+  const payments = sale?.payments ?? [];
+  const codConfirmed = payments.filter((p) => p.type === "income" && (p.notes ?? "").startsWith("COD collected on delivery")).length;
+  const codUndone = payments.filter((p) => p.type === "expense" && (p.notes ?? "").startsWith("Reversed payment")).length;
+  const canUndoCod = weCollect && sale!.payment_status === "paid" && codConfirmed > codUndone;
+  const courierHoldsCod = !!sale?.delivery_partner && sale.delivery_partner_kind !== "on_demand";
+
+  // The one thing to do next on this order. The delivery stages are worked in Shipping; payment is done here.
+  const next: { label: string; icon: ReactNode; onClick: () => void; title?: string } | null = (() => {
+    if (!sale || isQuotation || sale.is_voided || sale.sale_type !== "online" || !sale.delivery_status) return null;
+    const goShipping = () => navigate("/deliveries");
+    if (sale.delivery_status === "pending") return { label: "Pack in Shipping", icon: <Truck size={14} />, onClick: goShipping };
+    if (sale.delivery_status === "packed") return { label: "Dispatch in Shipping", icon: <Truck size={14} />, onClick: goShipping };
+    if (sale.delivery_status === "dispatched") return { label: "Mark delivered in Shipping", icon: <Truck size={14} />, onClick: goShipping };
+    if (sale.delivery_status === "delivered" && canMarkPaid) return { label: "Mark as paid", icon: <Wallet size={14} />, onClick: () => setShowCod(true), title: "The money has been collected" };
+    if (sale.delivery_status === "delivered" && courierHoldsCod && sale.payment_status !== "paid" && sale.payment_method !== "credit" && user?.role === "admin")
+      return { label: "Courier settlements", icon: <Wallet size={14} />, onClick: () => navigate("/couriers"), title: "The courier collected it — it's paid when their settlement is recorded" };
+    return null;
+  })();
+
+  async function undoCod() {
+    if (!sale) return;
+    if (!confirm(`Undo the COD confirmation for invoice ${sale.invoice}? This reverts it to unpaid and records a reversal in the cash book. Only possible within 24 hours of confirming.`)) return;
+    setUndoingCod(true);
+    setError(null);
+    try {
+      await runWithApproval((approval) => api.put(`/sales/${sale.id}/undo-cod`, {}, { approval }));
+      setReloadKey((k) => k + 1);
+    } catch (err) {
+      setError(err instanceof ApiRequestError ? err.message : "Failed to undo this confirmation");
+    } finally {
+      setUndoingCod(false);
+    }
+  }
 
   function receiptOptionsFor(sale: Sale): ModalOption[] {
     return [
@@ -263,7 +300,7 @@ export default function SaleDetailPage() {
               sale.is_wholesale ? " · Wholesale" : ""
             }${isQuotation ? " · Payment request" : ""}${sale.is_voided ? " · Voided" : ""}`}
             action={
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 sm:justify-end">
                 {isQuotation && (
                   <Button
                     variant="danger"
@@ -293,8 +330,20 @@ export default function SaleDetailPage() {
                     Exchange
                   </Button>
                 )}
+                {next && (
+                  <Button variant="primary" onClick={next.onClick} className="inline-flex items-center gap-1.5" title={next.title}>
+                    {next.icon}
+                    {next.label}
+                  </Button>
+                )}
+                {canMarkPaid && next?.label !== "Mark as paid" && (
+                  <Button onClick={() => setShowCod(true)} className="inline-flex items-center gap-1.5" title="Already paid, or collected by hand — record it">
+                    <Wallet size={14} />
+                    Mark as paid
+                  </Button>
+                )}
                 <Button
-                  variant={isQuotation ? "default" : "primary"}
+                  variant={isQuotation || next ? "default" : "primary"}
                   onClick={openReceiptOptions}
                   className="inline-flex items-center gap-1.5"
                   title="Get receipt (Ctrl/Cmd+Shift+D)"
@@ -302,15 +351,22 @@ export default function SaleDetailPage() {
                   <Printer size={14} />
                   {isQuotation ? "Get Payment Request" : "Get Receipt"}
                 </Button>
-                {/* Admin only, and tucked away: what this bill earned. */}
-                {user?.role === "admin" && !isQuotation && (
-                  <ActionMenu items={[{ label: "Profit on this bill", icon: <TrendingUp size={14} />, onClick: () => setShowProfit(true) }]} />
+                {/* The less usual things to do with a bill. */}
+                {!isQuotation && !sale.is_voided && (
+                  <ActionMenu
+                    items={[
+                      { label: "Return or exchange items", icon: <Undo2 size={14} />, onClick: () => navigate(`/returns?invoice=${encodeURIComponent(sale.invoice)}`) },
+                      ...(canUndoCod ? [{ label: undoingCod ? "Undoing..." : "Undo COD confirmation", icon: <Wallet size={14} />, onClick: undoCod }] : []),
+                      ...(user?.role === "admin" ? [{ label: "Profit on this bill", icon: <TrendingUp size={14} />, onClick: () => setShowProfit(true) }] : []),
+                    ]}
+                  />
                 )}
               </div>
             }
           />
 
           {showProfit && sale && <SaleProfitModal saleId={sale.id} invoice={sale.invoice} onClose={() => setShowProfit(false)} />}
+          {showCod && <ConfirmCodModal sale={sale} onClose={() => setShowCod(false)} onDone={() => setReloadKey((k) => k + 1)} />}
 
           {isQuotation && (
             // One quiet line: when it must be paid by and whether its pieces are held — the long explanation is behind the ?.
@@ -554,6 +610,8 @@ export default function SaleDetailPage() {
               </p>
             ) : null}
           </Card>
+
+          {!isQuotation && !sale.is_voided && <SaleProgress sale={sale} />}
 
           <Card className="p-0 overflow-hidden">
             <Table>

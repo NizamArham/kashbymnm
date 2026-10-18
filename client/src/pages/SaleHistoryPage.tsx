@@ -1,3 +1,4 @@
+import ConfirmCodModal from "../components/ConfirmCodModal";
 import { useEffect, useState, Fragment, useMemo, MouseEvent, useRef, ReactNode } from "react";
 import { PageLoader } from "../components/Loader";
 import { ChevronDown, ChevronRight, Receipt, Printer, MoreVertical, Wallet, Download, FileText, MessageCircle, Star, Repeat, TrendingUp, Search, X } from "lucide-react";
@@ -180,9 +181,6 @@ export default function SaleHistoryPage() {
   const [wholesaleReason, setWholesaleReason] = useState("");
   const [wholesaleError, setWholesaleError] = useState<string | null>(null);
   const [wholesaleBusy, setWholesaleBusy] = useState(false);
-  const [codConfirming, setCodConfirming] = useState(false);
-  const [codError, setCodError] = useState<string | null>(null);
-  const [codPaymentMethod, setCodPaymentMethod] = useState<"cash" | "bank_transfer" | "card">("cash");
   const [undoingId, setUndoingId] = useState<number | null>(null);
 
   const [period, setPeriod] = useState<Period>(isAdmin ? "month" : "week");
@@ -566,20 +564,6 @@ export default function SaleHistoryPage() {
     }
   }
 
-  async function handleConfirmCod() {
-    if (!codConfirmSale) return;
-    setCodError(null);
-    setCodConfirming(true);
-    try {
-      await api.put(`/sales/${codConfirmSale.id}/confirm-cod`, { payment_method: codPaymentMethod });
-      await refreshSales(codConfirmSale);
-      setCodConfirmSale(null);
-    } catch (err) {
-      setCodError(err instanceof ApiRequestError ? err.message : "Failed to confirm this payment");
-    } finally {
-      setCodConfirming(false);
-    }
-  }
 
   async function handleUndoCod(sale: Sale) {
     setOpenMenuId(null);
@@ -715,8 +699,6 @@ export default function SaleHistoryPage() {
             <button
               onClick={() => {
                 setOpenMenuId(null);
-                setCodError(null);
-                setCodPaymentMethod("cash");
                 setCodConfirmSale(sale);
               }}
               className="w-full flex items-center gap-2 px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition"
@@ -1150,42 +1132,7 @@ export default function SaleHistoryPage() {
       )}
 
       {codConfirmSale && (
-        <Modal
-          size="md"
-          onClose={() => setCodConfirmSale(null)}
-          title="Confirm COD collected"
-          subtitle="Marks the order as fully paid and records the amount in the cash book, together, in one step."
-          footer={
-            <>
-              <Button onClick={() => setCodConfirmSale(null)}>Cancel</Button>
-              <Button variant="primary" onClick={handleConfirmCod} disabled={codConfirming}>
-                {codConfirming ? "Confirming..." : "Confirm, collected"}
-              </Button>
-            </>
-          }
-        >
-              <p className="text-sm text-gray-600 mb-1">Invoice {codConfirmSale.invoice}</p>
-              <p className="text-2xl font-semibold text-gray-900 mb-3">
-                Rs. {(codConfirmSale.total - codConfirmSale.amount_paid).toLocaleString()}
-              </p>
-              <div className="mb-4">
-                <p className="text-xs font-medium text-gray-500 mb-1.5">How was it collected?</p>
-                <div className="flex gap-2">
-                  {(["cash", "bank_transfer", "card"] as const).map((m) => (
-                    <button
-                      key={m}
-                      onClick={() => setCodPaymentMethod(m)}
-                      className={`flex-1 border rounded-xl py-2 text-xs font-medium capitalize transition ${
-                        codPaymentMethod === m ? "border-black bg-black text-white" : "border-gray-200 text-gray-600 hover:border-gray-400"
-                      }`}
-                    >
-                      {m.replace("_", " ")}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {codError && <ErrorText>{codError}</ErrorText>}
-        </Modal>
+        <ConfirmCodModal sale={codConfirmSale} onClose={() => setCodConfirmSale(null)} onDone={() => refreshSales(codConfirmSale)} />
       )}
 
       {skuCopyTooltip}

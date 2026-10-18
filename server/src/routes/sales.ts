@@ -524,7 +524,9 @@ salesRouter.get(
                 deliveries.delivery_paid_by, deliveries.actual_fare as delivery_actual_fare,
                 deliveries.rider_direct as delivery_rider_direct, ${LIVE_COD_SQL} as delivery_cod_amount,
                 deliveries.fee_paid as delivery_fee_paid, deliveries.pickup_prepaid as delivery_pickup_prepaid, deliveries.delivery_status,
-                deliveries.tracking_number as delivery_tracking_number
+                deliveries.tracking_number as delivery_tracking_number, deliveries.waybill_number as delivery_waybill_number,
+                deliveries.packed_at as delivery_packed_at, deliveries.dispatched_at as delivery_dispatched_at,
+                deliveries.delivery_date as delivery_delivered_at
          FROM sales
          LEFT JOIN customers ON customers.id = sales.customer_id
          LEFT JOIN deliveries ON deliveries.sale_id = sales.id
@@ -533,6 +535,16 @@ salesRouter.get(
       )
       .get(req.params.id) as any;
     if (!sale) throw new ApiError(404, "Sale not found");
+
+    // The payments the cash book has against this bill: what was paid at the till, any extra payment, a "COD collected"
+    // confirmation (and its undoing). Money that reached the bill another way (a courier's settlement, a payment on the
+    // customer's account) isn't tied to one bill in the cash book, so the page shows whatever is left over as its own line.
+    const payments = db
+      .prepare(
+        `SELECT id, entry_date, type, amount, payment_method, notes, transaction_code
+         FROM cash_book WHERE category = 'sale' AND reference_id = ? ORDER BY id`
+      )
+      .all(req.params.id);
 
     const items = db
       .prepare(
@@ -584,6 +596,7 @@ salesRouter.get(
       hold_until: sale.status === "quotation" ? holdEndOf(sale.id) : null,
       exchanged_out: exchangesOutOfSale(sale.id),
       return_pickups: pickupsForSale(sale.id),
+      payments,
       store_credit_applied: credit,
       store_credit_sources: credit > 0 ? storeCreditSources(sale.id, sale.customer_id) : [],
     });
