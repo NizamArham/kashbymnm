@@ -13,6 +13,7 @@ import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { useAuth } from "../context/AuthContext";
 import { findCustomers, CASHIER_SEARCH_MIN_CHARS } from "../lib/customerSearch";
 import { previewPdf } from "../lib/pdfPreview";
+import { useConfirm } from "../components/Feedback";
 
 function formatLabelDate(d: Date): string {
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -22,6 +23,7 @@ function formatLabelDate(d: Date): string {
 type Step = "receiver" | "package";
 
 export default function WaybillGeneratorPage() {
+  const { confirm: confirmDialog } = useConfirm();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   const [step, setStep] = useState<Step>("receiver");
@@ -350,8 +352,8 @@ export default function WaybillGeneratorPage() {
     }
   }
 
-  function resetAll() {
-    if (!confirm("Start over? This clears everything you've entered on this waybill.")) return;
+  async function resetAll() {
+    if (!(await confirmDialog({ title: "Start over?", message: "This clears everything you've entered on this waybill.", confirmLabel: "Start over", danger: true }))) return;
     setStep("receiver");
     setCustomerName("");
     setAddr1("");

@@ -6,6 +6,7 @@ import { Supplier, Purchase, AvailableUnit } from "../lib/types";
 import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { useSortableData } from "../lib/useSortableData";
+import { useConfirm } from "../components/Feedback";
 import {
   PageHeader,
   Card,
@@ -56,6 +57,7 @@ function isWithinEditWindow(dateStr: string): boolean {
 }
 
 export default function PurchasesPage() {
+  const { confirm: confirmDialog } = useConfirm();
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [pending, setPending] = useState<Purchase[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -291,7 +293,7 @@ export default function PurchasesPage() {
   }
 
   async function handleMarkSorted(p: Purchase) {
-    if (!confirm(`Mark ${p.purchase_code} as fully sorted? This moves it to History.`)) return;
+    if (!(await confirmDialog({ title: `Mark ${p.purchase_code} as fully sorted?`, message: "This moves it to History.", confirmLabel: "Mark sorted" }))) return;
     setMarkingSortedId(p.id);
     setError(null);
     try {
@@ -347,7 +349,7 @@ export default function PurchasesPage() {
   }
 
   async function handleDeletePurchase(p: Purchase) {
-    if (!confirm(`Delete ${p.purchase_code} entirely? This removes it, its inventory units (if any), and related cash book entries. This cannot be undone.`)) return;
+    if (!(await confirmDialog({ title: `Delete ${p.purchase_code} entirely?`, message: "This removes it, its inventory units (if any), and related cash book entries. This cannot be undone.", confirmLabel: "Delete purchase", danger: true }))) return;
     setDeletingId(p.id);
     setError(null);
     try {

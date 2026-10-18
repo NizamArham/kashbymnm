@@ -16,6 +16,7 @@ import { WaybillLabelData } from "../components/WaybillLabel";
 import { applyBusinessInfoToReturnAddress } from "../lib/businessInfo";
 import { previewPdf } from "../lib/pdfPreview";
 import { whatsappNumber } from "../lib/phone";
+import { useConfirm } from "../components/Feedback";
 
 function formatLabelDate(d: Date): string {
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -326,6 +327,7 @@ const TABS: { key: DeliveryStatus; label: string; icon: any }[] = [
 const onThePipeline = (d: Delivery) => !(d.delivery_status === "dispatched" && d.coming_back_at);
 
 export default function DeliveriesPage() {
+  const { confirm: confirmDialog } = useConfirm();
   // A cashier works the whole pipeline; the steps that change money (marking a parcel returned, or putting one
   // back that would take a payment off an order) ask for an admin's password once, at that step.
   const { runWithApproval } = useAdminApproval();
@@ -517,7 +519,8 @@ export default function DeliveriesPage() {
     const message = courier
       ? `Has ${courier} delivered ${d?.invoice ?? "this parcel"}?\n\nOnly mark it delivered once ${courier} shows it as Delivered. A delivered parcel counts as COD collected, and its order is marked paid when you record ${courier}'s next settlement.`
       : `Mark ${d?.invoice ?? "this order"} as delivered?`;
-    if (!confirm(message)) return;
+    const [askTitle, ...askRest] = message.split("\n\n");
+    if (!(await confirmDialog({ title: askTitle, message: askRest.join("\n\n") || undefined, confirmLabel: "Yes, delivered" }))) return;
     setActionError(null);
     try {
       await api.put(`/deliveries/${id}/deliver`, {});
@@ -531,9 +534,11 @@ export default function DeliveriesPage() {
   async function markNotDelivered(id: number) {
     const d = deliveries.find((x) => x.id === id);
     if (
-      !confirm(
-        `Put ${d?.invoice ?? "this parcel"} back to Dispatched?\n\nUse this if it was marked delivered by mistake. It stops counting as delivered, and if a courier settlement had already marked the order paid, that payment is taken back off the order.`
-      )
+      !(await confirmDialog({
+        title: `Put ${d?.invoice ?? "this parcel"} back to Dispatched?`,
+        message: "Use this if it was marked delivered by mistake. It stops counting as delivered, and if a courier settlement had already marked the order paid, that payment is taken back off the order.",
+        confirmLabel: "Put it back",
+      }))
     )
       return;
     setActionError(null);
@@ -551,7 +556,7 @@ export default function DeliveriesPage() {
     const message = isExchangeParcel
       ? "The courier couldn't deliver this exchange parcel? It moves to \"on the way back\" — nothing is cancelled until it reaches you and you put it to Returned."
       : "The courier couldn't deliver this order? It moves to \"on the way back\" until it reaches you and you put it to Returned.";
-    if (!confirm(message)) return;
+    if (!(await confirmDialog({ title: "Couldn't be delivered?", message, confirmLabel: "Yes, on its way back", danger: true }))) return;
     setActionError(null);
     try {
       await api.put(`/deliveries/${id}/coming-back`, {});
@@ -567,7 +572,7 @@ export default function DeliveriesPage() {
     const message = isExchangeParcel
       ? "Mark this exchange parcel as returned? The exchange is cancelled (the customer keeps their old items) and the replacement pieces go back into stock."
       : "Mark this order as returned? This removes it from the normal pipeline.";
-    if (!confirm(message)) return;
+    if (!(await confirmDialog({ title: "Mark as returned?", message, confirmLabel: "Mark returned", danger: true }))) return;
     setActionError(null);
     try {
       await runWithApproval((approval) => api.put(`/deliveries/${id}/return`, {}, { approval }));

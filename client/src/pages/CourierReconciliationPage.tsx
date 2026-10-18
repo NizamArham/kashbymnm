@@ -7,6 +7,7 @@ import { useDeliveryPartners, partnerLabel } from "../lib/delivery";
 import CourierChargeModal from "../components/CourierChargeModal";
 import CourierBalanceModal from "../components/CourierBalanceModal";
 import { Button, Card, DatePicker, Dropdown, ErrorText, FormGroup, HelpHint, Input, Label, PageHeader, RefLink, Table, TabToggle, Td, Th } from "../components/ui";
+import { useConfirm } from "../components/Feedback";
 
 const money = (value: number) => `Rs. ${value.toLocaleString()}`;
 const signed = (value: number) => `${value > 0 ? "+" : "−"} ${money(Math.abs(value))}`;
@@ -36,6 +37,7 @@ function defaultReceivedAs(partnerCode: string): ReceivedAs {
 }
 
 export default function CourierReconciliationPage() {
+  const { confirm: confirmDialog } = useConfirm();
   const navigate = useNavigate();
   const { partners } = useDeliveryPartners();
   const [data, setData] = useState<CourierReconciliationData>({ summary: [], settlements: [], adjustments: [], orders: [] });
@@ -134,7 +136,7 @@ export default function CourierReconciliationPage() {
   }
 
   async function undoAdjustment(id: number) {
-    if (!window.confirm("Undo this correction? The balance goes back to what the orders and settlements say.")) return;
+    if (!(await confirmDialog({ title: "Undo this correction?", message: "The balance goes back to what the orders and settlements say.", confirmLabel: "Undo correction", danger: true }))) return;
     setError(null);
     try {
       await api.delete(`/courier-reconciliation/adjustments/${id}`);
@@ -239,8 +241,8 @@ export default function CourierReconciliationPage() {
               </p>
               <Button
                 size="sm"
-                onClick={() => {
-                  if (window.confirm(`Mark all ${needsChecking.length} charges as correct?`)) confirmCharges(needsChecking);
+                onClick={async () => {
+                  if (await confirmDialog({ title: `Mark all ${needsChecking.length} charges as correct?`, confirmLabel: "Mark all correct" })) confirmCharges(needsChecking);
                 }}
                 className="inline-flex items-center gap-1.5"
               >

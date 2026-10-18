@@ -24,8 +24,10 @@ import { whenLabel } from "../lib/whenLabel";
 import SaleProgress from "../components/SaleProgress";
 import ConfirmCodModal from "../components/ConfirmCodModal";
 import { useAdminApproval } from "../components/AdminApproval";
+import { useConfirm } from "../components/Feedback";
 
 export default function SaleDetailPage() {
+  const { confirm: confirmDialog } = useConfirm();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -77,7 +79,7 @@ export default function SaleDetailPage() {
 
   async function undoCod() {
     if (!sale) return;
-    if (!confirm(`Undo the COD confirmation for invoice ${sale.invoice}? This reverts it to unpaid and records a reversal in the cash book. Only possible within 24 hours of confirming.`)) return;
+    if (!(await confirmDialog({ title: `Undo the COD confirmation for ${sale.invoice}?`, message: "This reverts it to unpaid and records a reversal in the cash book. Only possible within 24 hours of confirming.", confirmLabel: "Undo confirmation", danger: true }))) return;
     setUndoingCod(true);
     setError(null);
     try {
@@ -126,9 +128,9 @@ export default function SaleDetailPage() {
 
   // Reopens the quotation in POS with everything filled in — adjust it
   // there, then re-save it or check out to make it the real sale.
-  function openInPos() {
+  async function openInPos() {
     if (!sale) return;
-    if (hasDraftInProgress() && !confirm("POS has a sale in progress. Replace it with this payment request?")) return;
+    if (hasDraftInProgress() && !(await confirmDialog({ title: "Replace the sale in progress?", message: "POS has a sale in progress. Opening this payment request there replaces it.", confirmLabel: "Replace it" }))) return;
     navigate(`/pos?quotation=${sale.id}`);
   }
 
@@ -150,7 +152,7 @@ export default function SaleDetailPage() {
 
   async function handleCancelQuotation() {
     if (!sale) return;
-    if (!confirm(`Cancel payment request ${sale.invoice}? This can't be undone.`)) return;
+    if (!(await confirmDialog({ title: `Cancel payment request ${sale.invoice}?`, message: "This can't be undone.", confirmLabel: "Cancel request", cancelLabel: "Keep it", danger: true }))) return;
     setCancellingQuotation(true);
     try {
       await api.delete(`/sales/${sale.id}/quotation`);

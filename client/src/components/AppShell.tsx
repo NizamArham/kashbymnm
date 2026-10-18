@@ -36,6 +36,7 @@ import { api } from "../lib/api";
 import { useNavShortcuts, navShortcutHint } from "../lib/navShortcuts";
 import CashierModeControl from "./CashierModeControl";
 import FullscreenToggle from "./FullscreenToggle";
+import { useConfirm } from "./Feedback";
 
 interface MenuSubItem {
   id: string;
@@ -62,6 +63,7 @@ function isWithin(path: string, base: string): boolean {
 }
 
 export default function AppShell() {
+  const { confirm: confirmDialog } = useConfirm();
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
@@ -244,8 +246,8 @@ export default function AppShell() {
     if (window.innerWidth < 1024) setSidebarOpen(false);
   }
 
-  function handleLogout() {
-    if (!confirm("Are you sure you want to log out?")) return;
+  async function handleLogout() {
+    if (!(await confirmDialog({ title: "Log out?", message: "You'll need to sign in again to use the app.", confirmLabel: "Log out" }))) return;
     logout();
     navigate("/login", { replace: true });
   }

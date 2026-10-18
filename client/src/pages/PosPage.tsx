@@ -53,6 +53,7 @@ import { findCustomers, CASHIER_SEARCH_MIN_CHARS } from "../lib/customerSearch";
 import PhoneInput from "../components/PhoneInput";
 import { downloadA4Pdf, downloadThermalPdf, sendWhatsAppBill } from "../lib/receipts";
 import ReceiptOptionsModal, { ModalOption } from "../components/ReceiptOptionsModal";
+import { useConfirm } from "../components/Feedback";
 
 // A cart line represents one or more physical units that share the same
 // product + color + size — merged into one row with a quantity, rather
@@ -94,6 +95,8 @@ function PosTick({
 }
 
 export default function PosPage() {
+  const { confirm: confirmDialog } = useConfirm();
+  const { notice } = useConfirm();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   // What a cashier can't do alone (a big discount, free delivery, credit, a price above the tag) asks
@@ -663,8 +666,8 @@ export default function PosPage() {
     }
   }
 
-  function exitQuotationEdit() {
-    if (!confirm("Stop editing this payment request? The cart will be cleared — the payment request stays as it was last saved.")) return;
+  async function exitQuotationEdit() {
+    if (!(await confirmDialog({ title: "Stop editing this payment request?", message: "The cart will be cleared — the payment request stays as it was last saved.", confirmLabel: "Stop editing", danger: true }))) return;
     setEditingQuotation(null);
     setCart([]);
     setStaleUnitIds(new Set());
@@ -749,12 +752,12 @@ export default function PosPage() {
     setAllAvailableUnits((prev) => (prev ? prev.filter((u) => u.id !== unit.id) : prev));
   }
 
-  function removeFromCart(lineKey: string) {
+  async function removeFromCart(lineKey: string) {
     const line = cart.find((l) => cartLineKey(l.units[0]) === lineKey);
     if (line && line.units.length === 1) {
       // Removing the last unit deletes the whole line — worth a quick
       // confirmation, unlike reducing 3 units down to 2.
-      if (!confirm(`Remove ${line.units[0].product_title} from the cart?`)) return;
+      if (!(await confirmDialog({ title: "Remove from the cart?", message: line.units[0].product_title, confirmLabel: "Remove", danger: true }))) return;
     }
     setCart((c) => {
       const removedUnit = c.find((l) => cartLineKey(l.units[0]) === lineKey)?.units.slice(-1)[0];
@@ -843,7 +846,7 @@ export default function PosPage() {
   async function selectCustomer(c: Customer) {
     if (c.is_suspended === 1) {
       setCustomerSearchOpen(false);
-      alert(`${c.name} is suspended${c.suspended_reason ? ` (${c.suspended_reason})` : ""} and can't be selected for a new sale. Reactivate them from the Customers page first if this was a mistake.`);
+      await notice({ title: `${c.name} is suspended`, message: `${c.suspended_reason ? `(${c.suspended_reason}) ` : ""}They can't be selected for a new sale. Reactivate them from the Customers page first if this was a mistake.` });
       return;
     }
     // Use the cached search result immediately so selection feels
@@ -862,7 +865,7 @@ export default function PosPage() {
         // fetch just caught it. Undo the selection rather than letting
         // it through.
         setSelectedCustomer(null);
-        alert(`${fresh.name} was suspended just now and can't be selected for a new sale.`);
+        await notice({ title: `${fresh.name} was suspended just now`, message: "They can't be selected for a new sale." });
         return;
       }
       setSelectedCustomer(fresh);
@@ -946,8 +949,8 @@ export default function PosPage() {
     }
   }
 
-  function clearCart() {
-    if (cart.length > 0 && confirm("Clear entire cart?")) {
+  async function clearCart() {
+    if (cart.length > 0 && (await confirmDialog({ title: "Clear the cart?", message: "Every item will be removed from this sale.", confirmLabel: "Clear cart", danger: true }))) {
       setCart([]);
       setDiscountValue("0");
       setCouponCode("");

@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { api, ApiRequestError } from "../lib/api";
 import { Modal, Button, ErrorText } from "./ui";
+import { useToast } from "./Feedback";
+import { useAdminApproval } from "./AdminApproval";
 
 // "Mark as paid / COD collected" — one step that records the money in the cash book and marks the order paid, for an order the
 // shop delivered itself (or an on-demand rider). Shared by Sale History and the invoice's own page.
@@ -13,6 +15,8 @@ export default function ConfirmCodModal({
   onClose: () => void;
   onDone: () => void | Promise<void>;
 }) {
+  const toast = useToast();
+  const { runWithApproval } = useAdminApproval();
   const [method, setMethod] = useState<"cash" | "bank_transfer" | "card">("cash");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,6 +28,21 @@ export default function ConfirmCodModal({
       await api.put(`/sales/${sale.id}/confirm-cod`, { payment_method: method });
       await onDone();
       onClose();
+      // A slip of the finger on this is easy, and it can be taken back for a day — so say it's done, and offer the way back.
+      toast.success(`${sale.invoice} marked as paid`, {
+        action: {
+          label: "Undo",
+          onClick: async () => {
+            try {
+              await runWithApproval((approval) => api.put(`/sales/${sale.id}/undo-cod`, {}, { approval }));
+              await onDone();
+              toast.info(`${sale.invoice} is unpaid again`);
+            } catch (err) {
+              toast.error(err instanceof ApiRequestError ? err.message : "Couldn't undo that");
+            }
+          },
+        },
+      });
     } catch (err) {
       setError(err instanceof ApiRequestError ? err.message : "Failed to confirm this payment");
     } finally {

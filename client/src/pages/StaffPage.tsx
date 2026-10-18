@@ -6,6 +6,7 @@ import { api, ApiRequestError } from "../lib/api";
 import { StaffMember } from "../lib/types";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { useSortableData } from "../lib/useSortableData";
+import { useConfirm, useToast } from "../components/Feedback";
 import {
   PageHeader,
   Card,
@@ -30,6 +31,8 @@ type StaffSortKey = "username" | "name" | "job_title" | "role" | "reports_to";
 const JOB_TITLES = ["Cashier", "Sales Assistant", "Store Manager", "Inventory Assistant", "Delivery Coordinator"];
 
 export default function StaffPage() {
+  const { confirm: confirmDialog } = useConfirm();
+  const toast = useToast();
   const navigate = useNavigate();
   const { user } = useAuth();
   const [staffList, setStaffList] = useState<StaffMember[]>([]);
@@ -144,13 +147,13 @@ export default function StaffPage() {
   }
 
   async function handleDeleteUser(id: number) {
-    if (!confirm("Remove this login?")) return;
+    if (!(await confirmDialog({ title: "Remove this login?", message: "They won't be able to sign in any more.", confirmLabel: "Remove login", danger: true }))) return;
     try {
       await api.delete(`/auth/users/${id}`);
       setExpandedId(null);
       load();
     } catch (err) {
-      alert(err instanceof ApiRequestError ? err.message : "Failed to remove account");
+      toast.error(err instanceof ApiRequestError ? err.message : "Failed to remove account");
     }
   }
 

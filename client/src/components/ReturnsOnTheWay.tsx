@@ -12,6 +12,7 @@ import { useAdminApproval } from "./AdminApproval";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { Button, Card, EmptyState, ErrorText, Input, RefLink, TabToggle } from "./ui";
 import { PageLoader } from "./Loader";
+import { useConfirm } from "./Feedback";
 
 const money = (n: number) => `Rs. ${Math.round(n).toLocaleString()}`;
 
@@ -34,6 +35,7 @@ export function shareSummary(p: Pick<ReturnPickup, "pickup_charge" | "customer_s
 // The Returns page's list can get long, so by default it shows what needs doing plus the last few finished ones; a search box ("/" jumps to it)
 // finds anything, and the chips (Open / Completed / Cancelled / All) or "View all" show the rest.
 export default function ReturnPickupList({ status = "open", onChanged }: { status?: "open" | "closed" | "all"; onChanged?: () => void }) {
+  const { confirm: confirmDialog } = useConfirm();
   const { runWithApproval } = useAdminApproval();
   const { user } = useAuth();
   const [rows, setRows] = useState<ReturnPickup[] | null>(null);
@@ -83,7 +85,7 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
     const message = d.exchange
       ? `Is the parcel for ${d.invoice} on your hand? It's put to Returned: the exchange is cancelled (the customer keeps their old items) and the replacement pieces go back into stock.`
       : `Is the parcel for ${d.invoice} on your hand? It's put to Returned and leaves the normal pipeline.`;
-    if (!confirm(message)) return;
+    if (!(await confirmDialog({ title: "Is the parcel back with you?", message, confirmLabel: "Mark as returned" }))) return;
     setBusyId(-d.id);
     setError(null);
     try {

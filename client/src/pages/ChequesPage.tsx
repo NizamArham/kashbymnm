@@ -6,6 +6,7 @@ import { Supplier } from "../lib/types";
 import { downloadTabularReport, buildReportFilename, todayLongDate, rangeLabelFor } from "../lib/reportPdf";
 import { PageHeader, Card, Table, Th, Td, SortHeader, Button, EmptyState, ErrorText, Badge, RowActions, TabToggle, Input, Label, FormGroup, Dropdown, DatePicker, DateRangePicker, Modal } from "../components/ui";
 import { useSortableData } from "../lib/useSortableData";
+import { useConfirm } from "../components/Feedback";
 
 interface ChequeRow {
   id: number;
@@ -78,6 +79,8 @@ function matchesStatusFilter(status: string, filter: StatusFilter, issued: boole
 }
 
 export default function ChequesPage() {
+  const { confirm: confirmDialog } = useConfirm();
+  const { notice } = useConfirm();
   const [activeTab, setActiveTab] = useState<Tab>("in_hand");
   const [cheques, setCheques] = useState<ChequeRow[]>([]);
   const [issuedCheques, setIssuedCheques] = useState<IssuedChequeRow[]>([]);
@@ -259,9 +262,10 @@ export default function ChequesPage() {
       setBounceReason("");
       load();
       if (!isIssued && result.affected_supplier) {
-        alert(
-          "This cheque had already been passed to a supplier — their balance has been reinstated as owed, alongside this customer's sales reverting to unpaid."
-        );
+        await notice({
+          title: "Passed on to a supplier",
+          message: "This cheque had already been passed to a supplier — their balance has been reinstated as owed, alongside this customer's sales reverting to unpaid.",
+        });
       }
     } catch (err) {
       setActionError(err instanceof ApiRequestError ? err.message : "Failed to mark this cheque bounced");
@@ -355,7 +359,7 @@ export default function ChequesPage() {
   }
 
   async function handleDeleteCheque(id: number, isIssued: boolean) {
-    if (!confirm("Delete this cheque? This can't be undone.")) return;
+    if (!(await confirmDialog({ title: "Delete this cheque?", message: "This can't be undone.", confirmLabel: "Delete", danger: true }))) return;
     setActionError(null);
     setDeletingId(id);
     try {

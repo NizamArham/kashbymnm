@@ -8,12 +8,14 @@ import { downloadA4Pdf, downloadThermalPdf, sendWhatsAppBill } from "../lib/rece
 import { PageHeader, Card, Table, Th, Td, Badge, EmptyState, ErrorText, Button, RowCard, RowCardStats, RowCardStat } from "../components/ui";
 import ReceiptOptionsModal, { ModalOption } from "../components/ReceiptOptionsModal";
 import { hasDraftInProgress } from "../lib/posDraft";
+import { useConfirm } from "../components/Feedback";
 
 function isExpired(sale: Sale): boolean {
   return !!sale.quotation_valid_until && new Date(sale.quotation_valid_until) < new Date();
 }
 
 export default function QuotationsPage() {
+  const { confirm: confirmDialog } = useConfirm();
   const navigate = useNavigate();
 
   const [quotations, setQuotations] = useState<Sale[]>([]);
@@ -38,13 +40,13 @@ export default function QuotationsPage() {
 
   // Reopens the quotation in POS with everything filled in, ready to
   // adjust and then re-save or check out as the real sale.
-  function openInPos(sale: Sale) {
+  async function openInPos(sale: Sale) {
     // A quoted exchange is confirmed on its own page (it can't be rung up in POS — the old items have to come back).
     if (sale.exchange_draft) {
       navigate(`/sales/${sale.id}`);
       return;
     }
-    if (hasDraftInProgress() && !confirm("POS has a sale in progress. Replace it with this payment request?")) return;
+    if (hasDraftInProgress() && !(await confirmDialog({ title: "Replace the sale in progress?", message: "POS has a sale in progress. Opening this payment request there replaces it.", confirmLabel: "Replace it" }))) return;
     navigate(`/pos?quotation=${sale.id}`);
   }
 
@@ -89,7 +91,7 @@ export default function QuotationsPage() {
   }
 
   async function handleCancel(sale: Sale) {
-    if (!confirm(`Cancel payment request ${sale.invoice}? This can't be undone.`)) return;
+    if (!(await confirmDialog({ title: `Cancel payment request ${sale.invoice}?`, message: "This can't be undone.", confirmLabel: "Cancel request", cancelLabel: "Keep it", danger: true }))) return;
     setCancellingId(sale.id);
     try {
       await api.delete(`/sales/${sale.id}/quotation`);

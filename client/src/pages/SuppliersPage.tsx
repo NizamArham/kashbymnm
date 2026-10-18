@@ -7,11 +7,13 @@ import { Supplier, BankAccount } from "../lib/types";
 import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Table, Th, Td, SortHeader, EmptyState, HelpHint, Modal } from "../components/ui";
 import { CityPicker } from "../components/CityPicker";
 import { useSortableData } from "../lib/useSortableData";
+import { useConfirm } from "../components/Feedback";
 
 type ExpandedTab = "details" | "bank" | "payment_history";
 type SupplierSortKey = "priority" | "code" | "name" | "phone" | "city" | "balance";
 
 export default function SuppliersPage() {
+  const { confirm: confirmDialog } = useConfirm();
   const navigate = useNavigate();
   const location = useLocation();
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -197,7 +199,7 @@ export default function SuppliersPage() {
   }
 
   async function handleDelete(id: number) {
-    if (!confirm("Delete this supplier? This only works if they have no purchases or payments on record.")) return;
+    if (!(await confirmDialog({ title: "Delete this supplier?", message: "This only works if they have no purchases or payments on record.", confirmLabel: "Delete supplier", danger: true }))) return;
     try {
       await api.delete(`/suppliers/${id}`);
       setExpandedId(null);
@@ -271,7 +273,7 @@ export default function SuppliersPage() {
   }
 
   async function deleteBankAccount(supplierId: number, accountId: number) {
-    if (!confirm("Delete this bank account?")) return;
+    if (!(await confirmDialog({ title: "Delete this bank account?", confirmLabel: "Delete", danger: true }))) return;
     try {
       await api.delete(`/suppliers/${supplierId}/bank-accounts/${accountId}`);
       refreshExpanded(supplierId);

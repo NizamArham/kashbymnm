@@ -23,6 +23,7 @@ import {
   TabToggle,
 } from "../components/ui";
 import { useSortableData } from "../lib/useSortableData";
+import { useConfirm, useToast } from "../components/Feedback";
 
 type PromoTab = "coupons" | "vouchers";
 type CouponSortKey = "code" | "reward" | "status" | "expires";
@@ -80,6 +81,8 @@ export default function PromotionsPage() {
 // ============================================================ Coupons ====
 
 function CouponsTab() {
+  const { confirm: confirmDialog } = useConfirm();
+  const toast = useToast();
   const [coupons, setCoupons] = useState<Coupon[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -99,13 +102,13 @@ function CouponsTab() {
   useEffect(load, []);
 
   async function handleDelete(c: Coupon) {
-    if (!confirm(`Delete coupon ${c.code}? This can't be undone.`)) return;
+    if (!(await confirmDialog({ title: `Delete coupon ${c.code}?`, message: "This can't be undone.", confirmLabel: "Delete", danger: true }))) return;
     setDeletingId(c.id);
     try {
       await api.delete(`/coupons/${c.id}`);
       load();
     } catch (err) {
-      alert(err instanceof ApiRequestError ? err.message : "Failed to delete coupon");
+      toast.error(err instanceof ApiRequestError ? err.message : "Failed to delete coupon");
     } finally {
       setDeletingId(null);
     }
@@ -357,6 +360,8 @@ const VOUCHER_STATUS_ORDER: Record<VoucherStatus, number> = { active: 0, pending
 const DURATION_PRESETS = [7, 30, 45, 90, 365];
 
 function VouchersTab() {
+  const { confirm: confirmDialog } = useConfirm();
+  const toast = useToast();
   const [vouchers, setVouchers] = useState<GiftVoucher[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -376,13 +381,13 @@ function VouchersTab() {
   useEffect(load, []);
 
   async function handleDelete(v: GiftVoucher) {
-    if (!confirm(`Delete gift voucher ${v.code}? This can't be undone.`)) return;
+    if (!(await confirmDialog({ title: `Delete gift voucher ${v.code}?`, message: "This can't be undone.", confirmLabel: "Delete", danger: true }))) return;
     setDeletingId(v.id);
     try {
       await api.delete(`/gift-vouchers/${v.id}`);
       load();
     } catch (err) {
-      alert(err instanceof ApiRequestError ? err.message : "Failed to delete gift voucher");
+      toast.error(err instanceof ApiRequestError ? err.message : "Failed to delete gift voucher");
     } finally {
       setDeletingId(null);
     }

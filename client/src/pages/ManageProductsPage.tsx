@@ -35,6 +35,7 @@ import {
 } from "../components/ui";
 import ProductSalesModal from "../components/ProductSalesModal";
 import ProductsViewToggle from "../components/ProductsViewToggle";
+import { useConfirm } from "../components/Feedback";
 
 const LOW_STOCK_THRESHOLD = 5;
 const removalReasons: RemovalReason[] = ["Damaged", "Gifted", "Staff Use", "Stolen", "Lost", "Other"];
@@ -272,6 +273,7 @@ function CategoryRow({
   onSubDeleted: (id: number) => Promise<void>;
   onAddSub: (category: Category) => void;
 }) {
+  const { confirm: confirmDialog } = useConfirm();
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState(category.name);
   const [error, setError] = useState<string | null>(null);
@@ -298,7 +300,7 @@ function CategoryRow({
   }
 
   async function handleDelete() {
-    if (!confirm(`Delete category "${category.name}"? This only works if no product currently uses it.`)) return;
+    if (!(await confirmDialog({ title: `Delete category "${category.name}"?`, message: "This only works if no product currently uses it.", confirmLabel: "Delete", danger: true }))) return;
     setBusy(true);
     setError(null);
     try {
@@ -327,7 +329,7 @@ function CategoryRow({
   }
 
   async function handleSubDelete(sub: SubCategory) {
-    if (!confirm(`Delete sub-category "${sub.name}"? This only works if no product currently uses it.`)) return;
+    if (!(await confirmDialog({ title: `Delete sub-category "${sub.name}"?`, message: "This only works if no product currently uses it.", confirmLabel: "Delete", danger: true }))) return;
     setBusy(true);
     setSubError(null);
     try {
@@ -536,6 +538,7 @@ function ManageCategoriesModal({
 }
 
 export default function ManageProductsPage() {
+  const { confirm: confirmDialog } = useConfirm();
   const [products, setProducts] = useState<Product[]>([]);
   // Where the list was left — the search, the filters, the product that was open and how far it was scrolled — is
   // remembered for this tab (lib/viewMemory.ts), so leaving for another page and coming back finds it as it was.
@@ -746,11 +749,14 @@ export default function ManageProductsPage() {
 
   async function handleDelete(p: Product) {
     if (
-      !confirm(
-        `Delete "${p.product_title}" permanently?\n\n` +
+      !(await confirmDialog({
+        title: `Delete "${p.product_title}" permanently?`,
+        message:
           `This removes the product and every unit of its stock — including units already sold. This cannot be undone.\n\n` +
-          `Old sale receipts and purchase history are preserved.`
-      )
+          `Old sale receipts and purchase history are preserved.`,
+        confirmLabel: "Delete product",
+        danger: true,
+      }))
     )
       return;
     try {

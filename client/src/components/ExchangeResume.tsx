@@ -2,10 +2,12 @@ import { Link } from "react-router-dom";
 import { Repeat, X } from "lucide-react";
 import { clearExchangeDraft, useHeldExchange } from "../lib/exchangeDraft";
 import { useAuth } from "../context/AuthContext";
+import { useConfirm } from "./Feedback";
 
 // The reminder for an exchange-by-delivery popup that was put aside: it's held (see lib/exchangeDraft.ts), and this is the
 // way back to it from any page. Gone once it's created, held as a quote, or thrown away with the ×.
 export default function ExchangeResume() {
+  const { confirm: confirmDialog } = useConfirm();
   const { user } = useAuth();
   const { draft, visible } = useHeldExchange();
   if (!draft || visible || draft.userId !== (user?.id ?? null)) return null;
@@ -20,8 +22,8 @@ export default function ExchangeResume() {
       </Link>
       <button
         type="button"
-        onClick={() => {
-          if (confirm("Throw away this exchange you were filling in?")) clearExchangeDraft();
+        onClick={async () => {
+          if (await confirmDialog({ title: "Throw away this exchange?", message: "The exchange you were filling in will be lost.", confirmLabel: "Throw away", danger: true })) clearExchangeDraft();
         }}
         className="ml-1 flex-shrink-0 rounded-full p-1 text-gray-400 hover:bg-gray-800 hover:text-white"
         title="Throw it away"

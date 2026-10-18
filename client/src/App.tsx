@@ -38,6 +38,7 @@ import FindPage from "./pages/FindPage";
 import AnalyticsPage from "./pages/AnalyticsPage";
 import AuditLogPage from "./pages/AuditLogPage";
 import { AdminApprovalProvider } from "./components/AdminApproval";
+import { FeedbackProvider } from "./components/Feedback";
 import PromotionsPage from "./pages/PromotionsPage";
 import DeliveryPartnersPage from "./pages/DeliveryPartnersPage";
 
@@ -58,6 +59,7 @@ function ToCustomerTab({ tab }: { tab: string }) {
 export default function App() {
   return (
     <AdminApprovalProvider>
+    <FeedbackProvider>
     <Routes>
       <Route path="/login" element={<LoginPage />} />
 
@@ -249,6 +251,7 @@ export default function App() {
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
     <PdfPreviewHost />
+    </FeedbackProvider>
     </AdminApprovalProvider>
   );
 }

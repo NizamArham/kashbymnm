@@ -18,6 +18,7 @@ import SaleProfitModal from "../components/SaleProfitModal";
 import DeliveryChargeSummary from "../components/DeliveryChargeSummary";
 import { useAuth } from "../context/AuthContext";
 import { useAdminApproval } from "../components/AdminApproval";
+import { useConfirm } from "../components/Feedback";
 
 // Two separate questions, each answered on its own: WHEN (the period, or a custom date range) and
 // WHAT KIND of sale. They used to share one row of tabs, so picking "Voided" forgot the period.
@@ -148,6 +149,8 @@ function CustomerName({ sale }: { sale: Sale }) {
 }
 
 export default function SaleHistoryPage() {
+  const { confirm: confirmDialog } = useConfirm();
+  const { askReason } = useConfirm();
   const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
@@ -534,7 +537,13 @@ export default function SaleHistoryPage() {
     const saleDay = sale.date.slice(0, 10);
     const today = toISODate(new Date());
     const sameDayWarning = saleDay !== today ? "\n\nNote: this sale was NOT made today — voiding an older sale should be rare." : "";
-    const reason = prompt(`Void invoice ${sale.invoice}? Stock will be returned and any payment reversed in the cash book.${sameDayWarning}\n\nReason (optional):`);
+    const reason = await askReason({
+      title: `Void invoice ${sale.invoice}?`,
+      message: `Stock will be returned and any payment reversed in the cash book.${sameDayWarning}`,
+      reasonLabel: "Reason (optional)",
+      confirmLabel: "Void sale",
+      danger: true,
+    });
     if (reason === null) return;
 
     setVoidingId(sale.id);
@@ -568,7 +577,7 @@ export default function SaleHistoryPage() {
   async function handleUndoCod(sale: Sale) {
     setOpenMenuId(null);
     setError(null);
-    if (!confirm(`Undo the COD confirmation for invoice ${sale.invoice}? This reverts it to unpaid and removes the matching cash book entry. Only possible within 24 hours of confirming.`)) return;
+    if (!(await confirmDialog({ title: `Undo the COD confirmation for ${sale.invoice}?`, message: "This reverts it to unpaid and records a reversal in the cash book. Only possible within 24 hours of confirming.", confirmLabel: "Undo confirmation", danger: true }))) return;
 
     setUndoingId(sale.id);
     try {

@@ -17,6 +17,7 @@ import PhoneInput from "../components/PhoneInput";
 import CustomerOrderHistoryPage from "./CustomerOrderHistoryPage";
 import CustomerPaymentHistoryPage from "./CustomerPaymentHistoryPage";
 import CustomerLoyaltyHistoryPage from "./CustomerLoyaltyHistoryPage";
+import { useConfirm } from "../components/Feedback";
 
 function whatsappLink(phone: string): string {
   return `https://wa.me/${whatsappNumber(phone)}`;
@@ -137,6 +138,7 @@ const TABS: { key: ProfileTab; label: string }[] = [
 // One customer on a page of their own: who they are and what they owe at the top, what you can do for them in the header,
 // and their orders, payments, points and contact details underneath.
 export default function CustomerProfilePage() {
+  const { confirm: confirmDialog } = useConfirm();
   const { id } = useParams<{ id: string }>();
   const customerId = Number(id);
   const navigate = useNavigate();
@@ -634,7 +636,7 @@ export default function CustomerProfilePage() {
   }
 
   async function deleteAddress(customerId: number, addressId: number) {
-    if (!confirm("Delete this address?")) return;
+    if (!(await confirmDialog({ title: "Delete this address?", confirmLabel: "Delete", danger: true }))) return;
     try {
       await api.delete(`/customers/${customerId}/addresses/${addressId}`);
       refresh();
@@ -704,7 +706,7 @@ export default function CustomerProfilePage() {
   }
 
   async function deleteBankAccount(customerId: number, accountId: number) {
-    if (!confirm("Delete this bank account?")) return;
+    if (!(await confirmDialog({ title: "Delete this bank account?", confirmLabel: "Delete", danger: true }))) return;
     try {
       await api.delete(`/customers/${customerId}/bank-accounts/${accountId}`);
       refresh();

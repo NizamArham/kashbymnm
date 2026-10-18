@@ -3,10 +3,12 @@ import { Printer } from "lucide-react";
 import { ApiRequestError } from "../lib/api";
 import { printRefundSlip } from "../lib/refundSlip";
 import { ActionMenu } from "./ui";
+import { useToast } from "./Feedback";
 
 // A small print icon that opens the "Refund payment done" receipt for a refund that has been paid. `slipKey` is "pickup-<id>" (a courier return)
 // or "return-<id>" (a refund paid at the shop).
 export default function RefundSlipButton({ slipKey, className = "" }: { slipKey: string; className?: string }) {
+  const toast = useToast();
   const [busy, setBusy] = useState(false);
   return (
     <button
@@ -20,7 +22,7 @@ export default function RefundSlipButton({ slipKey, className = "" }: { slipKey:
         try {
           await printRefundSlip(slipKey);
         } catch (err) {
-          window.alert(err instanceof ApiRequestError ? err.message : "Couldn't open the slip");
+          toast.error(err instanceof ApiRequestError ? err.message : "Couldn't open the slip");
         } finally {
           setBusy(false);
         }
@@ -35,6 +37,7 @@ export default function RefundSlipButton({ slipKey, className = "" }: { slipKey:
 // The same, as an entry in a row's three-dot menu — how the Returns lists offer it ("Print refund receipt" under the dots at the end of a
 // completed row).
 export function RefundSlipMenu({ slipKey }: { slipKey: string }) {
+  const toast = useToast();
   return (
     <ActionMenu
       items={[
@@ -45,7 +48,7 @@ export function RefundSlipMenu({ slipKey }: { slipKey: string }) {
             try {
               await printRefundSlip(slipKey);
             } catch (err) {
-              window.alert(err instanceof ApiRequestError ? err.message : "Couldn't open the receipt");
+              toast.error(err instanceof ApiRequestError ? err.message : "Couldn't open the receipt");
             }
           },
         },

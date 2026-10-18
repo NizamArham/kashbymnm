@@ -5,11 +5,13 @@ import { ArrowLeftRight } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { ApiRequestError } from "../lib/api";
 import { Modal, Button, FormGroup, Label, Input, ErrorText } from "./ui";
+import { useToast } from "./Feedback";
 
 // The sidebar button that lets an admin work the till as an ordinary cashier, and the way back.
 // Cashier mode is a real staff-level session (the server refuses admin actions in it), so getting
 // back to admin takes the admin's own password.
 export default function CashierModeControl({ onDone }: { onDone?: () => void }) {
+  const toast = useToast();
   const { user, enterCashierMode, exitCashierMode } = useAuth();
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
@@ -29,7 +31,7 @@ export default function CashierModeControl({ onDone }: { onDone?: () => void }) 
       onDone?.();
       navigate("/pos", { replace: true });
     } catch (err) {
-      alert(err instanceof ApiRequestError ? err.message : "Couldn't switch to cashier mode");
+      toast.error(err instanceof ApiRequestError ? err.message : "Couldn't switch to cashier mode");
     } finally {
       setBusy(false);
     }

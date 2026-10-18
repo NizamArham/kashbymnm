@@ -6,6 +6,7 @@ import { CourierPaymentRecords } from "../lib/types";
 import { partnerLabel, useDeliveryPartners } from "../lib/delivery";
 import { useSortableData } from "../lib/useSortableData";
 import { Badge, Card, DateRangePicker, Dropdown, ErrorText, HelpHint, PageHeader, SortHeader, TabToggle, Table, Td, Th } from "../components/ui";
+import { useConfirm } from "../components/Feedback";
 
 const money = (value: number) => `Rs. ${value.toLocaleString()}`;
 const signed = (value: number) => `${value > 0 ? "+" : "−"} ${money(Math.abs(value))}`;
@@ -46,6 +47,7 @@ const METHOD_LABEL: Record<string, string> = { bank_transfer: "Bank transfer", c
 // Every settlement a courier has paid over and every balance correction, for the whole
 // history — the Couriers page only shows the latest of each. Defaults to the past month.
 export default function CourierPaymentRecordsPage() {
+  const { confirm: confirmDialog } = useConfirm();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const { partners } = useDeliveryPartners();
@@ -72,7 +74,7 @@ export default function CourierPaymentRecordsPage() {
   }, []);
 
   async function undoCorrection(id: number) {
-    if (!window.confirm("Undo this correction? The balance goes back to what the orders and settlements say.")) return;
+    if (!(await confirmDialog({ title: "Undo this correction?", message: "The balance goes back to what the orders and settlements say.", confirmLabel: "Undo correction", danger: true }))) return;
     try {
       await api.delete(`/courier-reconciliation/adjustments/${id}`);
       await load();
