@@ -56,6 +56,11 @@ interface MenuItem {
   alsoActiveOn?: string[];
 }
 
+// Is `path` this page, or a page inside it (/customers/12 is within /customers)? The dashboard ("/") only ever matches itself.
+function isWithin(path: string, base: string): boolean {
+  return base === "/" ? path === "/" : path === base || path.startsWith(base + "/");
+}
+
 export default function AppShell() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -202,13 +207,15 @@ export default function AppShell() {
 
   useEffect(() => {
     const path = location.pathname;
-    const isOnPos = path === "/pos" || path === "/sales" || path === "/promotions" || path === "/quotations";
-    const isOnInventory = path === "/inventory" || path === "/products" || path === "/products/add";
-    const isOnDirectory = path === "/customers" || path === "/customers/add" || path === "/staff" || path === "/suppliers";
-    const isOnPurchases = path === "/purchases" || path === "/supplier-payments";
-    const isOnFinance = path === "/cash-book" || path === "/cheques";
-    const isOnDeliveries = path === "/deliveries" || path === "/couriers" || path === "/couriers/history" || path === "/waybill-generator" || path === "/delivery-partners";
-    const isOnAdmin = path === "/attendance" || path === "/settings/general" || path === "/audit-log";
+    // A page inside a section counts as being in it: /customers/12 is in Directory, /sales/40 in POS...
+    const on = (...bases: string[]) => bases.some((b) => isWithin(path, b));
+    const isOnPos = on("/pos", "/sales", "/promotions", "/quotations");
+    const isOnInventory = on("/inventory", "/products");
+    const isOnDirectory = on("/customers", "/staff", "/suppliers");
+    const isOnPurchases = on("/purchases", "/supplier-payments");
+    const isOnFinance = on("/cash-book", "/cheques");
+    const isOnDeliveries = on("/deliveries", "/couriers", "/waybill-generator", "/delivery-partners");
+    const isOnAdmin = on("/attendance", "/settings", "/audit-log");
 
     if (isOnPos) setOpenMenuId("pos");
     else if (isOnInventory) setOpenMenuId("inventory");
@@ -246,7 +253,7 @@ export default function AppShell() {
   function isParentActive(item: MenuItem): boolean {
     if (item.id === "dashboard") return location.pathname === "/";
     if (item.alsoActiveOn?.some((p) => location.pathname.startsWith(p))) return true;
-    if (item.subItems) return item.subItems.some((sub) => location.pathname === sub.path);
+    if (item.subItems) return item.subItems.some((sub) => isWithin(location.pathname, sub.path));
     return location.pathname.startsWith(item.path);
   }
 
@@ -343,7 +350,7 @@ export default function AppShell() {
                   <div className="ml-4 lg:ml-6 space-y-1 border-l border-gray-800 pl-2 lg:pl-3">
                     {visibleSubItems.map((sub) => {
                       const SubIcon = sub.icon;
-                      const subActive = location.pathname === sub.path;
+                      const subActive = isWithin(location.pathname, sub.path);
                       return (
                         <Link
                           key={sub.id}
@@ -413,7 +420,7 @@ export default function AppShell() {
           </button>
           <h2 className="text-sm font-medium text-gray-700">
             {visibleMenu.find(
-              (item) => location.pathname === item.path || item.subItems?.some((s) => location.pathname === s.path)
+              (item) => isWithin(location.pathname, item.path) || item.alsoActiveOn?.some((p) => isWithin(location.pathname, p)) || item.subItems?.some((s) => isWithin(location.pathname, s.path))
             )?.label || (isOnProfile ? "My Profile" : "Dashboard")}
           </h2>
         </div>
