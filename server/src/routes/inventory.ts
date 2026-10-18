@@ -5,6 +5,7 @@ import { nextSku } from "../lib/codes";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth, requireRole } from "../lib/auth";
 import { logAudit } from "../lib/auditLog";
+import { HELD_SQL } from "../lib/stockHolds";
 
 export const inventoryRouter = Router();
 
@@ -43,6 +44,15 @@ inventoryRouter.get(
       conditions.push("inventory.product_id = ?");
       params.push(req.query.product_id);
     }
+    // ?sellable=1 — only pieces free to sell now: not held for a payment request. ?for_sale=<id> is the same, except
+    // that the pieces held for that very request stay in (it's being edited or paid).
+    const forSale = Number(req.query.for_sale);
+    if (forSale > 0) {
+      conditions.push(`(NOT ${HELD_SQL} OR inventory.held_for_sale_id = ?)`);
+      params.push(forSale);
+    } else if (req.query.sellable) {
+      conditions.push(`NOT ${HELD_SQL}`);
+    }
 
     const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
@@ -51,7 +61,8 @@ inventoryRouter.get(
         `SELECT inventory.*, products.product_title, products.brand, products.category,
                 products.selling_price AS product_selling_price,
                 suppliers.id AS batch_supplier_id, suppliers.name AS batch_supplier_name,
-                suppliers.supplier_code AS batch_supplier_code
+                suppliers.supplier_code AS batch_supplier_code,
+                CASE WHEN ${HELD_SQL} THEN 1 ELSE 0 END AS is_held
          FROM inventory
          JOIN products ON products.id = inventory.product_id
          LEFT JOIN purchase_items ON purchase_items.id = inventory.purchase_item_id
