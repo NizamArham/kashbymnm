@@ -2,7 +2,8 @@ import { useState } from "react";
 import { Repeat } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { SaleExchange, SaleExchangeItem, SaleExchangeOut } from "../lib/types";
-import { Badge, Button, ErrorText, Modal, RefLink } from "./ui";
+import StepModal from "./StepModal";
+import { Badge, Button, RefLink } from "./ui";
 import { useAdminApproval } from "./AdminApproval";
 import ArrivalChoice, { allGood, startGood } from "./ArrivalChoice";
 import { useAuth } from "../context/AuthContext";
@@ -192,16 +193,13 @@ export function ExchangeReceiveModal({
   }
 
   return (
-    <Modal
-      size="3xl"
-      height="h-[min(40rem,calc(100dvh-2rem))]"
-      flush
-      onClose={onClose}
+    <StepModal
       title={`Parcel received${invoice ? ` — ${invoice}` : ""}`}
       subtitle={`${customer ?? "Customer"} · the old items are back`}
-      footer={
+      onClose={onClose}
+      message={error}
+      buttons={
         <>
-          <span className={`mr-auto min-w-0 basis-full text-xs sm:basis-0 sm:flex-1 ${error ? "text-red-500" : "text-gray-400"}`}>{error}</span>
           <Button onClick={onClose} disabled={busy}>
             Cancel
           </Button>
@@ -210,9 +208,8 @@ export function ExchangeReceiveModal({
           </Button>
         </>
       }
-    >
-      <div className="h-full overflow-y-auto lg:grid lg:grid-cols-[21rem_minmax(0,1fr)] lg:overflow-hidden">
-        <div className="border-b border-gray-100 bg-gray-50/70 px-5 py-5 lg:overflow-y-auto lg:border-b-0 lg:border-r">
+      left={
+        <>
           <div className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm">
             <div className="flex justify-between py-0.5 text-gray-600">
               <span>Old items ({waiting.length})</span>
@@ -253,22 +250,20 @@ export function ExchangeReceiveModal({
             </div>
           )}
           {needsAdmin && <p className="mt-3 text-xs text-gray-500">A bad item, or paying the difference out, needs an admin's password — you'll be asked for it when you confirm.</p>}
-        </div>
-
-        <div className="px-6 py-5 lg:overflow-y-auto">
-          <ArrivalChoice
-            items={waiting.map((i) => ({
-              id: i.old_sale_item_id,
-              name: itemName(i),
-              detail: `· ${i.old_invoice} · ${money(i.credit_amount)}`,
-              badNote: "Recorded as damaged stock — it isn't put back for sale. Its value still comes off the new order.",
-            }))}
-            state={arrival}
-            onChange={setArrival}
-          />
-        </div>
-      </div>
-    </Modal>
+        </>
+      }
+    >
+      <ArrivalChoice
+        items={waiting.map((i) => ({
+          id: i.old_sale_item_id,
+          name: itemName(i),
+          detail: `· ${i.old_invoice} · ${money(i.credit_amount)}`,
+          badNote: "Recorded as damaged stock — it isn't put back for sale. Its value still comes off the new order.",
+        }))}
+        state={arrival}
+        onChange={setArrival}
+      />
+    </StepModal>
   );
 }
 

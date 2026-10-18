@@ -318,7 +318,7 @@ export interface ReturnPickupItem {
 
 // Where a courier return is: asked for, approved (the customer may send it), on its way, on hand, report waiting for an admin, refund owed,
 // done. Declined / cancelled end it early.
-export type ReturnStage = "requested" | "approved" | "on_the_way" | "received" | "report_pending" | "refund_due" | "completed" | "declined" | "cancelled";
+export type ReturnStage = "requested" | "approved" | "on_the_way" | "received" | "report_pending" | "refund_due" | "completed" | "declined" | "cancelled" | "rejected";
 
 export interface ReturnPickup {
   id: number;
@@ -353,7 +353,7 @@ export interface ReturnPickup {
   received_at: string | null;
   received_by_name: string | null;
   // The inspection report: none → pending (waiting for an admin) → approved, or sent_back for another look.
-  report_status: "none" | "pending" | "approved" | "sent_back";
+  report_status: "none" | "pending" | "approved" | "sent_back" | "rejected";
   report_note: string | null;
   report_by_name: string | null;
   report_at: string | null;

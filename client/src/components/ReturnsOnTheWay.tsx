@@ -3,7 +3,7 @@ import { Truck } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { ExchangeOnTheWay, ParcelComingBack, ReturnPickup } from "../lib/types";
 import { ExchangeReceiveModal } from "./ExchangeNotice";
-import { CourierReceivedModal, InspectionReportModal, RefundPaidModal } from "./CourierReturnSteps";
+import { CourierReceivedModal, InspectionReportModal, RefundPaidModal, RejectReturnModal } from "./CourierReturnSteps";
 import CancelReasonModal from "./CancelReasonModal";
 import { useAuth } from "../context/AuthContext";
 import { FLOW_LABEL, courierNote, courierStage, exchangeStage } from "../lib/returnFlow";
@@ -22,7 +22,7 @@ export function shareSummary(p: Pick<ReturnPickup, "pickup_charge" | "customer_s
 }
 
 // What is on its way back to the shop, one compact row each — courier returns (with the button for whatever step they are at: Mark Received,
-// inspection report, refund paid), the old items of delivery exchanges, and parcels the courier couldn't deliver. A return or exchange that is
+// inspection report or Reject, refund paid), the old items of delivery exchanges, and parcels the courier couldn't deliver. A return or exchange that is
 // still to arrive has two buttons: Mark Received, and Cancel (which asks again, with an optional reason). Used on the Returns page and on Shipping.
 export default function ReturnPickupList({ status = "open", onChanged }: { status?: "open" | "closed" | "all"; onChanged?: () => void }) {
   const { runWithApproval } = useAdminApproval();
@@ -34,7 +34,7 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
   const [parcels, setParcels] = useState<ParcelComingBack[]>([]);
   const [error, setError] = useState<string | null>(null);
   // The step dialog open for a courier return: parcel received / inspection report / refund paid.
-  const [step, setStep] = useState<{ kind: "received" | "report" | "refund"; pickup: ReturnPickup } | null>(null);
+  const [step, setStep] = useState<{ kind: "received" | "report" | "refund" | "reject"; pickup: ReturnPickup } | null>(null);
   const [receivingExchange, setReceivingExchange] = useState<ExchangeOnTheWay | null>(null);
   // Being cancelled: the second look, with an optional reason.
   const [cancelling, setCancelling] = useState<{ kind: "pickup"; p: ReturnPickup } | { kind: "exchange"; x: ExchangeOnTheWay } | null>(null);
@@ -199,9 +199,14 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
             </>
           )}
           {p.stage === "received" && (
-            <Button size="sm" variant="primary" onClick={() => setStep({ kind: "report", pickup: p })}>
-              Inspection report
-            </Button>
+            <>
+              <Button size="sm" variant="primary" onClick={() => setStep({ kind: "report", pickup: p })}>
+                Inspection report
+              </Button>
+              <Button size="sm" onClick={() => setStep({ kind: "reject", pickup: p })}>
+                Reject
+              </Button>
+            </>
           )}
           {p.stage === "refund_due" && (
             <Button size="sm" variant="primary" onClick={() => setStep({ kind: "refund", pickup: p })}>
@@ -271,6 +276,7 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
           const close = () => setStep(null);
           if (step.kind === "received") return <CourierReceivedModal pickup={step.pickup} onClose={close} onDone={done} />;
           if (step.kind === "report") return <InspectionReportModal pickup={step.pickup} onClose={close} onDone={done} />;
+          if (step.kind === "reject") return <RejectReturnModal pickup={step.pickup} onClose={close} onDone={done} />;
           return <RefundPaidModal pickup={step.pickup} onClose={close} onDone={done} />;
         })()}
       {receivingExchange && (

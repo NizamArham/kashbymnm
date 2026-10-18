@@ -1,12 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { ReactNode, useEffect, useMemo, useState } from "react";
 import { api, ApiRequestError } from "../lib/api";
 import { ReturnPickup, ReturnPickupItem } from "../lib/types";
 import { useDeliveryPartners } from "../lib/delivery";
 import { cleanMoney } from "../lib/numberInput";
+import { SHARE_OPTIONS } from "../lib/pickupShare";
 import { useAuth } from "../context/AuthContext";
 import { useAdminApproval } from "./AdminApproval";
 import ArrivalChoice, { PasswordNote, allGood, startGood } from "./ArrivalChoice";
 import RefundMethodPicker, { useCustomerBankAccounts } from "./RefundMethodPicker";
+import StepModal from "./StepModal";
+import CancelReasonModal from "./CancelReasonModal";
 import { Button, Dropdown, ErrorText, FormGroup, Input, Label, Modal } from "./ui";
 
 const money = (n: number) => `Rs. ${Math.round(n).toLocaleString()}`;
@@ -17,6 +20,7 @@ const itemName = (i: ReturnPickupItem) => `${i.title ?? "Item"}${variant(i.size,
 //   CourierReceivedModal  the parcel is on hand: service, tracking number (or none, which is noted as accepted risk), what we paid, and
 //                         good or bad for each item with an optional reason
 //   InspectionReportModal the careful look: condition of each item, who pays the delivery charge, what to pay the customer back
+//   RejectReturnModal     the parcel is here and the return is not accepted at all — nothing refunded
 //   RefundPaidModal       the refund is paid (with the customer's bank details) and goes into the cash book
 
 const OTHER = "__other__";
@@ -84,12 +88,13 @@ function TrackingFields({
   );
 }
 
-function Foot({ onClose, busy, label, onConfirm, disabled }: { onClose: () => void; busy: boolean; label: string; onConfirm: () => void; disabled?: boolean }) {
+function Foot({ onClose, busy, label, onConfirm, disabled, middle }: { onClose: () => void; busy: boolean; label: string; onConfirm: () => void; disabled?: boolean; middle?: ReactNode }) {
   return (
     <>
       <Button onClick={onClose} disabled={busy}>
         Cancel
       </Button>
+      {middle}
       <Button variant="primary" onClick={onConfirm} disabled={busy || disabled}>
         {busy ? "Saving…" : label}
       </Button>
@@ -145,22 +150,14 @@ export function CourierReceivedModal({ pickup, onClose, onDone }: { pickup: Retu
   }
 
   return (
-    <Modal
-      size="3xl"
-      height="h-[min(40rem,calc(100dvh-2rem))]"
-      flush
+    <StepModal
       title={`Parcel received — ${pickup.invoice}`}
       subtitle={`${pickup.customer_name ?? "Walk-in"} · it is on hand`}
       onClose={onClose}
-      footer={
+      message={error}
+      buttons={<Foot onClose={onClose} busy={busy} label="Mark Received" onConfirm={confirm} />}
+      left={
         <>
-          <span className={`mr-auto min-w-0 basis-full text-xs sm:basis-0 sm:flex-1 ${error ? "text-red-500" : "text-gray-400"}`}>{error}</span>
-          <Foot onClose={onClose} busy={busy} label="Mark Received" onConfirm={confirm} />
-        </>
-      }
-    >
-      <div className="h-full overflow-y-auto lg:grid lg:grid-cols-[21rem_minmax(0,1fr)] lg:overflow-hidden">
-        <div className="border-b border-gray-100 bg-gray-50/70 px-5 py-5 lg:overflow-y-auto lg:border-b-0 lg:border-r">
           <ServicePicker partnerCode={service.partnerCode} serviceName={service.serviceName} onChange={setService} />
           <TrackingFields tracking={tracking} onTracking={setTracking} noTracking={noTracking} onNoTracking={setNoTracking} noTrackingLabel="It came without a tracking number" />
           <FormGroup>
@@ -168,17 +165,16 @@ export function CourierReceivedModal({ pickup, onClose, onDone }: { pickup: Retu
             <Input inputMode="decimal" placeholder="0 if the customer paid" value={paid} onChange={(e) => setPaid(cleanMoney(e.target.value))} />
             <p className="mt-1 text-xs text-gray-400">Who finally bears it is decided in the inspection report.</p>
           </FormGroup>
-        </div>
-        <div className="px-6 py-5 lg:overflow-y-auto">
-          <ArrivalChoice
-            items={waiting.map((i) => ({ id: i.sale_item_id, name: itemName(i), detail: money(i.amount), badNote: "Looked at again in the inspection report before anything is refunded." }))}
-            state={arrival}
-            onChange={setArrival}
-          />
-          <PasswordNote show={needsAdmin} />
-        </div>
-      </div>
-    </Modal>
+        </>
+      }
+    >
+      <ArrivalChoice
+        items={waiting.map((i) => ({ id: i.sale_item_id, name: itemName(i), detail: money(i.amount), badNote: "Looked at again in the inspection report before anything is refunded." }))}
+        state={arrival}
+        onChange={setArrival}
+      />
+      <PasswordNote show={needsAdmin} />
+    </StepModal>
   );
 }
 
@@ -189,12 +185,6 @@ const VERDICTS: { key: Verdict; label: string; hint: string }[] = [
   { key: "damaged", label: "Damaged", hint: "Taken back, but to the damaged stock — not resold." },
   { key: "missing_parts", label: "Missing parts", hint: "Taken back, but to the damaged stock — not resold." },
   { key: "not_per_policy", label: "Not per policy", hint: "Can't be taken back — no refund for it." },
-];
-
-const SPLIT_OPTIONS = [
-  { value: "0", label: "Us" },
-  { value: "50", label: "50-50" },
-  { value: "100", label: "Customer" },
 ];
 
 // Reasons that are our doing (a defect, a wrong description) — the delivery charge starts as ours; anything else starts as the customer's.
@@ -215,6 +205,7 @@ export function InspectionReportModal({ pickup, onClose, onDone }: { pickup: Ret
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rejecting, setRejecting] = useState(false);
 
   // The configured starting point for who pays the delivery charge, by the reason for the return.
   useEffect(() => {
@@ -258,39 +249,132 @@ export function InspectionReportModal({ pickup, onClose, onDone }: { pickup: Ret
   }
 
   return (
-    <Modal
-      size="lg"
+    <StepModal
       title={`Inspection report — ${pickup.invoice}`}
       subtitle={`${pickup.customer_name ?? "Walk-in"} · ${pickup.partner_name ?? "service not noted"}${pickup.tracking_number ? ` · tracking ${pickup.tracking_number}` : ""}`}
       onClose={onClose}
-      footer={<Foot onClose={onClose} busy={busy} label={isAdmin ? "Save and approve" : "Send for approval"} onConfirm={submit} />}
-    >
-      {pickup.report_status === "sent_back" && (
-        <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          An admin sent the last report back{pickup.report_decision_reason ? `: ${pickup.report_decision_reason}` : ""}. Look again and send a new one.
-        </p>
-      )}
+      message={error}
+      buttons={
+        <Foot
+          onClose={onClose}
+          busy={busy}
+          label={isAdmin ? "Save and approve" : "Send for approval"}
+          onConfirm={submit}
+          middle={
+            <Button onClick={() => setRejecting(true)} disabled={busy} title="The parcel is here but the return isn't accepted — nothing is refunded">
+              Reject return
+            </Button>
+          }
+        />
+      }
+      left={
+        <>
+          {pickup.report_status === "sent_back" && (
+            <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              An admin sent the last report back{pickup.report_decision_reason ? `: ${pickup.report_decision_reason}` : ""}. Look again and send a new one.
+            </p>
+          )}
 
+          <FormGroup>
+            <Label>The customer is paid back as</Label>
+            <div className="flex gap-2">
+              {([
+                ["refund", "Refund"],
+                ["store_credit", "Store credit"],
+              ] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  disabled={key === "store_credit" && !pickup.customer_id}
+                  onClick={() => setResolution(key)}
+                  className={`flex-1 rounded-xl border py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                    resolution === key ? "border-black bg-black text-white" : "border-gray-200 bg-white text-gray-600 hover:border-gray-400"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </FormGroup>
+
+          <FormGroup>
+            <Label>Who pays the delivery charge?</Label>
+            {pickup.pickup_charge > 0 ? (
+              <>
+                {/* The same three choices, worded the same way, as everywhere else the delivery charge is split. */}
+                <div className="space-y-1.5">
+                  {SHARE_OPTIONS.map((o) => (
+                    <button
+                      key={o.pct}
+                      type="button"
+                      onClick={() => setShare(String(o.pct))}
+                      className={`flex w-full items-baseline justify-between gap-3 rounded-xl border bg-white px-3 py-1.5 text-left transition ${
+                        sharePct === o.pct ? "border-black" : "border-gray-200 hover:border-gray-300"
+                      }`}
+                    >
+                      <span className="text-sm font-medium text-gray-900">{o.label}</span>
+                      <span className="text-right text-[11px] leading-tight text-gray-500">{o.hint}</span>
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1.5 text-xs text-gray-400">
+                  We paid {money(pickup.pickup_charge)} for the parcel.{" "}
+                  {sharePct === 0 ? "We carry all of it." : sharePct === 100 ? "It comes off what the customer is paid back." : `Half (${money(customerShare)}) comes off what the customer is paid back.`}
+                </p>
+              </>
+            ) : (
+              <p className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs text-gray-500">We paid nothing for the parcel, so there is nothing to share.</p>
+            )}
+          </FormGroup>
+
+          <FormGroup>
+            <Label>Proposed {creditNoun} (Rs.)</Label>
+            <Input
+              inputMode="decimal"
+              value={proposed ?? String(estimate)}
+              onChange={(e) => setProposed(cleanMoney(e.target.value))}
+              disabled={takenBack.length === 0}
+              aria-label="Proposed amount"
+            />
+            <p className="mt-1 text-xs text-gray-400">
+              Items {money(itemsTotal)}
+              {heldBack > 0 ? ` less ${money(heldBack)} delivery share` : ""} = {money(estimate)}. Shown for an order paid in full — a refund is never more than was actually paid.
+            </p>
+            {lessThanItems && <p className="mt-1 text-xs text-gray-600">{money(estimate - proposedNum)} is held back (for damage, say) — say why in the note.</p>}
+            {takenBack.length === 0 && <p className="mt-1 text-xs text-gray-400">Nothing is being taken back, so nothing is paid.</p>}
+          </FormGroup>
+
+          <FormGroup>
+            <Label>Note (optional)</Label>
+            <Input placeholder="What you saw — worn, a missing button, a tag gone…" value={note} onChange={(e) => setNote(e.target.value)} />
+          </FormGroup>
+          {!isAdmin && <p className="text-xs text-gray-500">An admin approves the delivery split and the amount together; nothing moves until then.</p>}
+        </>
+      }
+    >
       <Label>What condition is each item in?</Label>
-      <div className="mb-4 space-y-2">
+      <div className="space-y-2">
         {arrived.map((i) => {
           const chosen = verdicts[i.sale_item_id];
           const v = VERDICTS.find((x) => x.key === chosen);
           return (
-            <div key={i.id} className="rounded-xl border border-gray-200 px-3 py-2.5">
+            <div key={i.id} className="rounded-xl border border-gray-200 px-3.5 py-3">
               <p className="text-sm text-gray-900">
                 {itemName(i)} <span className="text-xs text-gray-400">{money(i.amount)}</span>
-                {i.arrival_condition === "damaged" && (
-                  <span className="ml-2 text-xs text-amber-700">marked Bad when it arrived{i.arrival_note ? ` — ${i.arrival_note}` : ""}</span>
-                )}
               </p>
-              <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+              {i.arrival_condition === "damaged" && (
+                <p className="mt-0.5 text-xs text-gray-500">Marked Bad when it arrived{i.arrival_note ? ` — ${i.arrival_note}` : ""}</p>
+              )}
+              {/* Four ways it can be, as small pills — the filled one is the answer. */}
+              <div className="mt-2.5 flex flex-wrap gap-1.5" role="radiogroup" aria-label="Condition">
                 {VERDICTS.map((o) => (
                   <button
                     key={o.key}
                     type="button"
+                    role="radio"
+                    aria-checked={chosen === o.key}
                     onClick={() => setVerdicts((cur) => ({ ...cur, [i.sale_item_id]: o.key }))}
-                    className={`rounded-lg border px-2 py-1.5 text-sm font-medium transition ${
+                    className={`rounded-full border px-3.5 py-1.5 text-xs font-medium transition ${
                       chosen === o.key ? "border-black bg-black text-white" : "border-gray-200 bg-white text-gray-600 hover:border-gray-400"
                     }`}
                   >
@@ -298,83 +382,42 @@ export function InspectionReportModal({ pickup, onClose, onDone }: { pickup: Ret
                   </button>
                 ))}
               </div>
-              {v && <p className="mt-1.5 text-xs text-gray-400">{v.hint}</p>}
+              {v && <p className="mt-2 text-xs text-gray-400">{v.hint}</p>}
             </div>
           );
         })}
         {missing.map((i) => (
-          <div key={i.id} className="rounded-xl border border-dashed border-gray-300 px-3 py-2.5 text-sm text-gray-500">
+          <div key={i.id} className="rounded-xl border border-dashed border-gray-300 px-3.5 py-3 text-sm text-gray-500">
             {itemName(i)} <span className="text-xs text-gray-400">{money(i.amount)}</span> — marked missing when the parcel was opened. Nothing to refund for it.
           </div>
         ))}
       </div>
+      {rejecting && <RejectReturnModal pickup={pickup} stacked onClose={() => setRejecting(false)} onDone={onDone} />}
+    </StepModal>
+  );
+}
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <FormGroup>
-          <Label>The customer is paid back as</Label>
-          <div className="flex gap-2">
-            {([
-              ["refund", "Refund"],
-              ["store_credit", "Store credit"],
-            ] as const).map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                disabled={key === "store_credit" && !pickup.customer_id}
-                onClick={() => setResolution(key)}
-                className={`flex-1 rounded-xl border py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${
-                  resolution === key ? "border-black bg-black text-white" : "border-gray-200 bg-white text-gray-600 hover:border-gray-400"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </FormGroup>
-
-        <FormGroup>
-          <Label>Who pays the delivery charge?</Label>
-          {pickup.pickup_charge > 0 ? (
-            <>
-              <Dropdown value={share} onChange={setShare} options={SPLIT_OPTIONS} />
-              <p className="mt-1 text-xs text-gray-400">
-                We paid {money(pickup.pickup_charge)} for the parcel.{" "}
-                {sharePct === 0 ? "We carry all of it." : sharePct === 100 ? "It comes off what the customer is paid back." : `Half (${money(customerShare)}) comes off what the customer is paid back.`}
-              </p>
-            </>
-          ) : (
-            <p className="rounded-xl border border-gray-200 bg-gray-50/70 px-3 py-2 text-xs text-gray-500">We paid nothing for the parcel, so there is nothing to share.</p>
-          )}
-        </FormGroup>
-      </div>
-
-      <FormGroup>
-        <Label>
-          Proposed {creditNoun} (Rs.){" "}
-          <span className="font-normal text-gray-400">
-            — items {money(itemsTotal)}
-            {heldBack > 0 ? ` less ${money(heldBack)} delivery share` : ""} = {money(estimate)}
-          </span>
-        </Label>
-        <Input
-          inputMode="decimal"
-          value={proposed ?? String(estimate)}
-          onChange={(e) => setProposed(cleanMoney(e.target.value))}
-          disabled={takenBack.length === 0}
-          aria-label="Proposed amount"
-        />
-        {lessThanItems && <p className="mt-1 text-xs text-gray-500">{money(estimate - proposedNum)} is held back (for damage, say) — say why in the note.</p>}
-        {takenBack.length === 0 && <p className="mt-1 text-xs text-gray-400">Nothing is being taken back, so nothing is paid.</p>}
-        <p className="mt-1 text-xs text-gray-400">Shown for an order paid in full — a refund is never more than was actually paid.</p>
-      </FormGroup>
-
-      <FormGroup>
-        <Label>Note (optional)</Label>
-        <Input placeholder="What you saw — worn, a missing button, a tag gone…" value={note} onChange={(e) => setNote(e.target.value)} />
-      </FormGroup>
-      {!isAdmin && <p className="text-xs text-gray-500">An admin approves the delivery split and the amount together; nothing moves until then.</p>}
-      {error && <ErrorText>{error}</ErrorText>}
-    </Modal>
+// ---------------------------------------------------------------- the return is not accepted
+// The parcel is on hand and it isn't taken back — worn, outside the policy… — so nothing is refunded and no stock moves. It is an admin's
+// decision (a cashier is asked for an admin's password); the reason is optional here and kept on the record.
+export function RejectReturnModal({ pickup, onClose, onDone, stacked = false }: { pickup: ReturnPickup; onClose: () => void; onDone: () => void; stacked?: boolean }) {
+  const { runWithApproval } = useAdminApproval();
+  return (
+    <CancelReasonModal
+      title={`Reject this return — ${pickup.invoice}?`}
+      confirmLabel="Yes, reject it"
+      keepLabel="No, go back"
+      busyLabel="Rejecting…"
+      stacked={stacked}
+      onClose={onClose}
+      onConfirm={async (reason) => {
+        await runWithApproval((approval) => api.put(`/return-pickups/${pickup.id}/report/reject`, reason ? { reason } : {}, { approval }));
+        onDone();
+      }}
+    >
+      Nothing is refunded and no stock moves — the customer's purchase stands. The parcel is still with you, so send it back to them or keep it as your policy says. A cashier needs an admin's
+      password for this.
+    </CancelReasonModal>
   );
 }
 

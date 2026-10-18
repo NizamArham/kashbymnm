@@ -56,6 +56,7 @@ const ACTION_META: Record<string, { label: string; icon: typeof AlertTriangle; t
   return_pickup_reported: { label: "Courier return inspection report", icon: Pencil, tone: "neutral" },
   return_pickup_report_approved: { label: "Courier return report approved", icon: Pencil, tone: "neutral" },
   return_pickup_report_sent_back: { label: "Courier return report sent back", icon: Pencil, tone: "warning" },
+  return_pickup_rejected: { label: "Courier return rejected after inspection", icon: Pencil, tone: "warning" },
   return_pickup_refunded: { label: "Courier return refund paid", icon: Pencil, tone: "neutral" },
   exchange_requested: { label: "Requested a delivery exchange", icon: Pencil, tone: "neutral" },
   exchange_request_approved: { label: "Approved a delivery exchange", icon: Pencil, tone: "neutral" },

@@ -477,6 +477,11 @@ export default function SaleDetailPage() {
                   <p className="mt-0.5 text-xs text-gray-400">{decidedLine(p.auto_approved === 1, "approved", p.approved_by_name, p.approved_at)}</p>
                 )}
                 {p.report_status === "approved" && p.pickup_charge > 0 && <p className="mt-0.5 text-xs text-gray-500">{shareSummary(p)}</p>}
+                {p.stage === "rejected" && (
+                  <p className="mt-0.5 text-xs text-red-600">
+                    Rejected after inspection{p.report_decision_reason ? ` — ${p.report_decision_reason}` : ""}. Nothing was refunded.
+                  </p>
+                )}
                 {p.report_status === "approved" && (
                   <p className="mt-0.5 text-xs text-gray-400">
                     {p.report_auto_approved === 1 ? `Inspection report — ${AUTO_APPROVED}` : `Inspection report approved by ${p.report_decided_by_name ?? "an admin"}`}

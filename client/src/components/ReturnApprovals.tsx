@@ -226,6 +226,10 @@ function CourierReportPanel({ p, onChanged }: { p: ReturnPickup; onChanged: () =
     await runWithApproval((approval) => api.put(`/return-pickups/${p.id}/report/send-back`, { reason }, { approval }));
     onChanged();
   }
+  async function reject(reason: string) {
+    await runWithApproval((approval) => api.put(`/return-pickups/${p.id}/report/reject`, { reason }, { approval }));
+    onChanged();
+  }
 
   return (
     <div className="space-y-4">
@@ -250,7 +254,7 @@ function CourierReportPanel({ p, onChanged }: { p: ReturnPickup; onChanged: () =
         </Fact>
         <Fact label="We paid for the parcel">{p.pickup_charge > 0 ? money(p.pickup_charge) : "Nothing"}</Fact>
         <Fact label="Who pays the delivery">
-          {p.pickup_charge <= 0 ? "Nothing to share" : p.customer_share_pct === 0 ? "Us" : p.customer_share_pct === 100 ? `Customer (${money(share)} comes off)` : `50-50 (${money(share)} comes off)`}
+          {p.pickup_charge <= 0 ? "Nothing to share" : p.customer_share_pct === 0 ? "We pay" : p.customer_share_pct === 100 ? `Customer pays (${money(share)} comes off)` : `Half and half (${money(share)} comes off)`}
         </Fact>
         <Fact label={p.resolution === "refund" ? "Proposed refund" : "Proposed store credit"}>
           <span className="font-semibold">{money(payBack)}</span>
@@ -276,7 +280,15 @@ function CourierReportPanel({ p, onChanged }: { p: ReturnPickup; onChanged: () =
         <p className="text-sm text-gray-900">{p.reason}</p>
       </div>
       <div className="border-t border-gray-200 pt-4">
-        <DecisionBox approveLabel="Approve report" declineLabel="Send back" onApprove={approve} onDecline={sendBack} />
+        <DecisionBox
+          approveLabel="Approve report"
+          declineLabel="Send back"
+          rejectLabel="Reject return"
+          rejectNote="The parcel is here but the return isn't accepted. Nothing is refunded and no stock moves; the parcel is still with the shop."
+          onApprove={approve}
+          onDecline={sendBack}
+          onReject={reject}
+        />
       </div>
     </div>
   );

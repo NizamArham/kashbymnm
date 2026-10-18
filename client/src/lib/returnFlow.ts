@@ -44,6 +44,8 @@ export function courierStage(p: Pick<ReturnPickup, "stage">): string {
       return "Completed";
     case "declined":
       return "Declined";
+    case "rejected":
+      return "Rejected";
     default:
       return "Cancelled";
   }
@@ -64,6 +66,8 @@ export function courierNote(p: Pick<ReturnPickup, "stage" | "refund_due" | "repo
       return "Inspection report waiting for an admin";
     case "refund_due":
       return `Refund Rs. ${Math.round(p.refund_due).toLocaleString()} to pay`;
+    case "rejected":
+      return "Not accepted — nothing refunded";
     default:
       return null;
   }

@@ -1,13 +1,11 @@
 import { useEffect, useState } from "react";
 import { api, ApiRequestError } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import { SHARE_OPTIONS } from "../lib/pickupShare";
 import { Button, Card, Dropdown, ErrorText, FormGroup, Label, SuccessText } from "./ui";
 
-const OPTIONS = [
-  { value: "0", label: "Us" },
-  { value: "50", label: "50-50" },
-  { value: "100", label: "Customer" },
-];
+// The same three choices, worded the same way, as everywhere else the delivery charge is split.
+const OPTIONS = SHARE_OPTIONS.map((o) => ({ value: String(o.pct), label: o.label, sublabel: o.hint }));
 
 // Who pays the delivery charge of a courier return, by default. The inspection report starts from this — by the reason the customer gave —
 // and whoever files the report can change it for that one case. An admin sets the defaults.
@@ -61,7 +59,7 @@ export default function ReturnSplitSettings() {
           <FormGroup>
             <Label>The customer's choice — wrong size or colour, changed their mind</Label>
             <Dropdown value={customerChoice} onChange={setCustomerChoice} options={OPTIONS} disabled={!isAdmin} />
-            <p className="mt-1 text-xs text-gray-400">50-50 is a fair goodwill choice if you'd rather share it.</p>
+            <p className="mt-1 text-xs text-gray-400">Half and half is a fair goodwill choice if you'd rather share it.</p>
           </FormGroup>
           {error && <ErrorText>{error}</ErrorText>}
           {saved && <SuccessText>Saved.</SuccessText>}

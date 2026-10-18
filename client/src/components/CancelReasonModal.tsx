@@ -9,6 +9,8 @@ export default function CancelReasonModal({
   children,
   confirmLabel = "Yes, cancel it",
   keepLabel = "No, keep it",
+  busyLabel = "Cancelling…",
+  stacked = false,
   onConfirm,
   onClose,
 }: {
@@ -17,6 +19,9 @@ export default function CancelReasonModal({
   children: ReactNode;
   confirmLabel?: string;
   keepLabel?: string;
+  busyLabel?: string;
+  // Opened on top of another dialog.
+  stacked?: boolean;
   onConfirm: (reason: string) => Promise<void>;
   onClose: () => void;
 }) {
@@ -38,6 +43,7 @@ export default function CancelReasonModal({
   return (
     <Modal
       size="md"
+      stacked={stacked}
       title={title}
       onClose={onClose}
       footer={
@@ -46,12 +52,12 @@ export default function CancelReasonModal({
             {keepLabel}
           </Button>
           <Button variant="danger" onClick={go} disabled={busy}>
-            {busy ? "Cancelling…" : confirmLabel}
+            {busy ? busyLabel : confirmLabel}
           </Button>
         </>
       }
     >
-      <div className="text-sm text-gray-600">{children}</div>
+      <div className="mb-4 text-sm text-gray-600">{children}</div>
       <FormGroup>
         <Label>Why? (optional)</Label>
         <Input placeholder="A few words, if you like" value={reason} onChange={(e) => setReason(e.target.value)} onKeyDown={(e) => e.key === "Enter" && !busy && go()} />
