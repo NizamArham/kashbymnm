@@ -309,8 +309,9 @@ export interface ReturnPickupItem {
   item_condition: "clean" | "damaged" | null;
   refund_amount: number | null;
   deduction: number;
-  // The quick check when the parcel was opened (ok / damaged / missing), and the inspection's verdict on the item.
+  // The quick look when the parcel was opened (ok = good, damaged = bad, with an optional reason), and the inspection's verdict on the item.
   arrival_condition: "ok" | "damaged" | "missing" | null;
+  arrival_note: string | null;
   arrival_at: string | null;
   verdict: "clean" | "damaged" | "missing_parts" | "not_per_policy" | "not_received" | null;
 }

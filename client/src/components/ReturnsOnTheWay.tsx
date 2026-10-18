@@ -3,7 +3,8 @@ import { Truck } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { ExchangeOnTheWay, ParcelComingBack, ReturnPickup } from "../lib/types";
 import { ExchangeReceiveModal } from "./ExchangeNotice";
-import { CourierReceivedModal, CourierSentModal, InspectionReportModal, RefundPaidModal } from "./CourierReturnSteps";
+import { CourierReceivedModal, InspectionReportModal, RefundPaidModal } from "./CourierReturnSteps";
+import CancelReasonModal from "./CancelReasonModal";
 import { useAuth } from "../context/AuthContext";
 import { FLOW_LABEL, courierNote, courierStage, exchangeStage } from "../lib/returnFlow";
 import { useAdminApproval } from "./AdminApproval";
@@ -20,9 +21,9 @@ export function shareSummary(p: Pick<ReturnPickup, "pickup_charge" | "customer_s
   return `Delivery charge ${money(p.pickup_charge)} — customer pays ${p.customer_share_pct}% (${money(p.customer_share)}), we carry ${money(p.pickup_charge - p.customer_share)}`;
 }
 
-// What is on its way back to the shop, one compact row each — courier returns (with the button for whatever step they are at: customer sent
-// it, mark received, inspection report, refund paid), the old items of delivery exchanges, and parcels the courier couldn't deliver.
-// Used on the Returns page and on Shipping.
+// What is on its way back to the shop, one compact row each — courier returns (with the button for whatever step they are at: Mark Received,
+// inspection report, refund paid), the old items of delivery exchanges, and parcels the courier couldn't deliver. A return or exchange that is
+// still to arrive has two buttons: Mark Received, and Cancel (which asks again, with an optional reason). Used on the Returns page and on Shipping.
 export default function ReturnPickupList({ status = "open", onChanged }: { status?: "open" | "closed" | "all"; onChanged?: () => void }) {
   const { runWithApproval } = useAdminApproval();
   const { user } = useAuth();
@@ -32,9 +33,11 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
   // …and so are parcels the courier couldn't deliver: dispatched, then "on the way back" until they reach the shop.
   const [parcels, setParcels] = useState<ParcelComingBack[]>([]);
   const [error, setError] = useState<string | null>(null);
-  // The step dialog open for a courier return: the customer sent it / parcel received / inspection report / refund paid.
-  const [step, setStep] = useState<{ kind: "sent" | "received" | "report" | "refund"; pickup: ReturnPickup } | null>(null);
+  // The step dialog open for a courier return: parcel received / inspection report / refund paid.
+  const [step, setStep] = useState<{ kind: "received" | "report" | "refund"; pickup: ReturnPickup } | null>(null);
   const [receivingExchange, setReceivingExchange] = useState<ExchangeOnTheWay | null>(null);
+  // Being cancelled: the second look, with an optional reason.
+  const [cancelling, setCancelling] = useState<{ kind: "pickup"; p: ReturnPickup } | { kind: "exchange"; x: ExchangeOnTheWay } | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
 
   const load = useCallback(() => {
@@ -94,19 +97,28 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
     }
   }
 
-  async function cancel(p: ReturnPickup) {
-    if (!confirm(`Cancel this courier return for ${p.invoice}? Nothing has moved, so nothing needs undoing — the items can be returned another way.`)) return;
-    setBusyId(p.id);
-    setError(null);
-    try {
-      await runWithApproval((approval) => api.put(`/return-pickups/${p.id}/cancel`, {}, { approval }));
-      load();
-      onChanged?.();
-    } catch (err) {
-      setError(err instanceof ApiRequestError ? err.message : "Couldn't cancel it");
-    } finally {
-      setBusyId(null);
-    }
+  // Calling off a courier return that hasn't arrived: nothing has moved, so nothing needs undoing and the items can be returned another way.
+  async function cancelPickup(p: ReturnPickup, reason: string) {
+    await runWithApproval((approval) => api.put(`/return-pickups/${p.id}/cancel`, reason ? { reason } : {}, { approval }));
+    setCancelling(null);
+    load();
+    onChanged?.();
+  }
+
+  // Calling off an exchange whose replacement has been delivered: the old items aren't coming back, so the customer keeps them and the part
+  // of the new order they were to cover stays unpaid. (It is the same as "nothing came back" — an admin's password for a cashier.)
+  async function cancelExchange(x: ExchangeOnTheWay, reason: string) {
+    const waiting = x.items.filter((i) => i.status === "awaiting");
+    await runWithApproval((approval) =>
+      api.put(
+        `/exchanges/${x.id}/receive`,
+        { items: waiting.map((i) => ({ sale_item_id: i.old_sale_item_id, outcome: "not_returned" })), note: `Cancelled — the old items aren't coming back${reason ? `: ${reason}` : ""}` },
+        { approval }
+      )
+    );
+    setCancelling(null);
+    load();
+    onChanged?.();
   }
 
   // One compact row per thing on its way back, like the rows of the shipping pipeline — what it is, who, how it's travelling and what
@@ -127,11 +139,11 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
         actions: (
           <>
             <Button size="sm" variant="primary" onClick={() => parcelReturned(d)} disabled={busyId === -d.id}>
-              Returned — on my hand
+              Mark Received
             </Button>
-            <button type="button" onClick={() => parcelRetry(d)} disabled={busyId === -d.id} className="text-xs text-gray-500 underline hover:text-gray-800">
+            <Button size="sm" onClick={() => parcelRetry(d)} disabled={busyId === -d.id}>
               Courier will retry
-            </button>
+            </Button>
           </>
         ),
       };
@@ -150,27 +162,20 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
         at: x.created_at,
         statusLabel: exchangeStage(x),
         actions: open ? (
-          <Button size="sm" variant="primary" onClick={() => setReceivingExchange(x)}>
-            Returned — on my hand
-          </Button>
+          <>
+            <Button size="sm" variant="primary" onClick={() => setReceivingExchange(x)}>
+              Mark Received
+            </Button>
+            <Button size="sm" onClick={() => setCancelling({ kind: "exchange", x })}>
+              Cancel
+            </Button>
+          </>
         ) : null,
       };
     }
     const p = entry.p;
-    const links = (
-      <>
-        {p.stage === "approved" && (
-          <button type="button" onClick={() => setStep({ kind: "sent", pickup: p })} className="text-xs text-gray-500 underline hover:text-gray-800">
-            Customer sent it
-          </button>
-        )}
-        {(p.stage === "approved" || p.stage === "on_the_way") && (
-          <button type="button" onClick={() => cancel(p)} disabled={busyId === p.id} className="text-xs text-gray-500 underline hover:text-gray-800">
-            Cancel
-          </button>
-        )}
-      </>
-    );
+    // Still to arrive: Mark Received, and Cancel.
+    const toArrive = p.stage === "approved" || p.stage === "on_the_way";
     return {
       key: `p${p.id}`,
       saleId: p.sale_id,
@@ -183,10 +188,15 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
       statusLabel: courierStage(p),
       actions: (
         <>
-          {(p.stage === "approved" || p.stage === "on_the_way") && (
-            <Button size="sm" variant="primary" onClick={() => setStep({ kind: "received", pickup: p })}>
-              Mark received
-            </Button>
+          {toArrive && (
+            <>
+              <Button size="sm" variant="primary" onClick={() => setStep({ kind: "received", pickup: p })}>
+                Mark Received
+              </Button>
+              <Button size="sm" onClick={() => setCancelling({ kind: "pickup", p })}>
+                Cancel
+              </Button>
+            </>
           )}
           {p.stage === "received" && (
             <Button size="sm" variant="primary" onClick={() => setStep({ kind: "report", pickup: p })}>
@@ -199,7 +209,6 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
             </Button>
           )}
           {p.stage === "report_pending" && <span className="text-xs text-gray-400">{user?.role === "admin" ? "Approve it in Returns ▸ To approve" : "An admin approves it"}</span>}
-          {links}
         </>
       ),
     };
@@ -242,9 +251,10 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
                 <span className="truncate text-gray-700">{r.customer}</span>
                 <span className="truncate text-gray-600">{r.via}</span>
                 <span className="text-xs text-gray-400">{r.at.slice(0, 10)}</span>
-                <div className="col-span-2 flex flex-wrap items-center gap-2 lg:col-span-1">
-                  <span className="text-xs text-gray-500">{r.statusLabel}</span>
-                  {r.actions}
+                {/* The status on its own line, the buttons together on the next. */}
+                <div className="col-span-2 lg:col-span-1">
+                  <p className="text-xs text-gray-500">{r.statusLabel}</p>
+                  {r.actions && <div className="mt-1.5 flex flex-wrap items-center gap-2">{r.actions}</div>}
                 </div>
               </div>
             ))}
@@ -259,7 +269,6 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
             onChanged?.();
           };
           const close = () => setStep(null);
-          if (step.kind === "sent") return <CourierSentModal pickup={step.pickup} onClose={close} onDone={done} />;
           if (step.kind === "received") return <CourierReceivedModal pickup={step.pickup} onClose={close} onDone={done} />;
           if (step.kind === "report") return <InspectionReportModal pickup={step.pickup} onClose={close} onDone={done} />;
           return <RefundPaidModal pickup={step.pickup} onClose={close} onDone={done} />;
@@ -267,6 +276,8 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
       {receivingExchange && (
         <ExchangeReceiveModal
           exchange={receivingExchange}
+          invoice={receivingExchange.new_invoice}
+          customer={receivingExchange.customer_name}
           onClose={() => setReceivingExchange(null)}
           onDone={() => {
             setReceivingExchange(null);
@@ -274,6 +285,26 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
             onChanged?.();
           }}
         />
+      )}
+      {cancelling?.kind === "pickup" && (
+        <CancelReasonModal
+          title={`Cancel the courier return — ${cancelling.p.invoice}?`}
+          onClose={() => setCancelling(null)}
+          onConfirm={(reason) => cancelPickup(cancelling.p, reason)}
+        >
+          Nothing has moved, so nothing needs undoing — the items can be returned another way. If the parcel never arrives, that is the customer's end.
+        </CancelReasonModal>
+      )}
+      {cancelling?.kind === "exchange" && (
+        <CancelReasonModal
+          title={`Cancel the exchange — ${cancelling.x.new_invoice}?`}
+          confirmLabel="Yes, cancel the exchange"
+          onClose={() => setCancelling(null)}
+          onConfirm={(reason) => cancelExchange(cancelling.x, reason)}
+        >
+          The old items aren't coming back, so the customer keeps them as well as the new ones. The {money(cancelling.x.items.filter((i) => i.status === "awaiting").reduce((sum, i) => sum + i.applied_share, 0))} of
+          the new order they were meant to cover stays unpaid on {cancelling.x.new_invoice}. A cashier needs an admin's password for this.
+        </CancelReasonModal>
       )}
     </div>
   );

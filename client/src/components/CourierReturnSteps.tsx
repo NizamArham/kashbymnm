@@ -5,7 +5,7 @@ import { useDeliveryPartners } from "../lib/delivery";
 import { cleanMoney } from "../lib/numberInput";
 import { useAuth } from "../context/AuthContext";
 import { useAdminApproval } from "./AdminApproval";
-import ArrivalChoice, { Outcome, PasswordNote, allOk } from "./ArrivalChoice";
+import ArrivalChoice, { PasswordNote, allGood, startGood } from "./ArrivalChoice";
 import RefundMethodPicker, { useCustomerBankAccounts } from "./RefundMethodPicker";
 import { Button, Dropdown, ErrorText, FormGroup, Input, Label, Modal } from "./ui";
 
@@ -13,9 +13,9 @@ const money = (n: number) => `Rs. ${Math.round(n).toLocaleString()}`;
 const variant = (size: string | null, color: string | null) => [size, color].filter(Boolean).join(" / ");
 const itemName = (i: ReturnPickupItem) => `${i.title ?? "Item"}${variant(i.size, i.color) ? ` · ${variant(i.size, i.color)}` : ""}`;
 
-// The steps of a courier return after it has been approved — each a small dialog, opened from the row on Returns ▸ On the way back:
-//   CourierSentModal      the customer says it is sent (service, tracking number — or none, which is noted as accepted risk)
-//   CourierReceivedModal  the parcel is on hand: service, tracking number, what we paid, and a quick OK / Damaged / Missing look at each item
+// The steps of a courier return after it has been approved — each a dialog, opened from the row on Returns ▸ On the way back:
+//   CourierReceivedModal  the parcel is on hand: service, tracking number (or none, which is noted as accepted risk), what we paid, and
+//                         good or bad for each item with an optional reason
 //   InspectionReportModal the careful look: condition of each item, who pays the delivery charge, what to pay the customer back
 //   RefundPaidModal       the refund is paid (with the customer's bank details) and goes into the cash book
 
@@ -97,49 +97,8 @@ function Foot({ onClose, busy, label, onConfirm, disabled }: { onClose: () => vo
   );
 }
 
-// ---------------------------------------------------------------- the customer sent it
-export function CourierSentModal({ pickup, onClose, onDone }: { pickup: ReturnPickup; onClose: () => void; onDone: () => void }) {
-  const [service, setService] = useState(initialService(pickup));
-  const [tracking, setTracking] = useState(pickup.tracking_number ?? "");
-  const [noTracking, setNoTracking] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function confirm() {
-    setError(null);
-    if (service.partnerCode === OTHER && !service.serviceName.trim()) return setError("Name the delivery service — or leave it unchosen.");
-    if (!tracking.trim() && !noTracking) return setError("Enter the tracking number — or tick that it was sent without one.");
-    setBusy(true);
-    try {
-      await api.put(`/return-pickups/${pickup.id}/sent`, {
-        ...serviceBody(service.partnerCode, service.serviceName),
-        ...(tracking.trim() ? { tracking_number: tracking.trim() } : { no_tracking_ack: true }),
-      });
-      onDone();
-    } catch (err) {
-      setError(err instanceof ApiRequestError ? err.message : "That didn't work — try again");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Modal
-      size="md"
-      title={`Customer sent it — ${pickup.invoice}`}
-      subtitle={`${pickup.customer_name ?? "Walk-in"} · on its way back to the shop`}
-      onClose={onClose}
-      footer={<Foot onClose={onClose} busy={busy} label="It's on its way" onConfirm={confirm} />}
-    >
-      <ServicePicker partnerCode={service.partnerCode} serviceName={service.serviceName} onChange={setService} />
-      <TrackingFields tracking={tracking} onTracking={setTracking} noTracking={noTracking} onNoTracking={setNoTracking} noTrackingLabel="The customer sent it without a tracking number — the risk is theirs until it arrives" />
-      {noTracking && <p className="text-xs text-amber-700">This is written down: "Customer shipped without tracking — risk accepted".</p>}
-      {error && <ErrorText>{error}</ErrorText>}
-    </Modal>
-  );
-}
-
 // ---------------------------------------------------------------- the parcel is on hand
+// One fixed size, two panes: the parcel itself on the left, what came back on the right (which scrolls when there are many items).
 export function CourierReceivedModal({ pickup, onClose, onDone }: { pickup: ReturnPickup; onClose: () => void; onDone: () => void }) {
   const { runWithApproval } = useAdminApproval();
   const { user } = useAuth();
@@ -148,11 +107,11 @@ export function CourierReceivedModal({ pickup, onClose, onDone }: { pickup: Retu
   const [tracking, setTracking] = useState(pickup.tracking_number ?? "");
   const [noTracking, setNoTracking] = useState(!!pickup.sent_without_tracking);
   const [paid, setPaid] = useState("");
-  // The quick look at each item as the parcel is opened — everything fine unless ticked otherwise.
-  const [outcomes, setOutcomes] = useState<Record<number, Outcome>>(() => Object.fromEntries(waiting.map((i) => [i.sale_item_id, "clean" as Outcome])));
+  // Good unless ticked otherwise, each with an optional reason.
+  const [arrival, setArrival] = useState(() => startGood(waiting.map((i) => i.sale_item_id)));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const needsAdmin = !allOk(outcomes) && user?.role !== "admin";
+  const needsAdmin = !allGood(arrival) && user?.role !== "admin";
 
   async function confirm() {
     setError(null);
@@ -170,7 +129,8 @@ export function CourierReceivedModal({ pickup, onClose, onDone }: { pickup: Retu
             pickup_charge: Number(paid) || 0,
             items: waiting.map((i) => ({
               sale_item_id: i.sale_item_id,
-              condition: outcomes[i.sale_item_id] === "not_returned" ? "missing" : outcomes[i.sale_item_id] === "damaged" ? "damaged" : "ok",
+              condition: arrival.condition[i.sale_item_id] === "bad" ? "damaged" : "ok",
+              ...(arrival.reason[i.sale_item_id]?.trim() ? { note: arrival.reason[i.sale_item_id].trim() } : {}),
             })),
           },
           { approval }
@@ -186,29 +146,38 @@ export function CourierReceivedModal({ pickup, onClose, onDone }: { pickup: Retu
 
   return (
     <Modal
-      size="md"
+      size="3xl"
+      height="h-[min(40rem,calc(100dvh-2rem))]"
+      flush
       title={`Parcel received — ${pickup.invoice}`}
       subtitle={`${pickup.customer_name ?? "Walk-in"} · it is on hand`}
       onClose={onClose}
-      footer={<Foot onClose={onClose} busy={busy} label="Mark received" onConfirm={confirm} />}
+      footer={
+        <>
+          <span className={`mr-auto min-w-0 basis-full text-xs sm:basis-0 sm:flex-1 ${error ? "text-red-500" : "text-gray-400"}`}>{error}</span>
+          <Foot onClose={onClose} busy={busy} label="Mark Received" onConfirm={confirm} />
+        </>
+      }
     >
-      <ServicePicker partnerCode={service.partnerCode} serviceName={service.serviceName} onChange={setService} />
-      <TrackingFields tracking={tracking} onTracking={setTracking} noTracking={noTracking} onNoTracking={setNoTracking} noTrackingLabel="It came without a tracking number" />
-      <FormGroup>
-        <Label>What we paid for the parcel (Rs.)</Label>
-        <Input inputMode="decimal" placeholder="0 if the customer paid" value={paid} onChange={(e) => setPaid(cleanMoney(e.target.value))} />
-        <p className="mt-1 text-xs text-gray-400">Who finally bears it is decided in the inspection report.</p>
-      </FormGroup>
-
-      <div className="mt-1">
-        <ArrivalChoice
-          items={waiting.map((i) => ({ id: i.sale_item_id, name: itemName(i), detail: money(i.amount), missingNote: "Not in the parcel — nothing will be refunded for it." }))}
-          outcomes={outcomes}
-          onChange={setOutcomes}
-        />
-        <PasswordNote show={needsAdmin} />
+      <div className="h-full overflow-y-auto lg:grid lg:grid-cols-[21rem_minmax(0,1fr)] lg:overflow-hidden">
+        <div className="border-b border-gray-100 bg-gray-50/70 px-5 py-5 lg:overflow-y-auto lg:border-b-0 lg:border-r">
+          <ServicePicker partnerCode={service.partnerCode} serviceName={service.serviceName} onChange={setService} />
+          <TrackingFields tracking={tracking} onTracking={setTracking} noTracking={noTracking} onNoTracking={setNoTracking} noTrackingLabel="It came without a tracking number" />
+          <FormGroup>
+            <Label>What we paid for the parcel (Rs.)</Label>
+            <Input inputMode="decimal" placeholder="0 if the customer paid" value={paid} onChange={(e) => setPaid(cleanMoney(e.target.value))} />
+            <p className="mt-1 text-xs text-gray-400">Who finally bears it is decided in the inspection report.</p>
+          </FormGroup>
+        </div>
+        <div className="px-6 py-5 lg:overflow-y-auto">
+          <ArrivalChoice
+            items={waiting.map((i) => ({ id: i.sale_item_id, name: itemName(i), detail: money(i.amount), badNote: "Looked at again in the inspection report before anything is refunded." }))}
+            state={arrival}
+            onChange={setArrival}
+          />
+          <PasswordNote show={needsAdmin} />
+        </div>
       </div>
-      {error && <ErrorText>{error}</ErrorText>}
     </Modal>
   );
 }
@@ -311,7 +280,9 @@ export function InspectionReportModal({ pickup, onClose, onDone }: { pickup: Ret
             <div key={i.id} className="rounded-xl border border-gray-200 px-3 py-2.5">
               <p className="text-sm text-gray-900">
                 {itemName(i)} <span className="text-xs text-gray-400">{money(i.amount)}</span>
-                {i.arrival_condition === "damaged" && <span className="ml-2 text-xs text-amber-700">ticked Damaged at the door</span>}
+                {i.arrival_condition === "damaged" && (
+                  <span className="ml-2 text-xs text-amber-700">marked Bad when it arrived{i.arrival_note ? ` — ${i.arrival_note}` : ""}</span>
+                )}
               </p>
               <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
                 {VERDICTS.map((o) => (
@@ -333,7 +304,7 @@ export function InspectionReportModal({ pickup, onClose, onDone }: { pickup: Ret
         })}
         {missing.map((i) => (
           <div key={i.id} className="rounded-xl border border-dashed border-gray-300 px-3 py-2.5 text-sm text-gray-500">
-            {itemName(i)} <span className="text-xs text-gray-400">{money(i.amount)}</span> — ticked Missing when the parcel was opened. Nothing to refund for it.
+            {itemName(i)} <span className="text-xs text-gray-400">{money(i.amount)}</span> — marked missing when the parcel was opened. Nothing to refund for it.
           </div>
         ))}
       </div>

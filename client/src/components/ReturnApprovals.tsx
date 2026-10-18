@@ -237,7 +237,7 @@ function CourierReportPanel({ p, onChanged }: { p: ReturnPickup; onChanged: () =
               <span className="text-gray-900">{nameOf(i)}</span>
               <span className="text-xs text-gray-400">{money(i.amount)}</span>
               <span className="text-xs font-medium text-gray-700">{VERDICT_TEXT[i.verdict ?? (i.arrival_condition === "missing" ? "not_received" : "clean")]}</span>
-              {i.arrival_condition === "damaged" && <span className="text-xs text-amber-700">ticked Damaged at the door</span>}
+              {i.arrival_condition === "damaged" && <span className="text-xs text-amber-700">marked Bad when it arrived{i.arrival_note ? ` — ${i.arrival_note}` : ""}</span>}
               {i.allow_returns === 0 && <span className="text-xs font-medium text-amber-600">Final Sale</span>}
             </li>
           ))}

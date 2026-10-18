@@ -4,7 +4,7 @@ import { api, ApiRequestError } from "../lib/api";
 import { SaleExchange, SaleExchangeItem, SaleExchangeOut } from "../lib/types";
 import { Badge, Button, ErrorText, Modal, RefLink } from "./ui";
 import { useAdminApproval } from "./AdminApproval";
-import ArrivalChoice, { Outcome, PasswordNote, allOk } from "./ArrivalChoice";
+import ArrivalChoice, { allGood, startGood } from "./ArrivalChoice";
 import { useAuth } from "../context/AuthContext";
 import { exchangeStage } from "../lib/returnFlow";
 
@@ -30,7 +30,7 @@ export default function ExchangeNotice({
   deliveryStatus,
   canAct,
   onChanged,
-  receiveLabel = "Old items received",
+  receiveLabel = "Mark Received",
   className = "",
 }: {
   exchange: SaleExchange;
@@ -124,33 +124,53 @@ export default function ExchangeNotice({
   );
 }
 
-// What came back? — said for each old item still waiting on an exchange, once the replacement has been delivered: clean (back on the
-// shelf), damaged, or not handed back, and what to do with any value left over. Used on the exchange's own page and in Returns on the way.
-export function ExchangeReceiveModal({ exchange, onClose, onDone }: { exchange: SaleExchange; onClose: () => void; onDone: () => void }) {
+// Parcel received — the old items of an exchange have come back (the replacement has been delivered): each one good or bad, with an
+// optional reason, and what to do with any value left over. One fixed size, two panes — the exchange on the left, what came back on the
+// right (it scrolls when there are many). Used on the exchange's own page and in Returns on the way back.
+export function ExchangeReceiveModal({
+  exchange,
+  invoice,
+  customer,
+  onClose,
+  onDone,
+}: {
+  exchange: SaleExchange;
+  invoice?: string;
+  customer?: string | null;
+  onClose: () => void;
+  onDone: () => void;
+}) {
   const { runWithApproval } = useAdminApproval();
   const { user } = useAuth();
   const waiting = exchange.items.filter((i) => i.status === "awaiting");
   // Most of the time everything comes back fine — start there.
-  const [outcomes, setOutcomes] = useState<Record<number, Outcome>>(() => Object.fromEntries(waiting.map((i) => [i.old_sale_item_id, "clean" as Outcome])));
+  const [arrival, setArrival] = useState(() => startGood(waiting.map((i) => i.old_sale_item_id)));
   const [leftoverChoice, setLeftoverChoice] = useState<Leftover>("credit");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // What's left of the returned items' value once the new order has taken its part —
+  // Everything that was ticked came back (good or bad), so what's left of the old items' value once the new order has taken its part is
   // the customer's to keep as store credit, or to have refunded.
-  const leftover = waiting
-    .filter((i) => (outcomes[i.old_sale_item_id] ?? "clean") !== "not_returned")
-    .reduce((sum, i) => sum + (i.credit_amount - i.applied_share), 0);
+  const worth = waiting.reduce((sum, i) => sum + i.credit_amount, 0);
+  const comesOff = waiting.reduce((sum, i) => sum + i.applied_share, 0);
+  const leftover = worth - comesOff;
+  const needsAdmin = user?.role !== "admin" && (!allGood(arrival) || (leftover > 0.009 && leftoverChoice !== "credit"));
 
   async function confirm() {
     setBusy(true);
     setError(null);
+    // The reasons given, as one note on the exchange.
+    const note = waiting
+      .filter((i) => arrival.reason[i.old_sale_item_id]?.trim())
+      .map((i) => `${itemName(i)} (${arrival.condition[i.old_sale_item_id] === "bad" ? "bad" : "good"}): ${arrival.reason[i.old_sale_item_id].trim()}`)
+      .join("; ");
     try {
       await runWithApproval((approval) =>
         api.put(
           `/exchanges/${exchange.id}/receive`,
           {
-            items: waiting.map((i) => ({ sale_item_id: i.old_sale_item_id, outcome: outcomes[i.old_sale_item_id] ?? "clean" })),
+            items: waiting.map((i) => ({ sale_item_id: i.old_sale_item_id, outcome: arrival.condition[i.old_sale_item_id] === "bad" ? "damaged" : "clean" })),
+            ...(note ? { note } : {}),
             ...(leftover > 0.009
               ? {
                   leftover:
@@ -173,63 +193,81 @@ export function ExchangeReceiveModal({ exchange, onClose, onDone }: { exchange: 
 
   return (
     <Modal
-      size="md"
+      size="3xl"
+      height="h-[min(40rem,calc(100dvh-2rem))]"
+      flush
       onClose={onClose}
-      title="What came back?"
-      subtitle="Say what happened to each old item that was to come back"
+      title={`Parcel received${invoice ? ` — ${invoice}` : ""}`}
+      subtitle={`${customer ?? "Customer"} · the old items are back`}
       footer={
         <>
+          <span className={`mr-auto min-w-0 basis-full text-xs sm:basis-0 sm:flex-1 ${error ? "text-red-500" : "text-gray-400"}`}>{error}</span>
           <Button onClick={onClose} disabled={busy}>
             Cancel
           </Button>
           <Button variant="primary" onClick={confirm} disabled={busy}>
-            {busy ? "Saving…" : "Confirm"}
+            {busy ? "Saving…" : "Mark Received"}
           </Button>
         </>
       }
     >
-      {error && <ErrorText>{error}</ErrorText>}
-      <ArrivalChoice
-        items={waiting.map((i) => ({
-          id: i.old_sale_item_id,
-          name: itemName(i),
-          detail: `· ${i.old_invoice} · ${money(i.credit_amount)}`,
-          missingNote: `Not handed back — ${money(i.applied_share)} stays unpaid on the new order.`,
-        }))}
-        outcomes={outcomes}
-        onChange={setOutcomes}
-      />
-      <PasswordNote show={!allOk(outcomes) && user?.role !== "admin"} />
-
-      {leftover > 0.009 && (
-        <div className="mt-4">
-          <p className="mb-1.5 text-sm font-medium text-gray-900">
-            The new items cost less — {money(leftover)} is left over. What does the customer want?
-          </p>
-          <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-3">
-            {(
-              [
-                ["credit", "Keep as store credit", "Spend it next time"],
-                ["refund_cash", "Refund in cash", "From the till"],
-                ["refund_bank", "Refund by bank transfer", "You transfer it"],
-              ] as const
-            ).map(([value, label, hint]) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => setLeftoverChoice(value)}
-                className={`rounded-xl border px-3 py-2 text-left transition ${leftoverChoice === value ? "border-black bg-gray-50" : "border-gray-200 hover:border-gray-300"}`}
-              >
-                <span className="block text-sm font-medium text-gray-900">{label}</span>
-                <span className="block text-xs text-gray-500">{hint}</span>
-              </button>
-            ))}
+      <div className="h-full overflow-y-auto lg:grid lg:grid-cols-[21rem_minmax(0,1fr)] lg:overflow-hidden">
+        <div className="border-b border-gray-100 bg-gray-50/70 px-5 py-5 lg:overflow-y-auto lg:border-b-0 lg:border-r">
+          <div className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm">
+            <div className="flex justify-between py-0.5 text-gray-600">
+              <span>Old items ({waiting.length})</span>
+              <span className="tabular-nums">{money(worth)}</span>
+            </div>
+            <div className="flex justify-between py-0.5 text-gray-600">
+              <span>Comes off the new order</span>
+              <span className="tabular-nums">{money(comesOff)}</span>
+            </div>
+            <div className={`mt-1 flex justify-between border-t border-gray-100 pt-1.5 ${leftover > 0.009 ? "font-semibold text-gray-900" : "text-gray-400"}`}>
+              <span>Left over for the customer</span>
+              <span className="tabular-nums">{leftover > 0.009 ? money(leftover) : "—"}</span>
+            </div>
           </div>
-          {leftoverChoice !== "credit" && user?.role !== "admin" && (
-            <p className="mt-2 text-xs text-gray-500">Paying the difference out needs an admin's password — you'll be asked for it when you confirm.</p>
+
+          {leftover > 0.009 && (
+            <div className="mt-4">
+              <p className="mb-1.5 text-sm font-medium text-gray-900">The new items cost less. What does the customer want with the {money(leftover)}?</p>
+              <div className="space-y-1.5">
+                {(
+                  [
+                    ["credit", "Keep as store credit", "Spend it next time"],
+                    ["refund_cash", "Refund in cash", "From the till"],
+                    ["refund_bank", "Refund by bank transfer", "You transfer it"],
+                  ] as const
+                ).map(([value, label, hint]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setLeftoverChoice(value)}
+                    className={`block w-full rounded-xl border bg-white px-3 py-2 text-left transition ${leftoverChoice === value ? "border-black" : "border-gray-200 hover:border-gray-300"}`}
+                  >
+                    <span className="block text-sm font-medium text-gray-900">{label}</span>
+                    <span className="block text-xs text-gray-500">{hint}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
+          {needsAdmin && <p className="mt-3 text-xs text-gray-500">A bad item, or paying the difference out, needs an admin's password — you'll be asked for it when you confirm.</p>}
         </div>
-      )}
+
+        <div className="px-6 py-5 lg:overflow-y-auto">
+          <ArrivalChoice
+            items={waiting.map((i) => ({
+              id: i.old_sale_item_id,
+              name: itemName(i),
+              detail: `· ${i.old_invoice} · ${money(i.credit_amount)}`,
+              badNote: "Recorded as damaged stock — it isn't put back for sale. Its value still comes off the new order.",
+            }))}
+            state={arrival}
+            onChange={setArrival}
+          />
+        </div>
+      </div>
     </Modal>
   );
 }

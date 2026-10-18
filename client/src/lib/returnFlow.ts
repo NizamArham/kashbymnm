@@ -55,7 +55,7 @@ export function courierNote(p: Pick<ReturnPickup, "stage" | "refund_due" | "repo
     case "requested":
       return "Waiting for an admin to approve";
     case "approved":
-      return "Approved — waiting for the customer to send it";
+      return "Waiting for the parcel";
     case "on_the_way":
       return p.sent_without_tracking ? "Sent without tracking — the risk is the customer's" : "On its way";
     case "received":
@@ -76,7 +76,8 @@ export function exchangeRequestStage(approval: ApprovalState | null | undefined)
 
 // The exchange once its order exists, from the order's delivery and what has come back of the old items.
 export function exchangeStage(x: Pick<SaleExchange, "status"> & { delivery_status?: string | null }): string {
-  if (x.status === "cancelled") return "Cancelled";
+  // Nothing came back (the exchange was cancelled, or none of the old items were handed back).
+  if (x.status === "cancelled" || x.status === "not_returned") return "Cancelled";
   if (x.status !== "awaiting_pickup") return "Completed";
   switch (x.delivery_status) {
     case "dispatched":
