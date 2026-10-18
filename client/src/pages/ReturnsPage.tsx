@@ -1,9 +1,17 @@
-import { useState, useEffect, Fragment } from "react";
+import { useState, useEffect, useCallback, Fragment } from "react";
+import { useNavigate } from "react-router-dom";
+import { PageLoader } from "../components/Loader";
 import { RotateCcw, AlertTriangle, ChevronDown, ChevronRight, Download } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
-import { Sale, ReturnRequest } from "../lib/types";
+import { Sale, ReturnRequest, ReturnApprovals } from "../lib/types";
 import { useAuth } from "../context/AuthContext";
-import { useAdminApproval } from "../components/AdminApproval";
+import ReturnByDeliveryForm from "../components/ReturnByDeliveryForm";
+import OnlineExchangeModal from "../components/OnlineExchangeModal";
+import ReturnPickupList from "../components/ReturnsOnTheWay";
+import ReturnApprovalList from "../components/ReturnApprovals";
+import ReturnRequestPanel from "../components/ReturnRequestPanel";
+import RefundMethodPicker, { useCustomerBankAccounts } from "../components/RefundMethodPicker";
+import { AUTO_APPROVED, FLOW_LABEL, inStoreStage } from "../lib/returnFlow";
 import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
 import { useSortableData } from "../lib/useSortableData";
 import { useCopyToClipboard } from "../lib/useCopyToClipboard";
@@ -26,13 +34,12 @@ import {
   DateRangePicker,
   EmptyState,
   ReasonPicker,
-  ReasonDropdown,
   RowCard,
   HelpHint,
   RefLink,
 } from "../components/ui";
 
-type ReturnsTab = "request" | "all";
+type ReturnsTab = "request" | "approve" | "all" | "pickups";
 type ReturnSortKey = "id" | "date" | "customer" | "product" | "status";
 
 const RETURN_REASON_PRESETS = [
@@ -42,22 +49,6 @@ const RETURN_REASON_PRESETS = [
   "Defective / damaged",
   "Not as described",
   "Found cheaper elsewhere",
-];
-
-const APPROVE_REASON_PRESETS = [
-  "Verified — unworn with tags",
-  "Valid defect confirmed",
-  "Within return policy",
-  "Approved as goodwill",
-  "Manager override approved",
-];
-
-const DECLINE_REASON_PRESETS = [
-  "Signs of wear / use",
-  "Outside return window",
-  "Final Sale — no override",
-  "Missing tags / packaging",
-  "Suspected misuse",
 ];
 
 function toISODate(d: Date): string {
@@ -79,30 +70,56 @@ function statusTone(status: string): "success" | "warning" | "danger" | "neutral
 }
 
 export default function ReturnsPage() {
-  const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
-
   const [activeTab, setActiveTab] = useState<ReturnsTab>("request");
+
+  // Everything waiting for an admin's yes — read here so the tab can show how many there are, and refreshed after anything is asked or decided.
+  const [approvals, setApprovals] = useState<ReturnApprovals | null>(null);
+  const [approvalsError, setApprovalsError] = useState<string | null>(null);
+  const loadApprovals = useCallback(() => {
+    api
+      .get<ReturnApprovals>("/returns/approvals")
+      .then((a) => {
+        setApprovals(a);
+        setApprovalsError(null);
+        window.dispatchEvent(new Event("mm-approvals-changed")); // the badge on the Returns menu item re-reads
+      })
+      .catch((err) => setApprovalsError(err instanceof ApiRequestError ? err.message : "Couldn't load what is waiting for approval"));
+  }, []);
+  useEffect(() => {
+    loadApprovals();
+  }, [loadApprovals, activeTab]);
+  const waiting = approvals ? approvals.in_store.length + approvals.courier.length + (approvals.courier_reports?.length ?? 0) + approvals.exchanges.length : 0;
 
   return (
     <div>
       <PageHeader
         title="Returns"
-        subtitle="Requests wait for admin approval before stock or cash move."
+        subtitle="Returns and exchanges wait for an admin's approval before any stock or cash moves."
         action={
           <TabToggle
             value={activeTab}
             onChange={setActiveTab}
             options={[
               { value: "request", label: "Request a Return" },
+              { value: "approve", label: waiting > 0 ? `To approve (${waiting})` : "To approve" },
               { value: "all", label: "Returns" },
+              { value: "pickups", label: "On the way back" },
             ]}
           />
         }
       />
 
-      {activeTab === "request" && <RequestReturnTab />}
-      {activeTab === "all" && <AllReturnsTab isAdmin={isAdmin} />}
+      {activeTab === "request" && <RequestReturnTab onRequested={loadApprovals} />}
+      {activeTab === "approve" &&
+        (approvals ? (
+          <ReturnApprovalList approvals={approvals} onChanged={loadApprovals} />
+        ) : approvalsError ? (
+          <ErrorText>{approvalsError}</ErrorText>
+        ) : (
+          <PageLoader />
+        ))}
+      {activeTab === "all" && <AllReturnsTab onDecided={loadApprovals} />}
+      {activeTab === "pickups" && <ReturnPickupList status="all" />}
     </div>
   );
 }
@@ -130,25 +147,47 @@ function defaultLineConfig(): ReturnLineConfig {
   };
 }
 
-function RequestReturnTab() {
+function RequestReturnTab({ onRequested }: { onRequested: () => void }) {
+  // An admin's own return is approved in the same step ("Auto-approved (recorded by admin)"), so how a refund is paid is chosen here;
+  // anyone else's waits in To approve, where the admin chooses it.
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
+  const [refundMethod, setRefundMethod] = useState<"cash" | "bank_transfer">("cash");
+  const [refundAccountId, setRefundAccountId] = useState("");
   const [invoiceQuery, setInvoiceQuery] = useState("");
   const [sale, setSale] = useState<Sale | null>(null);
   const [lookupError, setLookupError] = useState<string | null>(null);
 
   const [selectedItemIds, setSelectedItemIds] = useState<Set<number>>(new Set());
   const [lineConfigs, setLineConfigs] = useState<Record<number, ReturnLineConfig>>({});
+  const hasRefundLine = Array.from(selectedItemIds).some((id) => lineConfigs[id]?.resolution === "refund");
+  const { accounts: refundAccounts, defaultId: defaultRefundAccount } = useCustomerBankAccounts(
+    sale?.customer_id,
+    isAdmin && hasRefundLine && refundMethod === "bank_transfer"
+  );
+  useEffect(() => {
+    if (refundMethod === "bank_transfer") setRefundAccountId((cur) => cur || defaultRefundAccount);
+  }, [refundMethod, defaultRefundAccount]);
 
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // For a delivered online order there are three ways it can come back: to the shop (the form below), collected by a courier
+  // (recorded here), or swapped for new items by delivery (the exchange popup).
+  const navigate = useNavigate();
+  const [how, setHow] = useState<"shop" | "courier">("shop");
+  const [showExchange, setShowExchange] = useState(false);
 
   async function handleLookup() {
     setLookupError(null);
+    setHow("shop");
     setSale(null);
     setSelectedItemIds(new Set());
     setLineConfigs({});
     setSubmitError(null);
     setSubmitSuccess(null);
+    setRefundMethod("cash");
+    setRefundAccountId("");
     const value = invoiceQuery.trim();
     if (!value) return;
 
@@ -220,6 +259,17 @@ function RequestReturnTab() {
       }
     }
 
+    if (isAdmin && hasRefundLine && refundMethod === "bank_transfer") {
+      if (!sale?.customer_id) {
+        setSubmitError("A bank transfer refund needs a real customer account — this is a walk-in sale. Refund in cash instead.");
+        return;
+      }
+      if (!refundAccountId) {
+        setSubmitError("Select which of the customer's bank accounts to refund into");
+        return;
+      }
+    }
+
     setSubmitting(true);
     const succeededIds: number[] = [];
     const failed: { id: number; name: string; error: string }[] = [];
@@ -241,6 +291,9 @@ function RequestReturnTab() {
               ? `${cfg.reason.trim()} — ${cfg.exchangeNote.trim()}`
               : cfg.reason.trim(),
           credit_expiry_days,
+          ...(isAdmin && cfg.resolution === "refund"
+            ? { payment_method: refundMethod, ...(refundMethod === "bank_transfer" ? { bank_account_id: parseInt(refundAccountId, 10) } : {}) }
+            : {}),
         });
         succeededIds.push(id);
         if (result.is_final_sale) anyFinalSale = true;
@@ -253,10 +306,13 @@ function RequestReturnTab() {
 
     if (failed.length === 0) {
       setSubmitSuccess(
-        `${succeededIds.length} return request${succeededIds.length !== 1 ? "s" : ""} submitted — an admin will review ${
-          succeededIds.length !== 1 ? "them" : "it"
-        }.${anyFinalSale ? " Note: at least one item is Final Sale and will need an admin override to approve." : ""}`
+        isAdmin
+          ? `${succeededIds.length} return${succeededIds.length !== 1 ? "s" : ""} recorded — ${AUTO_APPROVED.toLowerCase()}.`
+          : `${succeededIds.length} return request${succeededIds.length !== 1 ? "s" : ""} sent for approval — an admin will decide ${
+              succeededIds.length !== 1 ? "them" : "it"
+            }.${anyFinalSale ? " Note: at least one item is Final Sale and will need an admin override to approve." : ""}`
       );
+      onRequested();
       setSale(null);
       setInvoiceQuery("");
       setSelectedItemIds(new Set());
@@ -293,6 +349,51 @@ function RequestReturnTab() {
             {sale.invoice} — {sale.customer_name ?? (sale.deleted_customer_snapshot ? `[Deleted: ${sale.deleted_customer_snapshot}]` : "Walk-in")}
           </h2>
 
+          {sale.sale_type === "online" && sale.delivery_status === "delivered" && (
+            <FormGroup>
+              <Label>How is it coming back?</Label>
+              <div className="grid grid-cols-3 gap-2">
+                {(
+                  [
+                    ["shop", FLOW_LABEL.in_store],
+                    ["courier", FLOW_LABEL.courier],
+                    ["exchange", FLOW_LABEL.exchange],
+                  ] as const
+                ).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => (key === "exchange" ? setShowExchange(true) : setHow(key))}
+                    className={`rounded-xl border px-3 py-2 text-left text-sm font-medium transition ${
+                      key !== "exchange" && how === key ? "border-black bg-black text-white" : "border-gray-200 bg-white text-gray-700 hover:border-gray-400"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {how === "courier" && (
+                <p className="mt-1.5 text-xs text-gray-500">
+                  Any delivery service will do — post, a bus, a courier. The delivery charge is split as you choose, and the customer's share is held back from what they're paid back.
+                </p>
+              )}
+            </FormGroup>
+          )}
+
+          {how === "courier" ? (
+            <ReturnByDeliveryForm
+              sale={sale}
+              onBooked={async () => {
+                // The items are now on their way back — reload the invoice so they show as such.
+                try {
+                  setSale(await api.get<Sale>(`/sales/${sale.id}`));
+                } catch {
+                  // the booking itself went through; the list will refresh on the next lookup
+                }
+              }}
+            />
+          ) : (
+          <>
           <FormGroup>
             <Label>Which item(s) are being returned? Tick one to configure its return.</Label>
             <div className="border border-gray-200 rounded-xl divide-y divide-gray-100 overflow-hidden">
@@ -448,24 +549,56 @@ function RequestReturnTab() {
             </div>
           </FormGroup>
 
+          {isAdmin && hasRefundLine && (
+            <div className="mt-4 max-w-md">
+              <RefundMethodPicker
+                method={refundMethod}
+                onMethod={setRefundMethod}
+                accounts={refundAccounts}
+                accountId={refundAccountId}
+                onAccount={setRefundAccountId}
+                name="request-refund-account"
+              />
+            </div>
+          )}
+
           {submitError && <ErrorText>{submitError}</ErrorText>}
           {submitSuccess && <SuccessText>{submitSuccess}</SuccessText>}
 
           <Button variant="primary" onClick={handleSubmitAll} disabled={submitting || selectedItemIds.size === 0} className="mt-4">
             {submitting
-              ? "Submitting..."
-              : `Submit ${selectedItemIds.size > 1 ? `${selectedItemIds.size} return requests` : "return request"}`}
+              ? isAdmin
+                ? "Recording..."
+                : "Sending..."
+              : isAdmin
+              ? `Record ${selectedItemIds.size > 1 ? `${selectedItemIds.size} returns` : "return"}`
+              : `Send ${selectedItemIds.size > 1 ? `${selectedItemIds.size} return requests` : "return request"} for approval`}
           </Button>
+          {isAdmin && selectedItemIds.size > 0 && <p className="mt-1.5 text-xs text-gray-400">{AUTO_APPROVED} — stock and money move straight away.</p>}
+          </>
+          )}
         </Card>
+      )}
+
+      {showExchange && sale && (
+        <OnlineExchangeModal
+          sale={sale}
+          onClose={() => setShowExchange(false)}
+          onCreated={(created) => {
+            setShowExchange(false);
+            navigate(`/sales/${created.id}`);
+          }}
+          onQuoted={(created) => {
+            setShowExchange(false);
+            navigate(`/sales/${created.id}`);
+          }}
+        />
       )}
     </>
   );
 }
 
-function AllReturnsTab({ isAdmin }: { isAdmin: boolean }) {
-  // A cashier can fill in the decision here too; confirming it asks for an admin's password, and the
-  // return is recorded as approved or declined by that admin.
-  const { runWithApproval } = useAdminApproval();
+function AllReturnsTab({ onDecided }: { onDecided: () => void }) {
   const [requests, setRequests] = useState<ReturnRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -477,24 +610,8 @@ function AllReturnsTab({ isAdmin }: { isAdmin: boolean }) {
   });
   const [endDate, setEndDate] = useState<string | null>(() => toISODate(new Date()));
 
-  // Expand a row in place instead of a modal — shows the full detail, and
-  // for a pending request (admins only) the approve/decline forms too.
+  // Expand a row in place instead of a modal — shows the full detail, and for a pending request the approve / decline form too.
   const [expandedId, setExpandedId] = useState<number | null>(null);
-  // Which decision an admin is looking at on the expanded row — a small
-  // tab switcher (defaults to Approve), so only one form's worth of
-  // fields ever shows at once instead of both stacked together.
-  const [decisionMode, setDecisionMode] = useState<"approve" | "decline">("approve");
-
-  const [approveReason, setApproveReason] = useState("");
-  const [refundMethod, setRefundMethod] = useState<"cash" | "bank_transfer">("cash");
-  const [customerBankAccounts, setCustomerBankAccounts] = useState<any[]>([]);
-  const [selectedRefundAccountId, setSelectedRefundAccountId] = useState("");
-  const [approveError, setApproveError] = useState<string | null>(null);
-  const [approveSubmitting, setApproveSubmitting] = useState(false);
-
-  const [declineReason, setDeclineReason] = useState("");
-  const [declineError, setDeclineError] = useState<string | null>(null);
-  const [declineSubmitting, setDeclineSubmitting] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -524,266 +641,21 @@ function AllReturnsTab({ isAdmin }: { isAdmin: boolean }) {
     setEndDate(toISODate(today));
   }
 
-  async function toggleExpand(r: ReturnRequest) {
-    if (expandedId === r.id) {
-      setExpandedId(null);
-      return;
-    }
-    setExpandedId(r.id);
-    setDecisionMode("approve");
-    setApproveReason("");
-    setApproveError(null);
-    setRefundMethod("cash");
-    setSelectedRefundAccountId("");
-    setCustomerBankAccounts([]);
-    setDeclineReason("");
-    setDeclineError(null);
-    if (r.status === "pending" && r.resolution === "refund" && r.customer_id) {
-      try {
-        const full = await api.get<{ bank_accounts?: any[] }>(`/customers/${r.customer_id}`);
-        setCustomerBankAccounts(full.bank_accounts ?? []);
-      } catch {
-        // row stays open fine; bank transfer just shows an empty list
-      }
-    }
+  function toggleExpand(r: ReturnRequest) {
+    setExpandedId(expandedId === r.id ? null : r.id);
   }
 
-  async function confirmApprove(r: ReturnRequest) {
-    setApproveError(null);
-    if (r.is_admin_override === 1 && !approveReason.trim()) {
-      setApproveError("An override reason is required for a Final Sale item.");
-      return;
-    }
-    if (r.resolution === "refund" && refundMethod === "bank_transfer" && !selectedRefundAccountId) {
-      setApproveError("Select which of the customer's bank accounts to refund into");
-      return;
-    }
-
-    setApproveSubmitting(true);
-    try {
-      const decision = {
-        decision_reason: approveReason.trim() || undefined,
-        payment_method: r.resolution === "refund" ? refundMethod : undefined,
-        bank_account_id: r.resolution === "refund" && refundMethod === "bank_transfer" ? parseInt(selectedRefundAccountId, 10) : undefined,
-      };
-      await runWithApproval((approval) => api.put(`/returns/requests/${r.id}/approve`, decision, { approval }));
-      setExpandedId(null);
-      load();
-    } catch (err) {
-      setApproveError(err instanceof ApiRequestError ? err.message : "Failed to approve request");
-    } finally {
-      setApproveSubmitting(false);
-    }
-  }
-
-  async function confirmDecline(r: ReturnRequest) {
-    setDeclineError(null);
-    if (!declineReason.trim()) {
-      setDeclineError("A reason is required to decline a request.");
-      return;
-    }
-
-    setDeclineSubmitting(true);
-    try {
-      const reason = declineReason.trim();
-      await runWithApproval((approval) => api.put(`/returns/requests/${r.id}/decline`, { decision_reason: reason }, { approval }));
-      setExpandedId(null);
-      load();
-    } catch (err) {
-      setDeclineError(err instanceof ApiRequestError ? err.message : "Failed to decline request");
-    } finally {
-      setDeclineSubmitting(false);
-    }
-  }
-
-  // Shared between the desktop table's expanded row and the mobile card
-  // list's expanded section — same content either way, just a different
-  // container around it.
+  // Shared between the desktop table's expanded row and the mobile card list's expanded section.
   function renderExpandedDetail(r: ReturnRequest) {
     return (
-      <div className="space-y-4">
-        <div>
-          <p className="text-xs text-gray-400 mb-1">Item</p>
-          <p className="text-sm font-medium text-gray-900">
-            {r.product_id ? <RefLink to={`/products/${r.product_id}`}>{r.product_title}</RefLink> : r.product_title} ({r.sku})
-            {(r.color || r.size) && <span className="text-gray-400 font-normal"> · {[r.color, r.size].filter(Boolean).join(" / ")}</span>}
-          </p>
-        </div>
-
-        <div className="grid grid-cols-3 gap-3 text-sm">
-          <div>
-            <p className="text-xs text-gray-400">Condition</p>
-            <p className="text-gray-900 capitalize">{r.condition}</p>
-          </div>
-          <div>
-            <p className="text-xs text-gray-400">Resolution</p>
-            <p className="text-gray-900 capitalize">{r.resolution.replace(/_/g, " ")}</p>
-          </div>
-          <div>
-            <p className="text-xs text-gray-400">Requested by</p>
-            <p className="text-gray-900">{r.requested_by_name ?? "—"}</p>
-          </div>
-        </div>
-
-        <div>
-          <p className="text-xs text-gray-400 mb-1">Reason for return</p>
-          <p className="text-sm text-gray-900">{r.reason}</p>
-        </div>
-
-        {r.is_admin_override === 1 && (
-          <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-            <AlertTriangle size={12} className="text-amber-600 flex-shrink-0 mt-0.5" />
-            <p className="text-xs text-amber-800">This item is Final Sale — approving it needs an explicit override.</p>
-          </div>
-        )}
-
-        {r.status !== "pending" && (
-          <div className="grid grid-cols-2 gap-3 text-sm border-t border-gray-200 pt-3">
-            <div>
-              <p className="text-xs text-gray-400">{r.status === "approved" ? "Approved by" : "Declined by"}</p>
-              <p className="text-gray-900">
-                {r.decided_by_name ?? "—"}
-                {r.decided_at && <span className="text-gray-400"> · {r.decided_at.slice(0, 10)}</span>}
-              </p>
-            </div>
-            {r.decision_reason && (
-              <div>
-                <p className="text-xs text-gray-400">{r.status === "approved" ? "Approval reason" : "Decline reason"}</p>
-                <p className="text-gray-900">{r.decision_reason}</p>
-              </div>
-            )}
-            {r.status === "approved" && r.resolution === "refund" && (
-              <div>
-                <p className="text-xs text-gray-400">Refund amount</p>
-                <p className="text-gray-900 font-semibold">Rs. {(r.refund_amount ?? 0).toLocaleString()}</p>
-              </div>
-            )}
-            {r.status === "approved" && r.resolution === "store_credit_exchange" && (
-              <div>
-                <p className="text-xs text-gray-400">Store credit granted</p>
-                <p className="text-gray-900 font-semibold">
-                  Rs. {r.unit_price.toLocaleString()}
-                  {r.credit_expiry_days ? ` — expires in ${r.credit_expiry_days} days` : ""}
-                </p>
-              </div>
-            )}
-          </div>
-        )}
-
-        {r.status === "pending" && (
-          <div className="border-t border-gray-200 pt-4">
-
-            <TabToggle
-              value={decisionMode}
-              onChange={setDecisionMode}
-              options={[
-                { value: "approve", label: "Approve" },
-                { value: "decline", label: "Decline" },
-              ]}
-            />
-
-            <div className="bg-white border border-gray-200 rounded-xl p-3.5 max-w-md mt-3">
-              {decisionMode === "approve" ? (
-                <>
-                  {r.resolution === "refund" && (
-                    <>
-                      <FormGroup>
-                        <Label>Refund method</Label>
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setRefundMethod("cash")}
-                            className={`flex-1 border rounded-xl py-2 text-sm font-medium transition ${
-                              refundMethod === "cash"
-                                ? "border-black bg-black text-white"
-                                : "border-gray-200 text-gray-600 hover:border-gray-400 bg-white"
-                            }`}
-                          >
-                            Cash
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setRefundMethod("bank_transfer")}
-                            className={`flex-1 border rounded-xl py-2 text-sm font-medium transition ${
-                              refundMethod === "bank_transfer"
-                                ? "border-black bg-black text-white"
-                                : "border-gray-200 text-gray-600 hover:border-gray-400 bg-white"
-                            }`}
-                          >
-                            Bank transfer
-                          </button>
-                        </div>
-                      </FormGroup>
-
-                      {refundMethod === "bank_transfer" && (
-                        <div className="border border-gray-200 rounded-xl p-3 mb-3">
-                          {customerBankAccounts.length === 0 ? (
-                            <p className="text-xs text-amber-600">
-                              No bank account on file for this customer — add one from the Customers page before refunding by bank
-                              transfer.
-                            </p>
-                          ) : (
-                            <div className="space-y-2">
-                              {customerBankAccounts.map((a) => (
-                                <label
-                                  key={a.id}
-                                  className={`flex items-start gap-2 border rounded-lg px-3 py-2 text-sm cursor-pointer transition ${
-                                    String(a.id) === selectedRefundAccountId
-                                      ? "border-black bg-gray-50"
-                                      : "border-gray-200 hover:border-gray-300"
-                                  }`}
-                                >
-                                  <input
-                                    type="radio"
-                                    name="refund-bank-account"
-                                    checked={String(a.id) === selectedRefundAccountId}
-                                    onChange={() => setSelectedRefundAccountId(String(a.id))}
-                                    className="mt-0.5"
-                                  />
-                                  <div>
-                                    <p className="font-medium text-gray-900">
-                                      {a.bank_name} {a.is_default === 1 && <span className="text-xs text-green-600 font-normal">(default)</span>}
-                                    </p>
-                                    <p className="text-xs text-gray-500">
-                                      {a.account_name} — {a.account_number}
-                                      {a.branch ? ` — ${a.branch}` : ""}
-                                    </p>
-                                  </div>
-                                </label>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </>
-                  )}
-
-                  <FormGroup>
-                    <Label>Reason{r.is_admin_override === 1 ? " (required)" : " (optional)"}</Label>
-                    <ReasonDropdown value={approveReason} onChange={setApproveReason} presets={APPROVE_REASON_PRESETS} />
-                  </FormGroup>
-
-                  {approveError && <ErrorText>{approveError}</ErrorText>}
-                  <Button variant="primary" size="sm" onClick={() => confirmApprove(r)} disabled={approveSubmitting} className="mt-1">
-                    {approveSubmitting ? "Approving..." : "Approve"}
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <FormGroup>
-                    <Label>Reason (required)</Label>
-                    <ReasonDropdown value={declineReason} onChange={setDeclineReason} presets={DECLINE_REASON_PRESETS} />
-                  </FormGroup>
-                  {declineError && <ErrorText>{declineError}</ErrorText>}
-                  <Button variant="danger" size="sm" onClick={() => confirmDecline(r)} disabled={declineSubmitting} className="mt-1">
-                    {declineSubmitting ? "Declining..." : "Decline"}
-                  </Button>
-                </>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
+      <ReturnRequestPanel
+        r={r}
+        onChanged={() => {
+          setExpandedId(null);
+          load();
+          onDecided();
+        }}
+      />
     );
   }
 
@@ -845,8 +717,8 @@ function AllReturnsTab({ isAdmin }: { isAdmin: boolean }) {
           longDate(r.requested_at),
           r.customer_name ?? (r.deleted_customer_snapshot ? `[Deleted: ${r.deleted_customer_snapshot}]` : "Walk-in"),
           `${r.product_title} (${r.sku})`,
-          r.status,
-          r.decided_by_name ?? "—",
+          inStoreStage(r),
+          r.auto_approved === 1 ? `${r.decided_by_name ?? "Admin"} (auto-approved)` : r.decided_by_name ?? "—",
         ],
         detail: `Reason: ${r.reason}`,
       })),
@@ -866,7 +738,7 @@ function AllReturnsTab({ isAdmin }: { isAdmin: boolean }) {
               options={[
                 { value: "all", label: "All statuses" },
                 { value: "pending", label: "Pending" },
-                { value: "approved", label: "Approved" },
+                { value: "approved", label: "Completed" },
                 { value: "declined", label: "Declined" },
               ]}
             />
@@ -904,7 +776,7 @@ function AllReturnsTab({ isAdmin }: { isAdmin: boolean }) {
       {!loading && <p className="text-xs text-gray-400 mb-3">{filtered.length} request(s) — click a row to see full details</p>}
 
       {loading ? (
-        <p className="text-sm text-gray-400">Loading...</p>
+        <PageLoader />
       ) : filtered.length === 0 ? (
         <EmptyState icon={RotateCcw} title="No returns match this view" />
       ) : (
@@ -958,9 +830,16 @@ function AllReturnsTab({ isAdmin }: { isAdmin: boolean }) {
                         </Td>
                         <Td className="max-w-[200px] truncate">{r.reason}</Td>
                         <Td>
-                          <Badge label={r.status} tone={statusTone(r.status)} />
+                          <Badge label={inStoreStage(r)} tone={statusTone(r.status)} />
                         </Td>
-                        <Td>{r.decided_by_name ?? "—"}</Td>
+                        <Td>
+                          {r.decided_by_name ?? "—"}
+                          {r.auto_approved === 1 && (
+                            <span className="block text-xs text-gray-400" title={AUTO_APPROVED}>
+                              Auto-approved
+                            </span>
+                          )}
+                        </Td>
                         <Td className="w-8">
                           {isExpanded ? <ChevronDown size={14} className="text-gray-400" /> : <ChevronRight size={14} className="text-gray-400" />}
                         </Td>
@@ -1002,7 +881,7 @@ function AllReturnsTab({ isAdmin }: { isAdmin: boolean }) {
                       </p>
                     </div>
                     <div className="flex-shrink-0 flex items-center gap-2">
-                      <Badge label={r.status} tone={statusTone(r.status)} />
+                      <Badge label={inStoreStage(r)} tone={statusTone(r.status)} />
                       {isExpanded ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-400" />}
                     </div>
                   </div>

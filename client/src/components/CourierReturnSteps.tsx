@@ -1,0 +1,474 @@
+import { useEffect, useMemo, useState } from "react";
+import { api, ApiRequestError } from "../lib/api";
+import { ReturnPickup, ReturnPickupItem } from "../lib/types";
+import { useDeliveryPartners } from "../lib/delivery";
+import { cleanMoney } from "../lib/numberInput";
+import { useAuth } from "../context/AuthContext";
+import { useAdminApproval } from "./AdminApproval";
+import ArrivalChoice, { Outcome, PasswordNote, allOk } from "./ArrivalChoice";
+import RefundMethodPicker, { useCustomerBankAccounts } from "./RefundMethodPicker";
+import { Button, Dropdown, ErrorText, FormGroup, Input, Label, Modal } from "./ui";
+
+const money = (n: number) => `Rs. ${Math.round(n).toLocaleString()}`;
+const variant = (size: string | null, color: string | null) => [size, color].filter(Boolean).join(" / ");
+const itemName = (i: ReturnPickupItem) => `${i.title ?? "Item"}${variant(i.size, i.color) ? ` · ${variant(i.size, i.color)}` : ""}`;
+
+// The steps of a courier return after it has been approved — each a small dialog, opened from the row on Returns ▸ On the way back:
+//   CourierSentModal      the customer says it is sent (service, tracking number — or none, which is noted as accepted risk)
+//   CourierReceivedModal  the parcel is on hand: service, tracking number, what we paid, and a quick OK / Damaged / Missing look at each item
+//   InspectionReportModal the careful look: condition of each item, who pays the delivery charge, what to pay the customer back
+//   RefundPaidModal       the refund is paid (with the customer's bank details) and goes into the cash book
+
+const OTHER = "__other__";
+
+// Which delivery service: one of our couriers, or any other by name.
+function ServicePicker({
+  partnerCode,
+  serviceName,
+  onChange,
+}: {
+  partnerCode: string;
+  serviceName: string;
+  onChange: (next: { partnerCode: string; serviceName: string }) => void;
+}) {
+  const { activePartners } = useDeliveryPartners();
+  const couriers = activePartners.filter((p) => p.kind === "courier");
+  return (
+    <FormGroup>
+      <Label>Which delivery service?</Label>
+      <Dropdown
+        value={partnerCode}
+        onChange={(v) => onChange({ partnerCode: v, serviceName })}
+        placeholder="Choose the service"
+        options={[...couriers.map((c) => ({ value: c.code, label: c.name })), { value: OTHER, label: "Another service (post, bus, someone else…)" }]}
+      />
+      {partnerCode === OTHER && <Input className="mt-2" placeholder="Name of the service" value={serviceName} onChange={(e) => onChange({ partnerCode, serviceName: e.target.value })} />}
+    </FormGroup>
+  );
+}
+
+// What the picker has chosen, in the shape the API takes.
+const serviceBody = (partnerCode: string, serviceName: string) =>
+  partnerCode === OTHER ? (serviceName.trim() ? { service_name: serviceName.trim() } : {}) : partnerCode ? { delivery_partner: partnerCode } : {};
+
+// The picker's starting value from a return that may already know its service.
+function initialService(p: ReturnPickup) {
+  if (p.delivery_partner) return { partnerCode: p.delivery_partner, serviceName: "" };
+  if (p.partner_name) return { partnerCode: OTHER, serviceName: p.partner_name };
+  return { partnerCode: "", serviceName: "" };
+}
+
+// A tracking number — or the plain statement that there is none.
+function TrackingFields({
+  tracking,
+  onTracking,
+  noTracking,
+  onNoTracking,
+  noTrackingLabel,
+}: {
+  tracking: string;
+  onTracking: (v: string) => void;
+  noTracking: boolean;
+  onNoTracking: (v: boolean) => void;
+  noTrackingLabel: string;
+}) {
+  return (
+    <FormGroup>
+      <Label>Tracking number</Label>
+      <Input placeholder="Tracking number" value={tracking} onChange={(e) => onTracking(e.target.value)} disabled={noTracking} />
+      <label className="mt-1.5 flex cursor-pointer items-center gap-2 text-xs text-gray-600">
+        <input type="checkbox" checked={noTracking} onChange={(e) => onNoTracking(e.target.checked)} className="h-3.5 w-3.5 accent-black" />
+        {noTrackingLabel}
+      </label>
+    </FormGroup>
+  );
+}
+
+function Foot({ onClose, busy, label, onConfirm, disabled }: { onClose: () => void; busy: boolean; label: string; onConfirm: () => void; disabled?: boolean }) {
+  return (
+    <>
+      <Button onClick={onClose} disabled={busy}>
+        Cancel
+      </Button>
+      <Button variant="primary" onClick={onConfirm} disabled={busy || disabled}>
+        {busy ? "Saving…" : label}
+      </Button>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------- the customer sent it
+export function CourierSentModal({ pickup, onClose, onDone }: { pickup: ReturnPickup; onClose: () => void; onDone: () => void }) {
+  const [service, setService] = useState(initialService(pickup));
+  const [tracking, setTracking] = useState(pickup.tracking_number ?? "");
+  const [noTracking, setNoTracking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function confirm() {
+    setError(null);
+    if (service.partnerCode === OTHER && !service.serviceName.trim()) return setError("Name the delivery service — or leave it unchosen.");
+    if (!tracking.trim() && !noTracking) return setError("Enter the tracking number — or tick that it was sent without one.");
+    setBusy(true);
+    try {
+      await api.put(`/return-pickups/${pickup.id}/sent`, {
+        ...serviceBody(service.partnerCode, service.serviceName),
+        ...(tracking.trim() ? { tracking_number: tracking.trim() } : { no_tracking_ack: true }),
+      });
+      onDone();
+    } catch (err) {
+      setError(err instanceof ApiRequestError ? err.message : "That didn't work — try again");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      size="md"
+      title={`Customer sent it — ${pickup.invoice}`}
+      subtitle={`${pickup.customer_name ?? "Walk-in"} · on its way back to the shop`}
+      onClose={onClose}
+      footer={<Foot onClose={onClose} busy={busy} label="It's on its way" onConfirm={confirm} />}
+    >
+      <ServicePicker partnerCode={service.partnerCode} serviceName={service.serviceName} onChange={setService} />
+      <TrackingFields tracking={tracking} onTracking={setTracking} noTracking={noTracking} onNoTracking={setNoTracking} noTrackingLabel="The customer sent it without a tracking number — the risk is theirs until it arrives" />
+      {noTracking && <p className="text-xs text-amber-700">This is written down: "Customer shipped without tracking — risk accepted".</p>}
+      {error && <ErrorText>{error}</ErrorText>}
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------- the parcel is on hand
+export function CourierReceivedModal({ pickup, onClose, onDone }: { pickup: ReturnPickup; onClose: () => void; onDone: () => void }) {
+  const { runWithApproval } = useAdminApproval();
+  const { user } = useAuth();
+  const waiting = pickup.items.filter((i) => i.status === "awaiting");
+  const [service, setService] = useState(initialService(pickup));
+  const [tracking, setTracking] = useState(pickup.tracking_number ?? "");
+  const [noTracking, setNoTracking] = useState(!!pickup.sent_without_tracking);
+  const [paid, setPaid] = useState("");
+  // The quick look at each item as the parcel is opened — everything fine unless ticked otherwise.
+  const [outcomes, setOutcomes] = useState<Record<number, Outcome>>(() => Object.fromEntries(waiting.map((i) => [i.sale_item_id, "clean" as Outcome])));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const needsAdmin = !allOk(outcomes) && user?.role !== "admin";
+
+  async function confirm() {
+    setError(null);
+    if (!service.partnerCode) return setError("Say which service brought it.");
+    if (service.partnerCode === OTHER && !service.serviceName.trim()) return setError("Name the delivery service.");
+    if (!tracking.trim() && !noTracking) return setError("Enter the tracking number — or tick that it came without one.");
+    setBusy(true);
+    try {
+      await runWithApproval((approval) =>
+        api.put(
+          `/return-pickups/${pickup.id}/received`,
+          {
+            ...serviceBody(service.partnerCode, service.serviceName),
+            ...(tracking.trim() ? { tracking_number: tracking.trim() } : { no_tracking_ack: true }),
+            pickup_charge: Number(paid) || 0,
+            items: waiting.map((i) => ({
+              sale_item_id: i.sale_item_id,
+              condition: outcomes[i.sale_item_id] === "not_returned" ? "missing" : outcomes[i.sale_item_id] === "damaged" ? "damaged" : "ok",
+            })),
+          },
+          { approval }
+        )
+      );
+      onDone();
+    } catch (err) {
+      setError(err instanceof ApiRequestError ? err.message : "That didn't work — try again");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      size="md"
+      title={`Parcel received — ${pickup.invoice}`}
+      subtitle={`${pickup.customer_name ?? "Walk-in"} · it is on hand`}
+      onClose={onClose}
+      footer={<Foot onClose={onClose} busy={busy} label="Mark received" onConfirm={confirm} />}
+    >
+      <ServicePicker partnerCode={service.partnerCode} serviceName={service.serviceName} onChange={setService} />
+      <TrackingFields tracking={tracking} onTracking={setTracking} noTracking={noTracking} onNoTracking={setNoTracking} noTrackingLabel="It came without a tracking number" />
+      <FormGroup>
+        <Label>What we paid for the parcel (Rs.)</Label>
+        <Input inputMode="decimal" placeholder="0 if the customer paid" value={paid} onChange={(e) => setPaid(cleanMoney(e.target.value))} />
+        <p className="mt-1 text-xs text-gray-400">Who finally bears it is decided in the inspection report.</p>
+      </FormGroup>
+
+      <div className="mt-1">
+        <ArrivalChoice
+          items={waiting.map((i) => ({ id: i.sale_item_id, name: itemName(i), detail: money(i.amount), missingNote: "Not in the parcel — nothing will be refunded for it." }))}
+          outcomes={outcomes}
+          onChange={setOutcomes}
+        />
+        <PasswordNote show={needsAdmin} />
+      </div>
+      {error && <ErrorText>{error}</ErrorText>}
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------- the inspection report
+type Verdict = "clean" | "damaged" | "missing_parts" | "not_per_policy";
+const VERDICTS: { key: Verdict; label: string; hint: string }[] = [
+  { key: "clean", label: "Sellable", hint: "Clean — back on the shelf." },
+  { key: "damaged", label: "Damaged", hint: "Taken back, but to the damaged stock — not resold." },
+  { key: "missing_parts", label: "Missing parts", hint: "Taken back, but to the damaged stock — not resold." },
+  { key: "not_per_policy", label: "Not per policy", hint: "Can't be taken back — no refund for it." },
+];
+
+const SPLIT_OPTIONS = [
+  { value: "0", label: "Us" },
+  { value: "50", label: "50-50" },
+  { value: "100", label: "Customer" },
+];
+
+// Reasons that are our doing (a defect, a wrong description) — the delivery charge starts as ours; anything else starts as the customer's.
+const OUR_FAULT = /defect|damag|not as described|wrong item/i;
+
+export function InspectionReportModal({ pickup, onClose, onDone }: { pickup: ReturnPickup; onClose: () => void; onDone: () => void }) {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
+  const items = pickup.items.filter((i) => i.status === "awaiting");
+  const arrived = items.filter((i) => i.arrival_condition !== "missing");
+  const missing = items.filter((i) => i.arrival_condition === "missing");
+  const [verdicts, setVerdicts] = useState<Record<number, Verdict>>(() =>
+    Object.fromEntries(arrived.map((i) => [i.sale_item_id, (i.arrival_condition === "damaged" ? "damaged" : "clean") as Verdict]))
+  );
+  const [resolution, setResolution] = useState<"refund" | "store_credit">(pickup.resolution);
+  const [share, setShare] = useState<string>(String(pickup.pickup_charge > 0 ? pickup.customer_share_pct : 0));
+  const [proposed, setProposed] = useState<string | null>(null); // null = not changed: pay back everything the items come to
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // The configured starting point for who pays the delivery charge, by the reason for the return.
+  useEffect(() => {
+    if (pickup.pickup_charge <= 0) return;
+    api
+      .get<{ our_fault: number; customer_choice: number }>("/app-settings/courier-return-split")
+      .then((d) => setShare(String(OUR_FAULT.test(pickup.reason) ? d.our_fault : d.customer_choice)))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const takenBack = arrived.filter((i) => verdicts[i.sale_item_id] !== "not_per_policy");
+  const itemsTotal = takenBack.reduce((sum, i) => sum + i.amount, 0);
+  const sharePct = Number(share);
+  const customerShare = Math.round((pickup.pickup_charge * sharePct) / 100);
+  const heldBack = Math.min(customerShare, itemsTotal);
+  const estimate = itemsTotal - heldBack;
+  const proposedNum = proposed === null ? estimate : Number(proposed) || 0;
+  const overMax = proposedNum > estimate + 0.5;
+  const lessThanItems = proposed !== null && proposedNum < estimate - 0.5;
+  const creditNoun = resolution === "refund" ? "refund" : "store credit";
+
+  async function submit() {
+    setError(null);
+    if (overMax) return setError(`That's more than the items allow — at most ${money(estimate)}.`);
+    setBusy(true);
+    try {
+      await api.put(`/return-pickups/${pickup.id}/report`, {
+        items: arrived.map((i) => ({ sale_item_id: i.sale_item_id, verdict: verdicts[i.sale_item_id] })),
+        resolution,
+        ...(pickup.pickup_charge > 0 ? { customer_share_pct: sharePct } : {}),
+        ...(proposed !== null && takenBack.length > 0 ? { proposed_amount: proposedNum } : {}),
+        ...(note.trim() ? { note: note.trim() } : {}),
+      });
+      onDone();
+    } catch (err) {
+      setError(err instanceof ApiRequestError ? err.message : "That didn't work — try again");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      size="lg"
+      title={`Inspection report — ${pickup.invoice}`}
+      subtitle={`${pickup.customer_name ?? "Walk-in"} · ${pickup.partner_name ?? "service not noted"}${pickup.tracking_number ? ` · tracking ${pickup.tracking_number}` : ""}`}
+      onClose={onClose}
+      footer={<Foot onClose={onClose} busy={busy} label={isAdmin ? "Save and approve" : "Send for approval"} onConfirm={submit} />}
+    >
+      {pickup.report_status === "sent_back" && (
+        <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          An admin sent the last report back{pickup.report_decision_reason ? `: ${pickup.report_decision_reason}` : ""}. Look again and send a new one.
+        </p>
+      )}
+
+      <Label>What condition is each item in?</Label>
+      <div className="mb-4 space-y-2">
+        {arrived.map((i) => {
+          const chosen = verdicts[i.sale_item_id];
+          const v = VERDICTS.find((x) => x.key === chosen);
+          return (
+            <div key={i.id} className="rounded-xl border border-gray-200 px-3 py-2.5">
+              <p className="text-sm text-gray-900">
+                {itemName(i)} <span className="text-xs text-gray-400">{money(i.amount)}</span>
+                {i.arrival_condition === "damaged" && <span className="ml-2 text-xs text-amber-700">ticked Damaged at the door</span>}
+              </p>
+              <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                {VERDICTS.map((o) => (
+                  <button
+                    key={o.key}
+                    type="button"
+                    onClick={() => setVerdicts((cur) => ({ ...cur, [i.sale_item_id]: o.key }))}
+                    className={`rounded-lg border px-2 py-1.5 text-sm font-medium transition ${
+                      chosen === o.key ? "border-black bg-black text-white" : "border-gray-200 bg-white text-gray-600 hover:border-gray-400"
+                    }`}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+              {v && <p className="mt-1.5 text-xs text-gray-400">{v.hint}</p>}
+            </div>
+          );
+        })}
+        {missing.map((i) => (
+          <div key={i.id} className="rounded-xl border border-dashed border-gray-300 px-3 py-2.5 text-sm text-gray-500">
+            {itemName(i)} <span className="text-xs text-gray-400">{money(i.amount)}</span> — ticked Missing when the parcel was opened. Nothing to refund for it.
+          </div>
+        ))}
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <FormGroup>
+          <Label>The customer is paid back as</Label>
+          <div className="flex gap-2">
+            {([
+              ["refund", "Refund"],
+              ["store_credit", "Store credit"],
+            ] as const).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                disabled={key === "store_credit" && !pickup.customer_id}
+                onClick={() => setResolution(key)}
+                className={`flex-1 rounded-xl border py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                  resolution === key ? "border-black bg-black text-white" : "border-gray-200 bg-white text-gray-600 hover:border-gray-400"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </FormGroup>
+
+        <FormGroup>
+          <Label>Who pays the delivery charge?</Label>
+          {pickup.pickup_charge > 0 ? (
+            <>
+              <Dropdown value={share} onChange={setShare} options={SPLIT_OPTIONS} />
+              <p className="mt-1 text-xs text-gray-400">
+                We paid {money(pickup.pickup_charge)} for the parcel.{" "}
+                {sharePct === 0 ? "We carry all of it." : sharePct === 100 ? "It comes off what the customer is paid back." : `Half (${money(customerShare)}) comes off what the customer is paid back.`}
+              </p>
+            </>
+          ) : (
+            <p className="rounded-xl border border-gray-200 bg-gray-50/70 px-3 py-2 text-xs text-gray-500">We paid nothing for the parcel, so there is nothing to share.</p>
+          )}
+        </FormGroup>
+      </div>
+
+      <FormGroup>
+        <Label>
+          Proposed {creditNoun} (Rs.){" "}
+          <span className="font-normal text-gray-400">
+            — items {money(itemsTotal)}
+            {heldBack > 0 ? ` less ${money(heldBack)} delivery share` : ""} = {money(estimate)}
+          </span>
+        </Label>
+        <Input
+          inputMode="decimal"
+          value={proposed ?? String(estimate)}
+          onChange={(e) => setProposed(cleanMoney(e.target.value))}
+          disabled={takenBack.length === 0}
+          aria-label="Proposed amount"
+        />
+        {lessThanItems && <p className="mt-1 text-xs text-gray-500">{money(estimate - proposedNum)} is held back (for damage, say) — say why in the note.</p>}
+        {takenBack.length === 0 && <p className="mt-1 text-xs text-gray-400">Nothing is being taken back, so nothing is paid.</p>}
+        <p className="mt-1 text-xs text-gray-400">Shown for an order paid in full — a refund is never more than was actually paid.</p>
+      </FormGroup>
+
+      <FormGroup>
+        <Label>Note (optional)</Label>
+        <Input placeholder="What you saw — worn, a missing button, a tag gone…" value={note} onChange={(e) => setNote(e.target.value)} />
+      </FormGroup>
+      {!isAdmin && <p className="text-xs text-gray-500">An admin approves the delivery split and the amount together; nothing moves until then.</p>}
+      {error && <ErrorText>{error}</ErrorText>}
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------- the refund is paid
+export function RefundPaidModal({ pickup, onClose, onDone }: { pickup: ReturnPickup; onClose: () => void; onDone: () => void }) {
+  const [method, setMethod] = useState<"cash" | "bank_transfer">("bank_transfer");
+  const [accountId, setAccountId] = useState("");
+  const { accounts, defaultId, reload } = useCustomerBankAccounts(pickup.customer_id, method === "bank_transfer");
+  useEffect(() => {
+    if (method === "bank_transfer") setAccountId((cur) => cur || defaultId);
+  }, [method, defaultId]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const received = useMemo(() => pickup.items.filter((i) => i.status === "received"), [pickup.items]);
+
+  async function confirm() {
+    setError(null);
+    if (method === "bank_transfer" && !accountId) return setError("Pick the customer's bank account — or add their bank details first.");
+    setBusy(true);
+    try {
+      await api.put(`/return-pickups/${pickup.id}/refund`, { method, ...(method === "bank_transfer" ? { bank_account_id: parseInt(accountId, 10) } : {}) });
+      onDone();
+    } catch (err) {
+      setError(err instanceof ApiRequestError ? err.message : "That didn't work — try again");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      size="md"
+      title={`Refund — ${pickup.invoice}`}
+      subtitle={`${pickup.customer_name ?? "Walk-in"} · approved ${pickup.report_decided_by_name ? `by ${pickup.report_decided_by_name}` : ""}`}
+      onClose={onClose}
+      footer={<Foot onClose={onClose} busy={busy} label={`Refund of ${money(pickup.refund_due)} paid`} onConfirm={confirm} />}
+    >
+      <div className="mb-4 rounded-xl border border-gray-200 bg-gray-50/70 px-4 py-2.5 text-sm">
+        {received.map((i) => (
+          <div key={i.id} className="flex justify-between py-0.5 text-gray-600">
+            <span>{itemName(i)}</span>
+            <span className="tabular-nums">{money(i.refund_amount ?? 0)}</span>
+          </div>
+        ))}
+        <div className="mt-1 flex justify-between border-t border-gray-200 pt-1.5 font-semibold text-gray-900">
+          <span>To pay the customer</span>
+          <span className="tabular-nums">{money(pickup.refund_due)}</span>
+        </div>
+      </div>
+      <RefundMethodPicker
+        method={method}
+        onMethod={setMethod}
+        accounts={accounts}
+        accountId={accountId}
+        onAccount={setAccountId}
+        name={`courier-refund-account-${pickup.id}`}
+        customerId={pickup.customer_id}
+        onAdded={(a) => {
+          reload();
+          setAccountId(String(a.id));
+        }}
+      />
+      <p className="text-xs text-gray-500">Make the payment first, then press the button — it records the money in the cash book and completes the return.</p>
+      {error && <ErrorText>{error}</ErrorText>}
+    </Modal>
+  );
+}
+

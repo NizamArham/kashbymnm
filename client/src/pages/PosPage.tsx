@@ -285,6 +285,8 @@ export default function PosPage() {
   // customer before anything is actually paid for; see beginQuotation.
   const [showQuotationModal, setShowQuotationModal] = useState(false);
   const [quotationValidDays, setQuotationValidDays] = useState("7");
+  // Keep the pieces for this customer until closing today (free) so they aren't sold to someone else meanwhile.
+  const [quotationHold, setQuotationHold] = useState(true);
   const [quotationError, setQuotationError] = useState<string | null>(null);
   const [savingQuotation, setSavingQuotation] = useState(false);
   // Set once a quotation has been saved — drives the "Get quotation"
@@ -579,7 +581,7 @@ export default function PosPage() {
     try {
       const q = await api.get<Sale>(`/sales/${idParam}`);
       if (q.status !== "quotation") {
-        setQuotationLoadError(`${q.invoice} isn't an open quotation anymore.`);
+        setQuotationLoadError(`${q.invoice} isn't an open payment request anymore.`);
         return;
       }
 
@@ -609,6 +611,7 @@ export default function PosPage() {
       setSaleType(q.sale_type);
       setCart(cartLines);
       setEditingQuotation({ id: q.id, invoice: q.invoice });
+      setQuotationHold(!!q.hold_until);
       setDiscountType("fixed");
       setDiscountValue(String(q.manual_discount));
 
@@ -633,7 +636,7 @@ export default function PosPage() {
           // raising the customer's total.
           setDiscountValue(String(q.manual_discount + q.coupon_discount));
           setCouponCode("");
-          setCouponError(`Coupon ${q.coupon_code} is no longer valid — its Rs. ${q.coupon_discount.toLocaleString()} discount was kept as a manual discount to match the quoted price.`);
+          setCouponError(`Coupon ${q.coupon_code} is no longer valid — its Rs. ${q.coupon_discount.toLocaleString()} discount was kept as a manual discount to match the price on the payment request.`);
         }
       }
 
@@ -648,12 +651,12 @@ export default function PosPage() {
           .catch(() => {});
       }
     } catch (err) {
-      setQuotationLoadError(err instanceof ApiRequestError ? err.message : "Failed to open this quotation");
+      setQuotationLoadError(err instanceof ApiRequestError ? err.message : "Failed to open this payment request");
     }
   }
 
   function exitQuotationEdit() {
-    if (!confirm("Stop editing this quotation? The cart will be cleared — the quotation stays as it was last saved.")) return;
+    if (!confirm("Stop editing this payment request? The cart will be cleared — the payment request stays as it was last saved.")) return;
     setEditingQuotation(null);
     setCart([]);
     setStaleUnitIds(new Set());
@@ -670,7 +673,8 @@ export default function PosPage() {
 
   async function ensureUnitsLoaded() {
     if (allAvailableUnits) return allAvailableUnits;
-    const units = await api.get<InventoryUnit[]>("/inventory?status=available");
+    // Pieces held for someone else's payment request aren't offered — except the ones held for the request being edited.
+    const units = await api.get<InventoryUnit[]>(`/inventory?status=available&sellable=1${editingQuotation ? `&for_sale=${editingQuotation.id}` : ""}`);
     setAllAvailableUnits(units);
     return units;
   }
@@ -1201,18 +1205,19 @@ export default function PosPage() {
       return;
     }
     if (cart.some((line) => line.units.some((u) => staleUnitIds.has(u.id)))) {
-      setCheckoutError("One or more items in the cart are no longer in stock — remove them before saving a quotation.");
+      setCheckoutError("One or more items in the cart are no longer in stock — remove them before saving a payment request.");
       return;
     }
     setQuotationValidDays("7");
+    if (!editingQuotation) setQuotationHold(true);
     setShowQuotationModal(true);
   }
 
   async function handleSaveQuotation() {
     setQuotationError(null);
-    const validDays = parseInt(quotationValidDays, 10);
+    const validDays = quotationHold ? 7 : parseInt(quotationValidDays, 10);
     if (!validDays || validDays <= 0) {
-      setQuotationError("Enter how many days this quote should stay valid for.");
+      setQuotationError("Enter how many days this payment request should stay open for.");
       return;
     }
 
@@ -1227,6 +1232,8 @@ export default function PosPage() {
         coupon_code: appliedCoupon?.code,
         sale_type: saleType,
         valid_days: validDays,
+        // Held pieces make it a same-day request: good, and held, until closing today.
+        hold_stock: quotationHold,
       };
       // Editing a reopened quotation updates that same record (same
       // number the customer may already have); otherwise it's a
@@ -1257,7 +1264,7 @@ export default function PosPage() {
       setCouponError(null);
       setAllAvailableUnits(null);
     } catch (err) {
-      setQuotationError(err instanceof ApiRequestError ? err.message : "Failed to save this quotation");
+      setQuotationError(err instanceof ApiRequestError ? err.message : "Failed to save this payment request");
     } finally {
       setSavingQuotation(false);
     }
@@ -1268,8 +1275,8 @@ export default function PosPage() {
       {
         key: "a4",
         icon: <FileText size={16} className="text-gray-700" />,
-        title: "A4 Quotation (PDF)",
-        subtitle: "Full-page printable quote",
+        title: "A4 Payment request (PDF)",
+        subtitle: "Full-page printable payment request",
         onClick: () => downloadA4Pdf(sale),
       },
       {
@@ -1367,8 +1374,8 @@ export default function PosPage() {
             {editingQuotation && (
               <div className="mt-3 flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-xl px-3.5 py-2.5">
                 <p className="text-xs text-amber-800 min-w-0">
-                  <strong>Editing quotation {editingQuotation.invoice}</strong> — add or adjust items, then{" "}
-                  <strong>Update quote</strong> to save the changes, or <strong>Checkout</strong> to turn it into the real sale.
+                  <strong>Editing payment request {editingQuotation.invoice}</strong> — add or adjust items, then{" "}
+                  <strong>Update request</strong> to save the changes, or <strong>Checkout</strong> to turn it into the real sale.
                 </p>
                 <button
                   onClick={exitQuotationEdit}
@@ -2127,11 +2134,11 @@ export default function PosPage() {
                   <button
                     onClick={beginQuotation}
                     disabled={cart.length === 0}
-                    title="Save as a price quotation to send the customer before they pay"
+                    title="Save as a payment request to send the customer before they pay"
                     className="flex-1 px-4 py-2 border border-gray-300 rounded-xl hover:bg-gray-50 transition text-sm font-medium disabled:opacity-50 inline-flex items-center justify-center gap-1.5"
                   >
                     <FileText size={14} />
-                    {editingQuotation ? "Update quote" : "Quotation"}
+                    {editingQuotation ? "Update request" : "Payment request"}
                   </button>
                   <button
                     onClick={beginCheckout}
@@ -2633,22 +2640,33 @@ export default function PosPage() {
         <Modal
           size="md"
           onClose={() => setShowQuotationModal(false)}
-          title={editingQuotation ? `Update quotation ${editingQuotation.invoice}` : "Save as quotation"}
+          title={editingQuotation ? `Update payment request ${editingQuotation.invoice}` : "Save as payment request"}
           subtitle={`${totalCartUnits} item${totalCartUnits !== 1 ? "s" : ""} · Rs. ${total.toLocaleString()}${selectedCustomer ? ` · ${selectedCustomer.name}` : " · Walk-in"}`}
           footer={
             <>
               <Button onClick={() => setShowQuotationModal(false)}>Cancel</Button>
               <Button variant="primary" onClick={handleSaveQuotation} disabled={savingQuotation}>
-                {savingQuotation ? "Saving..." : editingQuotation ? "Update quotation" : "Save quotation"}
+                {savingQuotation ? "Saving..." : editingQuotation ? "Update request" : "Save payment request"}
               </Button>
             </>
           }
         >
           <p className="text-xs text-gray-400 mb-4">
-            Saves this cart as a price-confirmation bill, with nothing charged or reserved yet. Print or send it to the customer — once they confirm, pull it up again and convert it to a real sale to collect payment.
+            Saves this cart as a payment request, with nothing charged yet. Print or send it to the customer — once they have paid or confirmed, pull it up again and turn it into a real sale.
           </p>
+          <label className="mb-4 flex cursor-pointer items-start gap-2.5 rounded-xl border border-gray-200 px-3.5 py-3 text-sm text-gray-700">
+            <input type="checkbox" checked={quotationHold} onChange={(e) => setQuotationHold(e.target.checked)} className="mt-0.5 h-4 w-4 accent-black" />
+            <span>
+              <span className="font-medium text-gray-900">Keep these pieces for the customer until closing today</span>
+              <span className="mt-0.5 block text-xs text-gray-500">
+                Free, and it ends by itself tonight. Nobody else can sell these pieces meanwhile, and the request is for today only. Untick it to leave the pieces
+                for sale and keep the request open for days instead.
+              </span>
+            </span>
+          </label>
+          {!quotationHold && (
               <FormGroup>
-                <Label>Valid for (days)</Label>
+                <Label>Open for (days)</Label>
                 <div className="flex gap-1.5 flex-wrap mb-1.5">
                   {[3, 7, 14, 30].map((d) => (
                     <button
@@ -2669,6 +2687,7 @@ export default function PosPage() {
                   onChange={(e) => setQuotationValidDays(e.target.value)}
                 />
               </FormGroup>
+          )}
 
               {quotationError && <ErrorText>{quotationError}</ErrorText>}
         </Modal>
@@ -2676,7 +2695,7 @@ export default function PosPage() {
 
       {savedQuotation && (
         <ReceiptOptionsModal
-          heading="Quotation saved"
+          heading="Payment request saved"
           subtitle={savedQuotation.invoice}
           options={quotationReceiptOptions(savedQuotation)}
           error={quotationReceiptError}

@@ -5,6 +5,9 @@ import { InventoryUnit, Sale } from "../lib/types";
 import { calculateDeliveryFee, useDeliveryPartners } from "../lib/delivery";
 import { cleanDecimal, cleanMoney } from "../lib/numberInput";
 import { useAuth } from "../context/AuthContext";
+import { useAdminApproval } from "./AdminApproval";
+import { SHARE_OPTIONS } from "../lib/pickupShare";
+import { clearExchangeDraft, exchangeDraftFor, saveExchangeDraft, setExchangePopupVisible } from "../lib/exchangeDraft";
 import { Button, Dropdown, DropdownOption, ErrorText, FormGroup, HelpHint, Input, Label, Modal } from "./ui";
 
 interface EligibleItem {
@@ -17,23 +20,23 @@ interface EligibleItem {
   color: string | null;
   delivery_partner: string | null;
   package_weight_kg: number | null;
+  // 0 = a no-returns (final sale) product
+  allow_returns?: number;
 }
 
 interface NewLine {
   key: string; // the variant (product / size / colour / price) this line takes units of
   qty: string;
   price: string; // what each piece is billed at; empty = the tag price
+  unitId?: number; // set when one particular piece was scanned or typed by its SKU / barcode — the line is that piece
 }
 
 const money = (n: number) => `Rs. ${Math.round(n).toLocaleString()}`;
 const variant = (size: string | null, color: string | null) => [size, color].filter(Boolean).join(" / ");
+const tagOf = (u: InventoryUnit) => u.selling_price ?? u.product_selling_price ?? 0;
+// One entry per product / size / colour / price — the key a new-item line is made of.
+const variantKeyOf = (u: InventoryUnit) => `${u.product_id}|${u.size ?? ""}|${u.color ?? ""}|${tagOf(u)}`;
 
-// Who pays the courier's charge for collecting the old items.
-const SHARE_OPTIONS: { pct: number; label: string; hint: string }[] = [
-  { pct: 0, label: "We pay", hint: "Our mistake — wrong item or a defect" },
-  { pct: 50, label: "Half and half", hint: "The customer pays half, we pay half" },
-  { pct: 100, label: "Customer pays", hint: "The customer pays all of it" },
-];
 
 // How the customer is paying for the exchange: at the door (COD), or already — by bank transfer, card or cash.
 type Payment = "cod" | "bank_transfer" | "card" | "cash";
@@ -53,6 +56,10 @@ const PAYMENTS: { key: Payment; label: string }[] = [
 // Payment is either collected at the door (COD) or already received — and when it isn't confirmed yet, the exchange
 // is held as a quotation instead (nothing reserved or booked) and turned into the order from the quotation's page.
 // With `quote` set, `sale` IS that quotation and the popup confirms it.
+//
+// A delivery exchange is a request: an admin's own goes straight ahead, a cashier's is sent for approval — saved as a payment request
+// with its pieces held for the day — and the order is made from it once an admin has said yes. (An admin standing at the till can also
+// type their password to make it right away.)
 export default function OnlineExchangeModal({
   sale,
   quote = false,
@@ -67,23 +74,63 @@ export default function OnlineExchangeModal({
   onQuoted?: (created: { id: number; invoice: string }) => void;
 }) {
   const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
+  const { runWithApproval } = useAdminApproval();
   const { activePartners } = useDeliveryPartners();
   const couriers = activePartners.filter((p) => p.kind === "courier");
 
+  // A popup that was left half-filled (page changed, reload) comes back as it was — see lib/exchangeDraft.ts.
+  const [held] = useState(() => exchangeDraftFor(sale.id, quote, user?.id));
+
   const [eligible, setEligible] = useState<EligibleItem[] | null>(null);
   const [units, setUnits] = useState<InventoryUnit[]>([]);
-  const [oldIds, setOldIds] = useState<number[]>([]);
-  const [lines, setLines] = useState<NewLine[]>([{ key: "", qty: "1", price: "" }]);
-  const [partnerCode, setPartnerCode] = useState("");
-  const [weight, setWeight] = useState("1");
-  const [freeDelivery, setFreeDelivery] = useState(false);
-  const [pickup, setPickup] = useState("");
-  const [pickupEdited, setPickupEdited] = useState(false);
-  const [sharePct, setSharePct] = useState<number | null>(null);
-  const [payment, setPayment] = useState<Payment>("cod");
+  const [oldIds, setOldIds] = useState<number[]>(held?.oldIds ?? []);
+  const [lines, setLines] = useState<NewLine[]>(held?.lines?.length ? held.lines : [{ key: "", qty: "1", price: "" }]);
+  const [partnerCode, setPartnerCode] = useState(held?.partnerCode ?? "");
+  const [weight, setWeight] = useState(held?.weight ?? "1");
+  const [freeDelivery, setFreeDelivery] = useState(held?.freeDelivery ?? false);
+  const [pickup, setPickup] = useState(held?.pickup ?? "");
+  const [pickupEdited, setPickupEdited] = useState(held?.pickupEdited ?? false);
+  const [sharePct, setSharePct] = useState<number | null>(held?.sharePct ?? null);
+  const [payment, setPayment] = useState<Payment>((held?.payment as Payment | undefined) ?? "cod");
+  // When held as a payment request: keep the pieces for the customer until closing today (free), so they aren't sold meanwhile.
+  const [holdStock, setHoldStock] = useState(held?.holdStock ?? true);
+  // The old items come back with the delivery of the new order (our courier collects them), or separately — sent by the customer
+  // with any other service, which doesn't matter beyond its name and what it cost.
+  const [returnVia, setReturnVia] = useState<"delivery" | "separate">(held?.returnVia ?? "delivery");
+  const [returnService, setReturnService] = useState(held?.returnService ?? "");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [filledFromQuote, setFilledFromQuote] = useState(false);
+  // A held popup already has what the quotation said (and whatever was changed since) — don't overwrite it.
+  const [filledFromQuote, setFilledFromQuote] = useState(!!held);
+
+  // Hold what's on the screen. Closing the popup only puts it aside; Cancel, creating the order or holding it as a quote
+  // lets it go.
+  useEffect(() => {
+    saveExchangeDraft({
+      userId: user?.id ?? null,
+      saleId: sale.id,
+      quote,
+      customer: sale.customer_name ?? "Customer",
+      invoice: sale.invoice,
+      oldIds,
+      lines,
+      partnerCode,
+      weight,
+      freeDelivery,
+      pickup,
+      pickupEdited,
+      sharePct,
+      payment,
+      holdStock,
+      returnVia,
+      returnService,
+    });
+  }, [user?.id, sale.id, sale.customer_name, sale.invoice, quote, oldIds, lines, partnerCode, weight, freeDelivery, pickup, pickupEdited, sharePct, payment, holdStock, returnVia, returnService]);
+  useEffect(() => {
+    setExchangePopupVisible(true);
+    return () => setExchangePopupVisible(false);
+  }, []);
 
   useEffect(() => {
     if (!sale.customer_id) return;
@@ -91,24 +138,40 @@ export default function OnlineExchangeModal({
       .get<EligibleItem[]>(`/exchanges/eligible?customer_id=${sale.customer_id}`)
       .then((items) => {
         setEligible(items);
-        // Start with the items of the order this was opened from.
-        const fromThisOrder = items.filter((i) => i.sale_id === sale.id);
-        setOldIds((fromThisOrder.length ? fromThisOrder : items.slice(0, 1)).map((i) => i.sale_item_id));
+        if (held) {
+          // Back from being held: keep what was ticked, minus anything that can't be exchanged any more.
+          setOldIds((cur) => cur.filter((id) => items.some((i) => i.sale_item_id === id)));
+          return;
+        }
+        // Nothing is ticked to begin with — what's coming back is picked, not un-picked from everything.
       })
       .catch((err) => setError(err instanceof ApiRequestError ? err.message : "Couldn't load this customer's delivered items"));
     api
-      .get<InventoryUnit[]>("/inventory?status=available")
+      // Pieces held for another payment request aren't offered — except the ones held for the one being confirmed.
+      .get<InventoryUnit[]>(`/inventory?status=available&sellable=1${quote ? `&for_sale=${sale.id}` : ""}`)
       .then(setUnits)
       .catch(() => setError("Couldn't load the stock list"));
   }, [sale.customer_id, sale.id]);
 
+  // A scanned piece that was sold or removed while the popup was held can't stay on its line.
+  useEffect(() => {
+    if (units.length === 0) return;
+    if (lines.some((l) => l.unitId && !units.some((u) => u.id === l.unitId))) {
+      setLines((cur) => cur.map((l) => (l.unitId && !units.some((u) => u.id === l.unitId) ? { key: "", qty: "1", price: "" } : l)));
+      setError("A piece on the list is no longer in stock — pick it again.");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [units]);
+
   const oldItems = (eligible ?? []).filter((i) => oldIds.includes(i.sale_item_id));
   const firstOld = oldItems[0] ?? null;
 
-  // The new order goes by the same courier the old items came by, to start with.
+  // The new order goes by the same courier the old items came by, to start with — the one of the order this was opened from
+  // until an old item is ticked.
   useEffect(() => {
-    if (!firstOld || couriers.length === 0) return;
-    setPartnerCode((cur) => (cur && couriers.some((c) => c.code === cur) ? cur : couriers.find((c) => c.code === firstOld.delivery_partner)?.code ?? couriers[0].code));
+    if (couriers.length === 0) return;
+    const from = firstOld?.delivery_partner ?? sale.delivery_partner ?? null;
+    setPartnerCode((cur) => (cur && couriers.some((c) => c.code === cur) ? cur : couriers.find((c) => c.code === from)?.code ?? couriers[0].code));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [firstOld?.sale_item_id, couriers.length]);
 
@@ -116,8 +179,7 @@ export default function OnlineExchangeModal({
   const variants = useMemo(() => {
     const byKey = new Map<string, InventoryUnit[]>();
     for (const u of units) {
-      const price = u.selling_price ?? u.product_selling_price ?? 0;
-      const key = `${u.product_id}|${u.size ?? ""}|${u.color ?? ""}|${price}`;
+      const key = variantKeyOf(u);
       byKey.set(key, [...(byKey.get(key) ?? []), u]);
     }
     const options: DropdownOption[] = Array.from(byKey, ([key, list]) => {
@@ -125,7 +187,9 @@ export default function OnlineExchangeModal({
       return {
         value: key,
         label: `${u.product_title ?? "Item"}${variant(u.size, u.color) ? ` · ${variant(u.size, u.color)}` : ""}`,
-        sublabel: `${money(u.selling_price ?? u.product_selling_price ?? 0)} · ${list.length} in stock`,
+        sublabel: `${money(tagOf(u))} · ${list.length} in stock`,
+        // Typing (or scanning) a piece's SKU or barcode finds its variant too.
+        keywords: list.map((x) => `${x.sku} ${x.barcode ?? ""}`).join(" "),
       };
     });
     return { byKey, options };
@@ -158,7 +222,11 @@ export default function OnlineExchangeModal({
     setPickup(String(q.pickup_charge));
     setPickupEdited(true);
     setSharePct(q.customer_share_pct);
-    if (missing > 0) setError(`${missing} piece${missing === 1 ? "" : "s"} on the quotation ${missing === 1 ? "is" : "are"} no longer in stock — check the new items below.`);
+    if (q.return_service) {
+      setReturnVia("separate");
+      setReturnService(q.return_service);
+    }
+    if (missing > 0) setError(`${missing} piece${missing === 1 ? "" : "s"} on the payment request ${missing === 1 ? "is" : "are"} no longer in stock — check the new items below.`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [quote, sale.exchange_quote, eligible, units, couriers.length, variants]);
 
@@ -167,19 +235,22 @@ export default function OnlineExchangeModal({
   const deliveryFee = calculateDeliveryFee(weightNum, freeDelivery, partner);
   const tariffPickup = calculateDeliveryFee(weightNum, false, partner);
 
-  // The pickup charge starts as the courier's tariff for this weight, until it's typed over.
+  // The return charge starts as our courier's tariff for this weight, until it's typed over — when another service carries the old
+  // items back there is no tariff of ours to start from, so it's typed in.
   useEffect(() => {
-    if (!pickupEdited) setPickup(tariffPickup ? String(tariffPickup) : "");
-  }, [tariffPickup, pickupEdited]);
+    if (!pickupEdited) setPickup(returnVia === "delivery" && tariffPickup ? String(tariffPickup) : "");
+  }, [tariffPickup, pickupEdited, returnVia]);
 
   // The pieces the new order will hold, with how many of each variant are in stock, and the
   // price each is billed at — the tag price unless it's been typed over (an exchange at the
   // price the customer paid the first time, say).
-  const tagPriceOf = (list: InventoryUnit[]) => list[0].selling_price ?? list[0].product_selling_price ?? 0;
+  const tagPriceOf = (list: InventoryUnit[]) => tagOf(list[0]);
   const chosen = lines
     .map((l) => {
-      const list = variants.byKey.get(l.key);
-      const qty = Math.max(0, Math.floor(Number(l.qty) || 0));
+      // A scanned piece is that one piece; anything else is a number of the variant, taken from its stock.
+      const pinned = l.unitId ? units.find((u) => u.id === l.unitId) : undefined;
+      const list = pinned ? [pinned] : variants.byKey.get(l.key);
+      const qty = pinned ? 1 : Math.max(0, Math.floor(Number(l.qty) || 0));
       if (!list || qty <= 0) return null;
       const typed = l.price.trim() === "" ? NaN : Number(l.price);
       return { list, qty: Math.min(qty, list.length), wanted: qty, price: Number.isFinite(typed) && typed >= 0 ? typed : tagPriceOf(list) };
@@ -204,6 +275,27 @@ export default function OnlineExchangeModal({
   function toggleOld(id: number) {
     setOldIds((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
   }
+  // A typed or scanned SKU / barcode that matches one available piece puts that exact piece on the line (the courier
+  // packs that very one), and opens a fresh line below it ready for the next scan. Returns false when nothing matches.
+  function pickByCode(lineIndex: number, raw: string): boolean {
+    const code = raw.trim().toLowerCase();
+    const unit = units.find((u) => u.sku.toLowerCase() === code || (u.barcode ?? "").toLowerCase() === code);
+    if (!unit) return false;
+    if (lines.some((l, idx) => idx !== lineIndex && l.unitId === unit.id)) {
+      setError("That piece is already on the list.");
+      return true;
+    }
+    setError(null);
+    setLines((cur) => {
+      const next = cur.map((l, idx) => (idx === lineIndex ? { key: variantKeyOf(unit), qty: "1", price: "", unitId: unit.id } : l));
+      return lineIndex === cur.length - 1 ? [...next, { key: "", qty: "1", price: "" }] : next;
+    });
+    setTimeout(() => {
+      const boxes = document.querySelectorAll<HTMLInputElement>("[data-stock-line] input");
+      boxes[boxes.length - 1]?.focus();
+    }, 0);
+    return true;
+  }
   function updateLine(i: number, patch: Partial<NewLine>) {
     setLines((cur) => cur.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
   }
@@ -218,7 +310,8 @@ export default function OnlineExchangeModal({
     if (!sale.customer_id || oldItems.length === 0 || pieces === 0) return null;
     if (!partner) return stop("Pick the courier that will deliver it.");
     if (!(weightNum > 0)) return stop("Enter the parcel weight.");
-    if (sharePct === null) return stop("Choose who pays the pickup charge.");
+    if (sharePct === null) return stop("Choose who pays the return charge.");
+    if (returnVia === "separate" && !returnService.trim()) return stop("Name the service the old items are coming back with.");
     if (overStock) return stop("There isn't enough stock for one of the lines — lower its quantity.");
     const items = chosen.flatMap((c) => c.list.slice(0, c.qty).map((u) => ({ inventory_id: u.id, unit_price: c.price })));
     return { customerId: sale.customer_id, items, courier: partner.code };
@@ -228,6 +321,7 @@ export default function OnlineExchangeModal({
     old_sale_item_ids: oldItems.map((i) => i.sale_item_id),
     pickup_charge: pickupCharge,
     customer_share_pct: sharePct as number,
+    ...(returnVia === "separate" ? { return_service: returnService.trim() } : {}),
   });
 
   async function submit() {
@@ -235,20 +329,28 @@ export default function OnlineExchangeModal({
     if (!ok) return;
     setSubmitting(true);
     try {
-      const created = await api.post<{ id: number; invoice: string }>("/sales", {
-        customer_id: ok.customerId,
-        salesperson: user?.name ?? user?.username,
-        items: ok.items,
-        sale_type: "online",
-        delivery_partner: ok.courier,
-        package_weight_kg: weightNum,
-        is_free_delivery: freeDelivery,
-        // Paid up front: what's due before the old items come back is taken now, so nothing is left for the courier.
-        amount_paid: prepaid ? dueNow : 0,
-        payment_method: prepaid ? payment : "cash",
-        exchange: exchangeBody(),
-        ...(quote ? { quotation_id: sale.id } : {}),
-      });
+      // (An exchange that hasn't been approved asks for an admin's password here — typing it is the approval.)
+      const created = await runWithApproval((approval) =>
+        api.post<{ id: number; invoice: string }>(
+          "/sales",
+          {
+            customer_id: ok.customerId,
+            salesperson: user?.name ?? user?.username,
+            items: ok.items,
+            sale_type: "online",
+            delivery_partner: ok.courier,
+            package_weight_kg: weightNum,
+            is_free_delivery: freeDelivery,
+            // Paid up front: what's due before the old items come back is taken now, so nothing is left for the courier.
+            amount_paid: prepaid ? dueNow : 0,
+            payment_method: prepaid ? payment : "cash",
+            exchange: exchangeBody(),
+            ...(quote ? { quotation_id: sale.id } : {}),
+          },
+          { approval }
+        )
+      );
+      clearExchangeDraft();
       onCreated(created);
     } catch (err) {
       setError(err instanceof ApiRequestError ? err.message : "Couldn't create the exchange order");
@@ -270,10 +372,14 @@ export default function OnlineExchangeModal({
         items: ok.items,
         sale_type: "online",
         exchange: { ...exchangeBody(), delivery_partner: ok.courier, package_weight_kg: weightNum, is_free_delivery: freeDelivery },
+        // A same-day request: the pieces are kept for the customer, and the request is good, until closing today. (One sent for
+        // approval always keeps them, so they aren't sold while an admin decides.)
+        hold_stock: isAdmin ? holdStock : true,
       });
+      clearExchangeDraft();
       onQuoted?.(created);
     } catch (err) {
-      setError(err instanceof ApiRequestError ? err.message : "Couldn't save the quotation");
+      setError(err instanceof ApiRequestError ? err.message : isAdmin ? "Couldn't save the payment request" : "Couldn't send it for approval");
     } finally {
       setSubmitting(false);
     }
@@ -293,7 +399,7 @@ export default function OnlineExchangeModal({
         : overStock
         ? "Not enough in stock for a quantity."
         : sharePct === null
-        ? "Choose who pays the pickup charge."
+        ? "Choose who pays the return charge."
         : null
       : null);
 
@@ -303,22 +409,40 @@ export default function OnlineExchangeModal({
       height="h-[min(44rem,calc(100dvh-2rem))]"
       flush
       onClose={onClose}
-      title={quote ? `Create exchange order — from ${sale.invoice}` : "Exchange by delivery"}
-      subtitle={`${sale.customer_name ?? "Customer"} — the courier brings the old items back with the new order`}
+      title={quote ? `Create exchange order — from ${sale.invoice}` : "Delivery Exchange"}
+      subtitle={`${sale.customer_name ?? "Customer"} — the old items come back with the new order, or by another service`}
       footer={
         <>
           <span className={`mr-auto min-w-0 basis-full text-xs sm:basis-0 sm:flex-1 ${error ? "text-red-500" : "text-gray-400"}`}>{hint}</span>
-          <Button onClick={onClose} disabled={submitting}>
+          <Button
+            onClick={() => {
+              clearExchangeDraft();
+              onClose();
+            }}
+            disabled={submitting}
+            title="Cancel throws away what's filled in. Closing the popup with the X keeps it for later."
+          >
             Cancel
           </Button>
-          {!quote && onQuoted && (
-            <Button onClick={holdAsQuote} disabled={!ready || submitting} title="Keep it as a quotation until the customer has paid — nothing is reserved or recorded">
-              Hold as quote
+          {!quote && onQuoted && isAdmin && (
+            <Button onClick={holdAsQuote} disabled={!ready || submitting} title="Keep it as a payment request until the customer has paid — nothing is reserved or recorded">
+              Hold as payment request
             </Button>
           )}
-          <Button variant="primary" onClick={submit} disabled={!ready || submitting}>
-            {submitting ? "Creating…" : "Create exchange order"}
-          </Button>
+          {!quote && onQuoted && !isAdmin ? (
+            <>
+              <Button onClick={submit} disabled={!ready || submitting} title="An admin here can type their password to approve it and make the order right now">
+                Create with admin password
+              </Button>
+              <Button variant="primary" onClick={holdAsQuote} disabled={!ready || submitting} title="An admin approves it first; the pieces are kept for the customer until closing today">
+                {submitting ? "Sending…" : "Send for approval"}
+              </Button>
+            </>
+          ) : (
+            <Button variant="primary" onClick={submit} disabled={!ready || submitting}>
+              {submitting ? "Creating…" : "Create exchange order"}
+            </Button>
+          )}
         </>
       }
     >
@@ -336,15 +460,28 @@ export default function OnlineExchangeModal({
         // screen is short — the popup itself never changes size. On a phone they stack.
         <div className="h-full overflow-y-auto lg:grid lg:grid-cols-[minmax(0,1fr)_22rem] lg:overflow-hidden">
           <div className="px-6 py-5 lg:overflow-y-auto">
-            <Label>Old items coming back with the delivery</Label>
+            <div className="flex items-baseline justify-between gap-3">
+              <Label>Tick the old items coming back with the delivery</Label>
+              {eligible.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => setOldIds(oldIds.length === eligible.length ? [] : eligible.map((i) => i.sale_item_id))}
+                  className="text-xs text-gray-500 underline hover:text-gray-800"
+                >
+                  {oldIds.length === eligible.length ? "Clear" : "Select all"}
+                </button>
+              )}
+            </div>
             <div className="mb-5 max-h-44 divide-y divide-gray-100 overflow-y-auto rounded-xl border border-gray-200">
-              {eligible.map((i) => (
+              {/* The items of the order this was opened from come first. */}
+              {[...eligible].sort((a, b) => Number(b.sale_id === sale.id) - Number(a.sale_id === sale.id)).map((i) => (
                 <label key={i.sale_item_id} className="flex cursor-pointer items-center gap-3 px-3 py-2 text-sm hover:bg-gray-50">
                   <input type="checkbox" checked={oldIds.includes(i.sale_item_id)} onChange={() => toggleOld(i.sale_item_id)} className="h-4 w-4 accent-black" />
                   <span className="min-w-0 flex-1 truncate text-gray-900">
                     {i.product_title ?? "Item"}
                     {variant(i.size, i.color) && <span className="text-gray-500"> · {variant(i.size, i.color)}</span>}
                     <span className="ml-2 text-xs text-gray-400">{i.invoice}</span>
+                    {i.allow_returns === 0 && <span className="ml-2 text-xs text-amber-700">Final Sale</span>}
                   </span>
                   <span className="tabular-nums text-gray-600">{money(i.unit_price)}</span>
                 </label>
@@ -356,8 +493,9 @@ export default function OnlineExchangeModal({
             </Label>
             <div className="space-y-2">
               {lines.map((l, i) => {
-                const list = variants.byKey.get(l.key);
-                const over = list && Number(l.qty) > list.length;
+                const pinned = l.unitId ? units.find((u) => u.id === l.unitId) : undefined;
+                const list = pinned ? [pinned] : variants.byKey.get(l.key);
+                const over = !pinned && list && Number(l.qty) > list.length;
                 const tag = list ? tagPriceOf(list) : 0;
                 const now = l.price.trim() === "" ? tag : Number(l.price) || 0;
                 // The same product, already in this customer's old items, at the price they paid for it.
@@ -365,11 +503,25 @@ export default function OnlineExchangeModal({
                 return (
                   <div key={i}>
                     <div className="flex items-start gap-2">
-                      <div className="min-w-0 flex-1">
-                        <Dropdown value={l.key} onChange={(v) => updateLine(i, { key: v, price: "" })} options={variants.options} searchable placeholder="Search the stock…" />
+                      <div className="min-w-0 flex-1" data-stock-line>
+                        <Dropdown
+                          value={l.key}
+                          onChange={(v) => updateLine(i, { key: v, price: "", unitId: undefined })}
+                          options={variants.options}
+                          searchable
+                          placeholder="Search the stock, or scan a barcode / SKU…"
+                          onSearchEnter={(q) => pickByCode(i, q)}
+                        />
                       </div>
                       <div className="w-16 flex-shrink-0">
-                        <Input inputMode="numeric" value={l.qty} onChange={(e) => updateLine(i, { qty: e.target.value.replace(/\D/g, "").slice(0, 3) })} className={over ? "!border-red-300" : ""} aria-label="Quantity" />
+                        <Input
+                          inputMode="numeric"
+                          value={pinned ? "1" : l.qty}
+                          disabled={!!pinned}
+                          onChange={(e) => updateLine(i, { qty: e.target.value.replace(/\D/g, "").slice(0, 3) })}
+                          className={over ? "!border-red-300" : ""}
+                          aria-label="Quantity"
+                        />
                       </div>
                       <div className="w-28 flex-shrink-0">
                         <Input
@@ -387,6 +539,15 @@ export default function OnlineExchangeModal({
                         </button>
                       )}
                     </div>
+                    {pinned && (
+                      <p className="mt-1 text-xs text-gray-400">
+                        This piece: {pinned.sku}
+                        {pinned.barcode ? ` · ${pinned.barcode}` : ""} ·{" "}
+                        <button type="button" onClick={() => updateLine(i, { unitId: undefined })} className="underline hover:text-gray-700">
+                          use any piece of it
+                        </button>
+                      </p>
+                    )}
                     {paid && (
                       <button type="button" onClick={() => updateLine(i, { price: String(paid.unit_price) })} className="mt-1 text-xs text-gray-500 underline hover:text-gray-800">
                         Same price they paid before — {money(paid.unit_price)} <span className="text-gray-400">(tag {money(tag)})</span>
@@ -409,15 +570,67 @@ export default function OnlineExchangeModal({
               </div>
               <label className="col-span-2 flex items-center gap-2 whitespace-nowrap text-sm text-gray-700 sm:col-span-1">
                 <input type="checkbox" checked={freeDelivery} onChange={(e) => setFreeDelivery(e.target.checked)} className="h-4 w-4 accent-black" />
-                Free delivery <HelpHint text="We pay the courier's delivery charge for the new order. The pickup charge on the right is separate." />
+                Free delivery <HelpHint text="We pay the courier's delivery charge for the new order. The return charge on the right is separate." />
               </label>
             </div>
+
+            <div className="mt-5">
+              <Label>How do the old items come back?</Label>
+            </div>
+            <div className="mb-2 grid grid-cols-2 gap-1.5">
+              {(
+                [
+                  ["delivery", "With the delivery"],
+                  ["separate", "Sent back separately"],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setReturnVia(key)}
+                  className={`rounded-xl border px-2 py-1.5 text-xs font-medium transition ${
+                    returnVia === key ? "border-black bg-black text-white" : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {returnVia === "separate" && (
+              <Input className="mb-2" placeholder="Service they're sent with (post, bus, a courier…)" value={returnService} onChange={(e) => setReturnService(e.target.value)} />
+            )}
+
+            {!quote && onQuoted && !isAdmin && (
+              <p className="mt-5 rounded-xl border border-gray-200 px-3.5 py-3 text-xs text-gray-500">
+                <span className="block text-sm font-medium text-gray-900">An admin approves this first</span>
+                Until they decide, the pieces are kept for the customer till closing today so nobody else can buy them.
+                {oldItems.some((i) => i.allow_returns === 0) && " An old item here is Final Sale — the admin will need to give a reason to approve it."}
+              </p>
+            )}
+            {!quote && onQuoted && isAdmin && (
+              <label className="mt-5 flex cursor-pointer items-start gap-2.5 rounded-xl border border-gray-200 px-3.5 py-3 text-sm text-gray-700">
+                <input type="checkbox" checked={holdStock} onChange={(e) => setHoldStock(e.target.checked)} className="mt-0.5 h-4 w-4 accent-black" />
+                <span>
+                  <span className="font-medium text-gray-900">If held as a payment request, keep the pieces for the customer until closing today</span>
+                  <span className="mt-0.5 block text-xs text-gray-500">
+                    Free, and it ends by itself tonight. The pieces can't be sold to anyone else meanwhile, and the request is for today only. Untick to leave them
+                    for sale and keep the request open for a week.
+                  </span>
+                </span>
+              </label>
+            )}
           </div>
 
           <div className="border-t border-gray-100 bg-gray-50/70 px-5 py-3 lg:overflow-y-auto lg:border-l lg:border-t-0">
             <Label>
-              Pickup charge (Rs.){" "}
-              <HelpHint text="What the courier charges for bringing the old items back. It starts as their normal charge for this weight — change it if they quoted something else." />
+              Return charge (Rs.){" "}
+              <HelpHint
+                text={
+                  returnVia === "delivery"
+                    ? "What the courier charges for bringing the old items back on the delivery. It starts as their normal charge for this weight — change it if they quoted something else."
+                    : "What it costs to send the old items back with that service — type it in. Our courier isn't charged for it; the customer's share is collected with the new order."
+                }
+              />
             </Label>
             <Input
               inputMode="decimal"
@@ -448,7 +661,7 @@ export default function OnlineExchangeModal({
 
             <Label>
               How is it being paid?{" "}
-              <HelpHint text="On delivery: the courier collects it at the door. Bank transfer, card or cash: it's already been received, so nothing is collected at the door. Not confirmed yet? Use Hold as quote — it's kept without recording anything." />
+              <HelpHint text="On delivery: the courier collects it at the door. Bank transfer, card or cash: it's already been received, so nothing is collected at the door. Not confirmed yet? Use Hold as payment request — it's kept without recording anything." />
             </Label>
             <div className="mb-3 grid grid-cols-4 gap-1.5">
               {PAYMENTS.map((p) => (
@@ -470,7 +683,7 @@ export default function OnlineExchangeModal({
               <Row label={`New items${pieces ? ` (${pieces})` : ""}`} value={pieces ? money(newTotal) : "—"} />
               <Row label="Old items' value" value={oldItems.length && pieces ? `− ${money(applied)}` : "—"} />
               <Row label="Delivery" value={weightNum ? (freeDelivery ? "Free" : `+ ${money(deliveryFee)}`) : "—"} />
-              <Row label="Customer's pickup share" value={sharePct === null ? "—" : customerShare > 0 ? `+ ${money(customerShare)}` : "—"} />
+              <Row label="Customer's share of the return charge" value={sharePct === null ? "—" : customerShare > 0 ? `+ ${money(customerShare)}` : "—"} />
               <div className="my-1.5 border-t border-gray-200" />
               {prepaid && <Row label={`Paid now (${PAYMENTS.find((p) => p.key === payment)?.label.toLowerCase()})`} value={oldItems.length && pieces ? money(dueNow) : "—"} strong />}
               <Row label="Collected at the door" value={oldItems.length && pieces ? money(toPayAtDoor) : "—"} strong={!prepaid} muted={prepaid} />
@@ -485,7 +698,7 @@ export default function OnlineExchangeModal({
                   value={leftover > 0 ? money(leftover) : "—"}
                   muted={leftover <= 0}
                 />
-                <Row label="Pickup charge we carry" value={sharePct === null ? "—" : weCarry > 0 ? money(weCarry) : "—"} muted />
+                <Row label="Return charge we carry" value={sharePct === null ? "—" : weCarry > 0 ? money(weCarry) : "—"} muted />
               </div>
             </div>
           </div>

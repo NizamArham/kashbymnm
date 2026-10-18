@@ -177,22 +177,12 @@ function paymentBreakdown(sale: Sale) {
 // payable is the total WITH delivery, shown for ordinary orders; a
 // credit order's product total stays on the customer's account, so only
 // the delivery fee is collected on delivery and no combined total applies.
-// "Old item collected on delivery (INV)" / "Old items collected on delivery (INV, INV)" —
-// the small line under an exchange's credit.
-function exchangeCollectNote(exchange: NonNullable<Sale["exchange"]>): string {
-  const invoices = Array.from(new Set(exchange.items.map((i) => i.old_invoice))).join(", ");
-  return `Old item${exchange.items.length === 1 ? "" : "s"} collected on delivery (${invoices})`;
-}
-
+// A bill for an exchange gives the amounts only — what comes off for the old items, not which items or from which invoices
+// (a long exchange would turn the bill into an essay; the details are in the system).
 // The figures of a quoted exchange by delivery, to print under the total: what comes off for the old items, the delivery,
 // the customer's pickup share, and what they pay. Null for everything else.
 function exchangeQuoteView(sale: Sale) {
-  const q = sale.status === "quotation" ? sale.exchange_quote : null;
-  if (!q) return null;
-  const names = q.old_items
-    .map((i) => `${i.title ?? "Item"}${[i.size, i.color].filter(Boolean).length ? ` (${[i.size, i.color].filter(Boolean).join(", ")})` : ""}`)
-    .join(", ");
-  return { ...q, note: `Old item${q.old_items.length === 1 ? "" : "s"} collected on delivery: ${names}` };
+  return sale.status === "quotation" ? sale.exchange_quote ?? null : null;
 }
 
 export function deliveryBreakdown(sale: Sale) {
@@ -345,10 +335,11 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
   // that's genuinely different about the layout rather than just a
   // swapped label below.
   if (isQuotation) {
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(16);
-    doc.setTextColor(20);
-    doc.text("QUOTATION", marginX, y);
+    // A quiet title — regular weight, sentence case — so the heading doesn't shout over the bill's own figures.
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(14);
+    doc.setTextColor(60);
+    doc.text("Payment request", marginX, y);
     y += 8;
   }
 
@@ -374,7 +365,7 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
   // one thing that matters here instead.
   if (isQuotation) {
     if (sale.quotation_valid_until) {
-      kvRow("Valid Until", (x, yy) => doc.text(formatDate(sale.quotation_valid_until!), x, yy));
+      kvRow("Pay By", (x, yy) => doc.text(formatDate(sale.quotation_valid_until!), x, yy));
     }
   } else {
     // An exchange waiting for its old items isn't "unpaid" or "partial": its value is covered by what's on its way back.
@@ -382,7 +373,7 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
     kvRow("Status", (x, yy) => doc.text(exchangeWaiting ? "Exchange pending" : formatStatus(sale.payment_status), x, yy));
     kvRow("Payment", (x, yy) => doc.text(paymentDisplay(sale), x, yy));
   }
-  kvRow("Invoice", (x, yy) => doc.text(sale.invoice, x, yy));
+  kvRow(isQuotation ? "Request" : "Invoice", (x, yy) => doc.text(sale.invoice, x, yy));
   kvRow("Date", (x, yy) => doc.text(formatDate(sale.date), x, yy));
   kvRow("Bill To", (x, yy) => {
     const name = sale.customer_name ?? (sale.deleted_customer_snapshot ? sale.deleted_customer_snapshot : "Walk-in");
@@ -612,13 +603,6 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
     doc.setTextColor(90);
     doc.text("Old items collected", totalsX, y);
     doc.text(`- ${amountOnly(quote.applied_amount)}`, rightX, y, { align: "right" });
-    const noteLines = doc.splitTextToSize(quote.note, 70) as string[];
-    doc.setFontSize(7.5);
-    doc.setTextColor(150);
-    for (const line of noteLines.slice(0, 3)) {
-      y += 4.5;
-      doc.text(line, totalsX, y);
-    }
     y += 6;
     doc.setFontSize(9.5);
     doc.setTextColor(90);
@@ -626,7 +610,7 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
     doc.text(quote.is_free_delivery ? "FREE" : `+ ${amountOnly(quote.delivery_fee)}`, rightX, y, { align: "right" });
     if (quote.pickup_collected > 0) {
       y += 6;
-      doc.text("Pickup charge (your share)", totalsX, y);
+      doc.text("Return charge (your share)", totalsX, y);
       doc.text(`+ ${amountOnly(quote.pickup_collected)}`, rightX, y, { align: "right" });
     }
     y += 3;
@@ -649,10 +633,6 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
       doc.setTextColor(90);
       doc.text("Exchange credit", totalsX, y);
       doc.text(`- ${amountOnly(delivery.exchange.applied_amount)}`, rightX, y, { align: "right" });
-      y += 4.5;
-      doc.setFontSize(7.5);
-      doc.setTextColor(150);
-      doc.text(exchangeCollectNote(delivery.exchange), totalsX, y);
     }
     y += 6;
     doc.setFontSize(9.5);
@@ -661,7 +641,7 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
     doc.text(delivery.free ? "FREE" : `+ ${amountOnly(delivery.fee)}`, rightX, y, { align: "right" });
     if (delivery.exchange && delivery.exchange.pickup_collected > 0) {
       y += 6;
-      doc.text("Pickup charge (your share)", totalsX, y);
+      doc.text("Return charge (your share)", totalsX, y);
       doc.text(`+ ${amountOnly(delivery.exchange.pickup_collected)}`, rightX, y, { align: "right" });
     }
     if (delivery.exchange && delivery.prepaid > 0) {
@@ -739,8 +719,10 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
   // out. "Pay Here" only for an actual credit sale with a real
   // balance still owed — not a COD order (collected by the courier,
   // not bank transfer) and not anything already settled.
-  // A quoted exchange is paid before it goes out, usually by transfer — so it carries the shop's account too.
-  const needsPayHere = (sale.payment_method === "credit" && sale.payment_status !== "paid" && amountOwed > 0) || (!!quote && quote.amount_to_pay > 0);
+  // A payment request is paid before the order goes out, usually by transfer — so it carries the shop's account too.
+  const needsPayHere =
+    (sale.payment_method === "credit" && sale.payment_status !== "paid" && amountOwed > 0) ||
+    (isQuotation && (quote ? quote.amount_to_pay : sale.total) > 0);
   // Needs about 30mm for Total alone, or 42mm with Pay Here — start a
   // fresh page rather than let it run into the footer. A bill with a
   // Balance Due already states its Total and Balance in the totals
@@ -773,6 +755,8 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
       kvRow("Pay", (x, yy) => doc.text("Nothing on delivery", x, yy));
     } else if (quote) {
       kvRow("Pay", (x, yy) => doc.text(`${quote.amount_to_pay.toLocaleString()}LKR`, x, yy));
+    } else if (isQuotation) {
+      kvRow("Pay", (x, yy) => doc.text(`${sale.total.toLocaleString()}LKR`, x, yy));
     } else {
       kvRow("Total", (x, yy) => doc.text(`${sale.total.toLocaleString()}LKR`, x, yy));
     }
@@ -799,7 +783,7 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
   doc.setTextColor(120);
   doc.text(
     isQuotation
-      ? "This is a price quotation, not a tax invoice — confirm with us to proceed to payment."
+      ? "This is a payment request, not a tax invoice — send the payment and we'll get your order ready."
       : `Thank you for shopping with ${businessInfo?.business_name || "M&M Clothing"}!`,
     marginX,
     y
@@ -833,7 +817,7 @@ export async function downloadA4Pdf(sale: Sale) {
   // (or the request fails) rather than leaving the invoice blank.
   const businessInfo = await api.get<BusinessInfo | null>("/business-info").catch(() => null);
   const doc = generateA4Pdf(sale, businessInfo);
-  previewPdf(doc, `${sale.status === "quotation" ? "Quotation" : "Invoice"}${sale.invoice}.pdf`);
+  previewPdf(doc, `${sale.status === "quotation" ? "PaymentRequest" : "Invoice"}${sale.invoice}.pdf`);
 }
 
 // ---------------------------------------------------------------------
@@ -874,7 +858,7 @@ export function generateThermalPdf(sale: Sale): jsPDF {
   y += logoHeight + 3;
   doc.setFont("courier", "normal");
   doc.setFontSize(7.5);
-  doc.text(isQuotation ? "Price Quotation" : "POS Receipt", widthMm / 2, y, { align: "center" });
+  doc.text(isQuotation ? "Payment Request" : "POS Receipt", widthMm / 2, y, { align: "center" });
   y += 6;
 
   doc.setLineDashPattern([0.5, 0.5], 0);
@@ -985,16 +969,11 @@ export function generateThermalPdf(sale: Sale): jsPDF {
       doc.text("Old items collected", marginX, y);
       doc.text(`-${money(quote.applied_amount)}`, widthMm - marginX, y, { align: "right" });
       y += 4;
-      doc.setFontSize(6);
-      const noteLines = doc.splitTextToSize(quote.note, contentWidth) as string[];
-      doc.text(noteLines.slice(0, 3), marginX, y);
-      y += Math.min(noteLines.length, 3) * 3 + 0.5;
-      doc.setFontSize(7);
       doc.text("Delivery charges", marginX, y);
       doc.text(quote.is_free_delivery ? "FREE" : `+${money(quote.delivery_fee)}`, widthMm - marginX, y, { align: "right" });
       y += 4;
       if (quote.pickup_collected > 0) {
-        doc.text("Pickup charge (your share)", marginX, y);
+        doc.text("Return charge (your share)", marginX, y);
         doc.text(`+${money(quote.pickup_collected)}`, widthMm - marginX, y, { align: "right" });
         y += 4;
       }
@@ -1007,7 +986,7 @@ export function generateThermalPdf(sale: Sale): jsPDF {
       y += 6;
     }
     if (sale.quotation_valid_until) {
-      doc.text("Valid until", marginX, y);
+      doc.text("Pay by", marginX, y);
       doc.text(formatDate(sale.quotation_valid_until), widthMm - marginX, y, { align: "right" });
       y += 6;
     }
@@ -1054,16 +1033,12 @@ export function generateThermalPdf(sale: Sale): jsPDF {
         doc.text("Exchange credit", marginX, y);
         doc.text(`-${money(delivery.exchange.applied_amount)}`, widthMm - marginX, y, { align: "right" });
         y += 4;
-        doc.setFontSize(6);
-        doc.text(exchangeCollectNote(delivery.exchange), marginX, y);
-        doc.setFontSize(7);
-        y += 3.5;
       }
       doc.text("Delivery charges", marginX, y);
       doc.text(delivery.free ? "FREE" : `+${money(delivery.fee)}`, widthMm - marginX, y, { align: "right" });
       y += 4;
       if (delivery.exchange && delivery.exchange.pickup_collected > 0) {
-        doc.text("Pickup charge (your share)", marginX, y);
+        doc.text("Return charge (your share)", marginX, y);
         doc.text(`+${money(delivery.exchange.pickup_collected)}`, widthMm - marginX, y, { align: "right" });
         y += 4;
       }
@@ -1117,7 +1092,7 @@ export function generateThermalPdf(sale: Sale): jsPDF {
 
   doc.setFontSize(7);
   if (isQuotation) {
-    doc.text("This is a quotation, not a tax invoice.", widthMm / 2, y, { align: "center" });
+    doc.text("This is a payment request, not a tax invoice.", widthMm / 2, y, { align: "center" });
     y += 4;
     doc.text("Confirm with us to proceed to payment.", widthMm / 2, y, { align: "center" });
   } else {
@@ -1131,7 +1106,7 @@ export function generateThermalPdf(sale: Sale): jsPDF {
 
 export function downloadThermalPdf(sale: Sale) {
   const doc = generateThermalPdf(sale);
-  previewPdf(doc, `${sale.status === "quotation" ? "Quotation" : "Invoice"}${sale.invoice}.pdf`);
+  previewPdf(doc, `${sale.status === "quotation" ? "PaymentRequest" : "Invoice"}${sale.invoice}.pdf`);
 }
 
 // ---------------------------------------------------------------------
@@ -1143,8 +1118,8 @@ export function buildWhatsAppMessage(sale: Sale, businessInfo?: BusinessInfo | n
   const items = groupSaleItemsForDisplay(sale.items ?? [], { wholesale: !!sale.is_wholesale });
   const lines: string[] = [];
 
-  lines.push(`*${businessInfo?.business_name || "M&M Clothing"} — ${isQuotation ? "Price Quotation" : "Receipt"}*`);
-  lines.push(`${isQuotation ? "Quotation" : "Invoice"}: ${sale.invoice}`);
+  lines.push(`*${businessInfo?.business_name || "M&M Clothing"} — ${isQuotation ? "Payment Request" : "Receipt"}*`);
+  lines.push(`${isQuotation ? "Payment request" : "Invoice"}: ${sale.invoice}`);
   lines.push(`Date: ${formatDate(sale.date)}`);
   lines.push(`Order Type: ${orderTypeLabel(sale)}`);
   const service = deliveryService(sale);
@@ -1169,18 +1144,22 @@ export function buildWhatsAppMessage(sale: Sale, businessInfo?: BusinessInfo | n
   if (isQuotation) {
     const quote = exchangeQuoteView(sale);
     if (quote) {
-      lines.push(`Old items collected: -${money(quote.applied_amount)} _(${quote.note.replace(/^Old items? collected on delivery: /, "")})_`);
+      lines.push(`Old items collected: -${money(quote.applied_amount)}`);
       lines.push(quote.is_free_delivery ? "Delivery charges: FREE" : `Delivery charges: +${money(quote.delivery_fee)}`);
-      if (quote.pickup_collected > 0) lines.push(`Pickup charge (your share): +${money(quote.pickup_collected)}`);
+      if (quote.pickup_collected > 0) lines.push(`Return charge (your share): +${money(quote.pickup_collected)}`);
       lines.push(`*Amount to pay: ${money(quote.amount_to_pay)}*`);
       const bank = shopBankDetails(businessInfo);
       if (quote.amount_to_pay > 0 && (bank.accountName || bank.accountNumber)) {
         lines.push(`Pay to: ${[bank.accountName, bank.accountNumber, bank.bankName].filter(Boolean).join(" · ")}`);
       }
     }
-    if (sale.quotation_valid_until) lines.push(`Valid until: ${formatDate(sale.quotation_valid_until)}`);
+    if (!quote && sale.total > 0) {
+      const bank = shopBankDetails(businessInfo);
+      lines.push(`Pay to: ${[bank.accountName, bank.accountNumber, bank.bankName].filter(Boolean).join(" · ")}`);
+    }
+    if (sale.quotation_valid_until) lines.push(`Pay by: ${formatDate(sale.quotation_valid_until)}`);
     lines.push("");
-    lines.push("This is a price quotation, not a tax invoice — reply to confirm and we'll get your order ready for payment.");
+    lines.push("This is a payment request, not a tax invoice — send the payment and reply here, and we'll get your order ready.");
   } else {
     const { storeCredit, cashPaid, amountOwed, showBalance, showPaid, creditSources } = paymentBreakdown(sale);
     if (storeCredit > 0) {
@@ -1195,11 +1174,11 @@ export function buildWhatsAppMessage(sale: Sale, businessInfo?: BusinessInfo | n
     if (showBalance) lines.push(`*Balance due: ${money(amountOwed)}*`);
     if (delivery) {
       if (delivery.exchange) {
-        lines.push(`Exchange credit: -${money(delivery.exchange.applied_amount)} _(${exchangeCollectNote(delivery.exchange).toLowerCase()})_`);
+        lines.push(`Exchange credit: -${money(delivery.exchange.applied_amount)}`);
       }
       lines.push(delivery.free ? "Delivery charges: FREE" : `Delivery charges: +${money(delivery.fee)}`);
       if (delivery.exchange && delivery.exchange.pickup_collected > 0) {
-        lines.push(`Pickup charge (your share): +${money(delivery.exchange.pickup_collected)}`);
+        lines.push(`Return charge (your share): +${money(delivery.exchange.pickup_collected)}`);
       }
       if (delivery.exchange && delivery.prepaid > 0) lines.push(`Paid: -${money(delivery.prepaid)} (${formatPaymentMethod(sale.payment_method)})`);
       if (delivery.note) lines.push(`_${delivery.note}_`);

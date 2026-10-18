@@ -1,9 +1,11 @@
 import { useEffect, useState, useMemo, useRef, Fragment, ReactNode } from "react";
-import { Truck, Package, Send, CheckCircle2, RotateCcw, FileDown, Ban, ExternalLink, ChevronDown, ChevronRight, MoreHorizontal, Download, MessageCircle } from "lucide-react";
+import { PageLoader } from "../components/Loader";
+import { Truck, Package, PackageCheck, Send, CheckCircle2, RotateCcw, FileDown, Ban, ExternalLink, ChevronDown, ChevronRight, MoreHorizontal, Download, MessageCircle } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Delivery, DeliveryStatus, BusinessInfo } from "../lib/types";
 import { PageHeader, Card, Table, Th, Td, Button, EmptyState, ErrorText, DateRangePicker, Badge, RowCard, RowCardStats, RowCardStat, RefLink } from "../components/ui";
 import ExchangeNotice from "../components/ExchangeNotice";
+import ReturnPickupList from "../components/ReturnsOnTheWay";
 import PackWaybillModal from "../components/PackWaybillModal";
 import ChangePartnerModal from "../components/ChangePartnerModal";
 import DeliveryFareModal from "../components/DeliveryFareModal";
@@ -196,7 +198,7 @@ function ExpandedDetail({ d, onReload, onNotDelivered }: { d: Delivery; onReload
   return (
     <div className="relative">
       {d.exchange && (
-        <ExchangeNotice exchange={d.exchange} delivered={d.delivery_status === "delivered"} canAct onChanged={onReload} className="mb-5 lg:mr-10" />
+        <ExchangeNotice exchange={d.exchange} delivered={d.delivery_status === "delivered"} deliveryStatus={d.delivery_status} canAct onChanged={onReload} className="mb-5 lg:mr-10" />
       )}
       {(hasWaybill || d.delivery_status === "delivered") && (
         <div className="absolute top-0 right-0" ref={menuRef}>
@@ -320,6 +322,9 @@ const TABS: { key: DeliveryStatus; label: string; icon: any }[] = [
   { key: "delivered", label: "Delivered", icon: CheckCircle2 },
 ];
 
+// A dispatched parcel the courier couldn't deliver has moved to "on the way back" (Returns on the way) — it isn't on the normal pipeline any more.
+const onThePipeline = (d: Delivery) => !(d.delivery_status === "dispatched" && d.coming_back_at);
+
 export default function DeliveriesPage() {
   // A cashier works the whole pipeline; the steps that change money (marking a parcel returned, or putting one
   // back that would take a payment off an order) ask for an admin's password once, at that step.
@@ -328,6 +333,22 @@ export default function DeliveriesPage() {
   // rows below read from.
   const { partners } = useDeliveryPartners();
   const [activeTab, setActiveTab] = useState<DeliveryStatus>("pending");
+  // Items coming back to the shop (returns by delivery, and the old items of exchanges) — not one of the order statuses, so a pill of their own.
+  const [showPickups, setShowPickups] = useState(false);
+  const [openPickups, setOpenPickups] = useState(0);
+  // Everything on its way back: returns by delivery, the old items of delivered exchanges, and parcels the courier couldn't deliver.
+  const countPickups = () =>
+    Promise.all([
+      api.get<unknown[]>("/return-pickups?status=open"),
+      api.get<{ delivery_status: string | null }[]>("/exchanges?status=open"),
+      api.get<unknown[]>("/deliveries/coming-back"),
+    ])
+      // An exchange's old items are on their way back once its replacement has been delivered.
+      .then(([returns, exchanges, parcels]) => setOpenPickups(returns.length + exchanges.filter((x) => x.delivery_status === "delivered").length + parcels.length))
+      .catch(() => {});
+  useEffect(() => {
+    countPickups();
+  }, []);
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -367,6 +388,7 @@ export default function DeliveriesPage() {
   const filtered = useMemo(() => {
     return deliveries.filter((d) => {
       if (d.delivery_status !== activeTab) return false;
+      if (!onThePipeline(d)) return false;
       if (!startDate || !endDate || !d.sale_date) return true;
       const saleDate = d.sale_date.slice(0, 10);
       return saleDate >= startDate && saleDate <= endDate;
@@ -492,6 +514,23 @@ export default function DeliveriesPage() {
     }
   }
 
+  // The courier couldn't deliver it: it moves to "on the way back" (Returns on the way) until it reaches the shop and is put to Returned.
+  async function markComingBack(id: number) {
+    const isExchangeParcel = deliveries.find((x) => x.id === id)?.exchange?.status === "awaiting_pickup";
+    const message = isExchangeParcel
+      ? "The courier couldn't deliver this exchange parcel? It moves to \"on the way back\" — nothing is cancelled until it reaches you and you put it to Returned."
+      : "The courier couldn't deliver this order? It moves to \"on the way back\" until it reaches you and you put it to Returned.";
+    if (!confirm(message)) return;
+    setActionError(null);
+    try {
+      await api.put(`/deliveries/${id}/coming-back`, {});
+      load();
+      countPickups();
+    } catch (err) {
+      setActionError(err instanceof ApiRequestError ? err.message : "Couldn't mark it as on its way back");
+    }
+  }
+
   async function markReturned(id: number) {
     const isExchangeParcel = deliveries.find((x) => x.id === id)?.exchange?.status === "awaiting_pickup";
     const message = isExchangeParcel
@@ -586,8 +625,8 @@ export default function DeliveriesPage() {
           <Button size="sm" variant="primary" onClick={() => markDelivered(d.id)}>
             Mark delivered
           </Button>
-          <Button size="sm" variant="danger" onClick={() => markReturned(d.id)}>
-            Returned
+          <Button size="sm" variant="danger" onClick={() => markComingBack(d.id)} title="The courier couldn't deliver it — it's on its way back to you">
+            Couldn't deliver
           </Button>
         </div>
       );
@@ -628,12 +667,13 @@ export default function DeliveriesPage() {
       <div className="flex items-center gap-2 mb-5 flex-wrap">
         {TABS.map((tab) => {
           const Icon = tab.icon;
-          const count = deliveries.filter((d) => d.delivery_status === tab.key).length;
-          const isActive = activeTab === tab.key;
+          const count = deliveries.filter((d) => d.delivery_status === tab.key && onThePipeline(d)).length;
+          const isActive = !showPickups && activeTab === tab.key;
           return (
             <button
               key={tab.key}
               onClick={() => {
+                setShowPickups(false);
                 setActiveTab(tab.key);
                 setExpandedId(null);
               }}
@@ -650,11 +690,12 @@ export default function DeliveriesPage() {
         <div className="w-px h-6 bg-gray-200 mx-1" />
         <button
           onClick={() => {
+            setShowPickups(false);
             setActiveTab("returned");
             setExpandedId(null);
           }}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition ${
-            activeTab === "returned" ? "bg-red-600 text-white" : "bg-red-50 text-red-600 hover:bg-red-100"
+            !showPickups && activeTab === "returned" ? "bg-red-600 text-white" : "bg-red-50 text-red-600 hover:bg-red-100"
           }`}
         >
           <RotateCcw size={14} />
@@ -663,16 +704,32 @@ export default function DeliveriesPage() {
         </button>
         <button
           onClick={() => {
+            setShowPickups(false);
             setActiveTab("cancelled");
             setExpandedId(null);
           }}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition ${
-            activeTab === "cancelled" ? "bg-gray-700 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+            !showPickups && activeTab === "cancelled" ? "bg-gray-700 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
           }`}
         >
           <Ban size={14} />
           Cancelled
-          <span className={`text-xs px-1.5 py-0.5 rounded-full ${activeTab === "cancelled" ? "bg-white/20" : "bg-white"}`}>{cancelledCount}</span>
+          <span className={`text-xs px-1.5 py-0.5 rounded-full ${!showPickups && activeTab === "cancelled" ? "bg-white/20" : "bg-white"}`}>{cancelledCount}</span>
+        </button>
+        <div className="w-px h-6 bg-gray-200 mx-1" />
+        <button
+          onClick={() => {
+            setShowPickups(true);
+            setExpandedId(null);
+          }}
+          title="Items coming back to the shop — customers' returns and the old items of exchanges"
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition ${
+            showPickups ? "bg-black text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+          }`}
+        >
+          <PackageCheck size={14} />
+          Returns on the way
+          <span className={`text-xs px-1.5 py-0.5 rounded-full ${showPickups ? "bg-white/20" : "bg-white text-gray-500"}`}>{openPickups}</span>
         </button>
       </div>
 
@@ -680,8 +737,10 @@ export default function DeliveriesPage() {
       {actionError && <ErrorText>{actionError}</ErrorText>}
       {syncMessage && <p className="text-xs text-gray-500 mb-3">{syncMessage}</p>}
 
-      {loading ? (
-        <p className="text-sm text-gray-400">Loading...</p>
+      {showPickups ? (
+        <ReturnPickupList status="open" onChanged={countPickups} />
+      ) : loading ? (
+        <PageLoader />
       ) : filtered.length === 0 ? (
         <EmptyState icon={Truck} title={`No ${activeTab} orders in this date range`} />
       ) : (

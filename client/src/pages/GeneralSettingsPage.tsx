@@ -1,11 +1,13 @@
 import { useState, useEffect } from "react";
+import { PageLoader } from "../components/Loader";
 import { Building2, MapPin, Phone, Mail, Globe, Landmark, Pencil, Keyboard, DatabaseBackup, Download, Send } from "lucide-react";
 import { api, ApiRequestError, downloadFile } from "../lib/api";
 import { BusinessInfo } from "../lib/types";
 import { NAV_SHORTCUTS } from "../lib/navShortcuts";
 import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, TabToggle } from "../components/ui";
+import ReturnSplitSettings from "../components/ReturnSplitSettings";
 
-type SettingsTab = "business" | "reference" | "backup";
+type SettingsTab = "business" | "returns" | "reference" | "backup";
 
 interface ShortcutEntry {
   keys: string;
@@ -187,6 +189,7 @@ export default function GeneralSettingsPage() {
             onChange={setTab}
             options={[
               { value: "business", label: "Business Info" },
+              { value: "returns", label: "Returns" },
               { value: "reference", label: "Reference" },
               { value: "backup", label: "Backup" },
             ]}
@@ -197,7 +200,7 @@ export default function GeneralSettingsPage() {
       {tab === "business" ? (
         <>
       {loading ? (
-        <p className="text-sm text-gray-400">Loading...</p>
+        <PageLoader />
       ) : !isEditing ? (
         <Card className="max-w-2xl">
           <div className="flex items-start justify-between">
@@ -334,6 +337,8 @@ export default function GeneralSettingsPage() {
         </Card>
       )}
         </>
+      ) : tab === "returns" ? (
+        <ReturnSplitSettings />
       ) : tab === "reference" ? (
       <>
       <Card className="max-w-2xl">

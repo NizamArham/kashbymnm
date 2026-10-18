@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { PageLoader } from "../components/Loader";
 import { useNavigate } from "react-router-dom";
 import { FileText, Printer, ShoppingCart, XCircle, MessageCircle, Receipt } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
@@ -31,7 +32,7 @@ export default function QuotationsPage() {
     api
       .get<Sale[]>("/sales?status=quotation")
       .then(setQuotations)
-      .catch((err) => setError(err instanceof ApiRequestError ? err.message : "Failed to load quotations"))
+      .catch((err) => setError(err instanceof ApiRequestError ? err.message : "Failed to load payment requests"))
       .finally(() => setLoading(false));
   }
 
@@ -43,7 +44,7 @@ export default function QuotationsPage() {
       navigate(`/sales/${sale.id}`);
       return;
     }
-    if (hasDraftInProgress() && !confirm("POS has a sale in progress. Replace it with this quotation?")) return;
+    if (hasDraftInProgress() && !confirm("POS has a sale in progress. Replace it with this payment request?")) return;
     navigate(`/pos?quotation=${sale.id}`);
   }
 
@@ -58,8 +59,8 @@ export default function QuotationsPage() {
       {
         key: "a4",
         icon: <FileText size={16} className="text-gray-700" />,
-        title: "A4 Quotation (PDF)",
-        subtitle: "Full-page printable quote",
+        title: "A4 Payment request (PDF)",
+        subtitle: "Full-page printable payment request",
         onClick: () => downloadA4Pdf(sale),
       },
       {
@@ -88,13 +89,13 @@ export default function QuotationsPage() {
   }
 
   async function handleCancel(sale: Sale) {
-    if (!confirm(`Cancel quotation ${sale.invoice}? This can't be undone.`)) return;
+    if (!confirm(`Cancel payment request ${sale.invoice}? This can't be undone.`)) return;
     setCancellingId(sale.id);
     try {
       await api.delete(`/sales/${sale.id}/quotation`);
       setQuotations((prev) => prev.filter((q) => q.id !== sale.id));
     } catch (err) {
-      setError(err instanceof ApiRequestError ? err.message : "Failed to cancel this quotation");
+      setError(err instanceof ApiRequestError ? err.message : "Failed to cancel this payment request");
     } finally {
       setCancellingId(null);
     }
@@ -104,6 +105,9 @@ export default function QuotationsPage() {
     return (
       <span className="inline-flex items-center gap-1">
         {sale.exchange_draft && <Badge label="exchange" tone="neutral" />}
+        {sale.exchange_draft && sale.approval_status === "pending" && <Badge label="needs approval" tone="warning" />}
+        {sale.exchange_draft && sale.approval_status === "declined" && <Badge label="declined" tone="danger" />}
+        {sale.hold_until && <Badge label="pieces held" tone="success" />}
         {isExpired(sale) ? <Badge label="expired" tone="warning" /> : <Badge label="open" tone="neutral" />}
       </span>
     );
@@ -111,20 +115,20 @@ export default function QuotationsPage() {
 
   return (
     <div>
-      <PageHeader title="Quotations" subtitle="Price-confirmation bills saved from POS — nothing here has been charged yet." />
+      <PageHeader title="Payment requests" subtitle="Bills waiting to be paid — saved from POS or an exchange. Nothing here has been charged yet." />
 
       {error && <ErrorText>{error}</ErrorText>}
 
       {!loading && (
         <p className="text-xs text-gray-400 mb-3">
-          {quotations.length} quotation{quotations.length !== 1 ? "s" : ""}
+          {quotations.length} payment request{quotations.length !== 1 ? "s" : ""}
         </p>
       )}
 
       {loading ? (
-        <p className="text-sm text-gray-400">Loading...</p>
+        <PageLoader />
       ) : quotations.length === 0 ? (
-        <EmptyState icon={FileText} title="No quotations saved yet" subtitle={'Save a cart as a quotation from the POS page using the "Quotation" button.'} />
+        <EmptyState icon={FileText} title="No payment requests saved yet" subtitle={'Save a cart as a payment request from the POS page using the "Payment request" button.'} />
       ) : (
         <>
           {/* Desktop / tablet-landscape */}
@@ -132,12 +136,12 @@ export default function QuotationsPage() {
             <Table>
               <thead>
                 <tr>
-                  <Th>Quote #</Th>
+                  <Th>Request #</Th>
                   <Th>Date</Th>
                   <Th>Customer</Th>
                   <Th>Type</Th>
                   <Th>Total</Th>
-                  <Th>Valid until</Th>
+                  <Th>Pay by</Th>
                   <Th>Status</Th>
                   <Th></Th>
                 </tr>
@@ -156,7 +160,7 @@ export default function QuotationsPage() {
                       <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                         <button
                           onClick={() => openReceipt(q)}
-                          title="Get quotation"
+                          title="Get payment request"
                           className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition"
                         >
                           <Printer size={14} />
@@ -171,7 +175,7 @@ export default function QuotationsPage() {
                         <button
                           onClick={() => handleCancel(q)}
                           disabled={cancellingId === q.id}
-                          title="Cancel quotation"
+                          title="Cancel payment request"
                           className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition disabled:opacity-50"
                         >
                           <XCircle size={14} />
@@ -221,7 +225,7 @@ export default function QuotationsPage() {
                 </div>
                 <RowCardStats>
                   <RowCardStat label="Total" value={`Rs. ${q.total.toLocaleString()}`} />
-                  <RowCardStat label="Valid until" value={q.quotation_valid_until ? q.quotation_valid_until.slice(0, 10) : "—"} />
+                  <RowCardStat label="Pay by" value={q.quotation_valid_until ? q.quotation_valid_until.slice(0, 10) : "—"} />
                 </RowCardStats>
               </RowCard>
             ))}
@@ -231,7 +235,7 @@ export default function QuotationsPage() {
 
       {receiptSale && (
         <ReceiptOptionsModal
-          heading="Get quotation"
+          heading="Get payment request"
           subtitle={receiptSale.invoice}
           options={receiptOptionsFor(receiptSale)}
           error={receiptError}

@@ -139,6 +139,8 @@ export interface InventoryUnit {
   removal_reason?: RemovalReason | null;
   removal_note?: string | null;
   created_at: string;
+  // 1 while the piece is being held for a payment request (set on stock lists; ?sellable=1 leaves held pieces out).
+  is_held?: number;
   product_title?: string;
   brand?: string;
   product_selling_price?: number;
@@ -244,10 +246,12 @@ export interface SaleExchange {
   // All the old items' value together, and how much of it comes off the replacement's total.
   credit_amount: number;
   applied_amount: number;
-  // The courier's pickup charge, the share the customer pays (0 / 50 / 100) and what that was.
+  // The charge for bringing the old items back, the share the customer pays (0 / 50 / 100) and what that was.
   pickup_charge: number;
   customer_share_pct: number;
   pickup_collected: number;
+  // Set when the old items come back separately, by another service, instead of with the delivery of the new order.
+  return_service?: string | null;
   status: "awaiting_pickup" | "received" | "not_returned" | "cancelled";
   item_condition: "clean" | "damaged" | null;
   note: string | null;
@@ -263,12 +267,125 @@ export interface ExchangeQuote {
   is_free_delivery: boolean;
   pickup_charge: number;
   customer_share_pct: number;
-  old_items: { sale_item_id: number; unit_price: number; old_invoice: string; title: string | null; size: string | null; color: string | null }[];
+  return_service?: string | null;
+  old_items: {
+    sale_item_id: number;
+    unit_price: number;
+    old_invoice: string;
+    title: string | null;
+    size: string | null;
+    color: string | null;
+    // 0 = a no-returns (final sale) product
+    allow_returns?: number;
+  }[];
   credit_amount: number;
   applied_amount: number;
   delivery_fee: number;
   pickup_collected: number;
   amount_to_pay: number;
+}
+
+// An exchange as listed with the items on their way back: the exchange itself, plus its replacement order, customer and whether
+// that replacement has been delivered yet.
+export interface ExchangeOnTheWay extends SaleExchange {
+  new_invoice: string;
+  customer_name: string | null;
+  delivery_status: string | null;
+  partner_name: string | null;
+  created_at: string;
+}
+
+// A return by courier: items of a delivered online order the courier is to collect, with the courier's pickup charge and who pays it.
+export interface ReturnPickupItem {
+  id: number;
+  sale_item_id: number;
+  title: string | null;
+  size: string | null;
+  color: string | null;
+  sku: string | null;
+  amount: number;
+  allow_returns: number;
+  status: "awaiting" | "received" | "not_returned" | "cancelled";
+  item_condition: "clean" | "damaged" | null;
+  refund_amount: number | null;
+  deduction: number;
+  // The quick check when the parcel was opened (ok / damaged / missing), and the inspection's verdict on the item.
+  arrival_condition: "ok" | "damaged" | "missing" | null;
+  arrival_at: string | null;
+  verdict: "clean" | "damaged" | "missing_parts" | "not_per_policy" | "not_received" | null;
+}
+
+// Where a courier return is: asked for, approved (the customer may send it), on its way, on hand, report waiting for an admin, refund owed,
+// done. Declined / cancelled end it early.
+export type ReturnStage = "requested" | "approved" | "on_the_way" | "received" | "report_pending" | "refund_due" | "completed" | "declined" | "cancelled";
+
+export interface ReturnPickup {
+  id: number;
+  sale_id: number;
+  invoice: string;
+  customer_id: number | null;
+  customer_name: string | null;
+  delivery_partner: string;
+  // The service that carried it — null until the customer or the shop says which.
+  partner_name: string | null;
+  package_weight_kg: number | null;
+  // What we paid for the return parcel (0 until the parcel is marked received, and often 0 after).
+  pickup_charge: number;
+  customer_share_pct: number;
+  customer_share: number;
+  // How much of the customer's share has been held back from what they were paid so far.
+  share_used: number;
+  resolution: "refund" | "store_credit";
+  reason: string;
+  tracking_number: string | null;
+  status: "awaiting_pickup" | "received" | "not_returned" | "cancelled";
+  // A courier return is a request first: 'pending' until an admin says yes (an admin's own is approved on the spot — auto_approved).
+  approval_status: ApprovalState;
+  auto_approved: number;
+  approved_by_name: string | null;
+  approved_at: string | null;
+  // Why it was declined — or the override reason for a no-returns item that was approved anyway.
+  decision_reason: string | null;
+  stage: ReturnStage;
+  sent_at: string | null;
+  sent_without_tracking: number;
+  received_at: string | null;
+  received_by_name: string | null;
+  // The inspection report: none → pending (waiting for an admin) → approved, or sent_back for another look.
+  report_status: "none" | "pending" | "approved" | "sent_back";
+  report_note: string | null;
+  report_by_name: string | null;
+  report_at: string | null;
+  report_decided_by_name: string | null;
+  report_decision_reason: string | null;
+  report_auto_approved: number;
+  // What the inspection proposed to pay the customer back in total (null = everything the items come to, less the delivery share).
+  report_proposed: number | null;
+  // What is owed to the customer once the report is approved, and how / when it was paid.
+  refund_due: number;
+  refund_method: "cash" | "bank_transfer" | null;
+  refund_account_label: string | null;
+  refunded_at: string | null;
+  refunded_by_name: string | null;
+  created_at: string;
+  closed_at: string | null;
+  requested_by_name: string | null;
+  items: ReturnPickupItem[];
+}
+
+// Where a request stands with the admin. null/absent on a record that needs no approval (or predates approvals) — treat as approved.
+export type ApprovalState = "pending" | "approved" | "declined";
+
+// Everything waiting for an admin's yes, whichever way it came (Returns → To approve).
+export interface ReturnApprovals {
+  in_store: ReturnRequest[];
+  // Courier return requests waiting for a yes, and inspection reports of courier returns that have arrived.
+  courier: ReturnPickup[];
+  courier_reports: ReturnPickup[];
+  exchanges: (Sale & {
+    customer_phone?: string | null;
+    new_items: { unit_price: number; title: string | null; size: string | null; color: string | null }[];
+  })[];
 }
 
 // An exchange that took items out of an invoice — shown on that (old) invoice.
@@ -359,6 +476,14 @@ export interface Sale {
   // On a quotation for an exchange by delivery (set on the quotation's own page / on lists).
   exchange_draft?: string | null;
   exchange_quote?: ExchangeQuote | null;
+  // For a payment request: when the hold on its pieces ends (null/absent when it holds none).
+  hold_until?: string | null;
+  // On a delivery exchange request: waiting for an admin's yes ('pending'), approved (the order can be made), or declined. An admin's own is
+  // auto-approved ("recorded by admin"). null on anything else.
+  approval_status?: ApprovalState | null;
+  auto_approved?: number | null;
+  approved_at?: string | null;
+  decision_reason?: string | null;
   // How this invoice figures in an exchange (set on sales lists and searches):
   // its own items are being / were swapped (out), or it is the replacement order (in).
   exchange_out_status?: "awaiting" | "received" | "not_returned" | null;
@@ -368,6 +493,8 @@ export interface Sale {
   exchange_in_from?: string | null;
   // On one invoice's own page: the exchanges that took items out of it.
   exchanged_out?: SaleExchangeOut[];
+  // The returns by delivery recorded for this invoice's items.
+  return_pickups?: ReturnPickup[];
 }
 
 export interface Coupon {
@@ -427,6 +554,8 @@ export interface ReturnRequest {
   decided_at: string | null;
   decision_reason: string | null;
   is_admin_override: number;
+  // 1 = an admin recorded it themselves, so it was approved on the spot.
+  auto_approved?: number;
   return_id: number | null;
   // Joined fields for display
   sale_id: number;
@@ -459,9 +588,27 @@ export interface DeliveryItem {
   color?: string | null;
 }
 
+// A dispatched parcel the courier couldn't deliver, on its way back to the shop.
+export interface ParcelComingBack {
+  id: number;
+  sale_id: number;
+  invoice: string;
+  customer_name: string | null;
+  partner_name: string | null;
+  waybill_number: string | null;
+  tracking_number: string | null;
+  cod_amount: number;
+  sale_total: number;
+  coming_back_at: string;
+  items: { title: string | null; size: string | null; color: string | null; unit_price: number }[];
+  exchange?: SaleExchange | null;
+}
+
 export interface Delivery {
   id: number;
   sale_id: number;
+  // Set when the courier couldn't deliver this dispatched parcel and it is on its way back.
+  coming_back_at?: string | null;
   address_id: number | null;
   courier_name: string | null;
   tracking_number: string | null;

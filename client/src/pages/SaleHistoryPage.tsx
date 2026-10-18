@@ -705,7 +705,7 @@ export default function SaleHistoryPage() {
             className="w-full flex items-center gap-2 px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition"
           >
             <Repeat size={14} />
-            Exchange by delivery
+            Delivery Exchange
           </button>
         )}
         {sale.invoice.startsWith("OCD") &&

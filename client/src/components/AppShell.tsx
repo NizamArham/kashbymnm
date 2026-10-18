@@ -1,4 +1,5 @@
 import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
+import ExchangeResume from "./ExchangeResume";
 import {
   Home,
   Package,
@@ -33,6 +34,7 @@ import {
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "../context/AuthContext";
+import { api } from "../lib/api";
 import { useNavShortcuts, navShortcutHint } from "../lib/navShortcuts";
 import CashierModeControl from "./CashierModeControl";
 import FullscreenToggle from "./FullscreenToggle";
@@ -63,6 +65,24 @@ export default function AppShell() {
   const inCashierMode = !!user?.cashier_mode;
   useNavShortcuts(isAdmin);
 
+  // How many returns / exchanges are waiting for an admin's yes — a badge on Returns, so they don't sit unseen. Re-read when moving
+  // between pages and whenever the Returns page says it changed something.
+  const [waitingApprovals, setWaitingApprovals] = useState(0);
+  useEffect(() => {
+    if (!isAdmin) {
+      setWaitingApprovals(0);
+      return;
+    }
+    const read = () =>
+      api
+        .get<{ count: number }>("/returns/approvals/count")
+        .then((r) => setWaitingApprovals(r.count))
+        .catch(() => {}); // the badge just stays as it was
+    read();
+    window.addEventListener("mm-approvals-changed", read);
+    return () => window.removeEventListener("mm-approvals-changed", read);
+  }, [isAdmin, location.pathname]);
+
   // Accordion — only one section's sub-items are ever open at a time.
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -88,7 +108,7 @@ export default function AppShell() {
       subItems: [
         { id: "checkout", label: "Checkout", path: "/pos", icon: ShoppingCart },
         { id: "sales-history", label: "Sale History", path: "/sales", icon: History },
-        { id: "quotations", label: "Quotations", path: "/quotations", icon: FileText },
+        { id: "quotations", label: "Payment requests", path: "/quotations", icon: FileText },
         { id: "promotions", label: "Promotions", path: "/promotions", icon: Tag, adminOnly: true },
       ],
     },
@@ -247,6 +267,7 @@ export default function AppShell() {
 
   return (
     <div className="min-h-screen flex bg-gray-50 text-black">
+      <ExchangeResume />
       {sidebarOpen && (
         <div
           onClick={() => setSidebarOpen(false)}
@@ -309,6 +330,14 @@ export default function AppShell() {
                   >
                     <Icon size={16} />
                     <span className="text-xs lg:text-sm">{item.label}</span>
+                    {item.id === "returns" && waitingApprovals > 0 && (
+                      <span
+                        title={`${waitingApprovals} waiting for approval`}
+                        className={`ml-auto rounded-full px-2 py-0.5 text-[11px] font-medium leading-none ${active ? "bg-black text-white" : "bg-white text-black"}`}
+                      >
+                        {waitingApprovals}
+                      </span>
+                    )}
                   </Link>
                 )}
 

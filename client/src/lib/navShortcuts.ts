@@ -24,7 +24,7 @@ export const NAV_SHORTCUTS: NavShortcut[] = [
   { letter: "a", label: "Analytics", path: "/analytics", adminOnly: true },
   { letter: "p", label: "POS · Checkout", path: "/pos" },
   { letter: "h", label: "Sale History", path: "/sales" },
-  { letter: "q", label: "Quotations", path: "/quotations" },
+  { letter: "q", label: "Payment requests", path: "/quotations" },
   { letter: "i", label: "Inventory · Stocks", path: "/inventory", withCtrlCmd: true },
   { letter: "m", label: "Manage Products", path: "/products", adminOnly: true },
   { letter: "n", label: "Add Product", path: "/products/add", adminOnly: true },
