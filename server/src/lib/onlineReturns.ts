@@ -10,6 +10,7 @@ import { db } from "../db/connection";
 //   approved      yes — the customer may send it back. We don't know yet how, or in what state it will arrive
 //   on_the_way    the customer says it is sent (optional step: with which service / tracking number)
 //   received      it is on hand — marked with the service, tracking number and what we paid; waiting for the inspection
+//                 (on_the_way, "the customer says it is sent", is still understood but the screens skip it: it is marked received when it arrives)
 //   report_pending the inspection report (per item: sellable / damaged / can't take back, who pays the delivery) waits for an admin
 //   refund_due    the admin approved the report: stock is back, the refund is owed — paid once the customer's bank details are in
 //   completed     refund paid and in the cash book (or store credit granted); declined / cancelled end it early
@@ -129,6 +130,8 @@ if (!(db.prepare(`PRAGMA table_info(returns)`).all() as { name: string }[]).some
   if (!cols.includes("arrival_condition")) db.exec(`ALTER TABLE online_return_items ADD COLUMN arrival_condition TEXT`);
   if (!cols.includes("arrival_by")) db.exec(`ALTER TABLE online_return_items ADD COLUMN arrival_by INTEGER REFERENCES users(id)`);
   if (!cols.includes("arrival_at")) db.exec(`ALTER TABLE online_return_items ADD COLUMN arrival_at TEXT`);
+  // An optional word on why it was marked bad (or good) — shown to whoever does the inspection.
+  if (!cols.includes("arrival_note")) db.exec(`ALTER TABLE online_return_items ADD COLUMN arrival_note TEXT`);
 }
 
 // A sale item that is on its way back by delivery (or already came) can't also be returned another way — it would be paid twice.

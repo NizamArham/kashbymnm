@@ -42,7 +42,6 @@ export type AuditAction =
   | "return_pickup_booked"
   | "return_pickup_requested"
   | "return_pickup_approved"
-  | "return_pickup_sent"
   | "return_pickup_parcel_received"
   | "return_pickup_item_checked"
   | "return_pickup_reported"

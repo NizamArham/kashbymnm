@@ -182,7 +182,7 @@ exchangesRouter.put(
       sale.id,
       `${sale.invoice}: ${came} old item${came === 1 ? "" : "s"} collected${missing ? `, ${missing} not handed back` : ""}${
         leftoverCredit > 0.009 ? `; Rs. ${Math.round(leftoverCredit).toLocaleString()} left over ${data.leftover?.mode === "refund" ? "refunded" : "kept as store credit"}` : ""
-      }`
+      }${data.note ? ` — ${data.note}` : ""}`
     );
     res.json(exchangeById(exchange.id));
   })

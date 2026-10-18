@@ -218,68 +218,32 @@ returnPickupsRouter.put(
 );
 
 // PUT /api/return-pickups/:id/cancel — it isn't coming back after all (the customer changed their mind, or it never arrived — which is
-// the customer's end). Only before it is on hand; nothing was moved, so nothing is undone and the items can be returned another way.
+// the customer's end), with an optional reason. Only before it is on hand; nothing was moved, so nothing is undone and the items can be
+// returned another way.
 returnPickupsRouter.put(
   "/:id/cancel",
   asyncHandler(async (req, res) => {
+    const data = z.object({ reason: z.string().trim().max(200).optional() }).parse(req.body ?? {});
     const pickup = load(req.params.id);
     needStage(pickup, ["requested", "approved", "on_the_way"], "Cancelling it");
     // Withdrawing a request still waiting for approval is anyone's call; calling off an approved one is an admin's.
     if (pickup.stage !== "requested") approveIfNeeded(req, res, ["cancelling an approved return"], "Cancelling a courier return");
     db.transaction(() => {
       db.prepare(`UPDATE online_return_items SET status = 'cancelled' WHERE pickup_id = ?`).run(pickup.id);
-      db.prepare(`UPDATE online_returns SET status = 'cancelled', stage = 'cancelled', closed_at = ${NOW} WHERE id = ?`).run(pickup.id);
+      db.prepare(`UPDATE online_returns SET status = 'cancelled', stage = 'cancelled', closed_at = ${NOW}, note = COALESCE(?, note) WHERE id = ?`).run(data.reason || null, pickup.id);
     })();
-    logAudit(actorOf(req), "return_pickup_cancelled", "sale", pickup.sale_id, `${pickup.invoice}: courier return cancelled`);
+    logAudit(actorOf(req), "return_pickup_cancelled", "sale", pickup.sale_id, `${pickup.invoice}: courier return cancelled${data.reason ? ` — ${data.reason}` : ""}`);
     res.json(pickupById(pickup.id));
   })
 );
 
-// The tracking rule: a parcel is sent / received with a tracking number — or the person says outright that there isn't one, which is allowed
-// but written down ("Customer shipped without tracking — risk accepted"): until it is received the risk is the customer's.
+// The tracking rule: a parcel is received with a tracking number — or the person says outright that there isn't one, which is allowed but
+// written down ("Customer shipped without tracking — risk accepted"): until it is received the risk is the customer's.
 const NO_TRACKING = "Customer shipped without tracking — risk accepted";
 
-// PUT /api/return-pickups/:id/sent — the customer has sent it: with which service and the tracking number (or the note that there is none).
-// Anyone can note it; a parcel can also be marked received straight from "approved".
-returnPickupsRouter.put(
-  "/:id/sent",
-  asyncHandler(async (req, res) => {
-    const data = z.object({ ...serviceInput, no_tracking_ack: z.boolean().optional() }).parse(req.body ?? {});
-    const pickup = load(req.params.id);
-    needStage(pickup, ["approved", "on_the_way"], "Marking it sent");
-    const service = resolveService(data);
-    const tracking = data.tracking_number || pickup.tracking_number;
-    if (!tracking && !data.no_tracking_ack) {
-      throw new ApiError(400, "Enter the tracking number — or say the customer shipped it without one (the risk is then theirs).");
-    }
-    db.prepare(
-      `UPDATE online_returns
-       SET stage = 'on_the_way', sent_at = COALESCE(sent_at, ${NOW}),
-           delivery_partner = ?, service_name = ?, package_weight_kg = COALESCE(?, package_weight_kg), tracking_number = COALESCE(?, tracking_number),
-           sent_without_tracking = ?
-       WHERE id = ?`
-    ).run(
-      service ? service.code : pickup.delivery_partner,
-      service ? service.name : pickup.service_name,
-      data.package_weight_kg ?? null,
-      data.tracking_number || null,
-      tracking ? 0 : 1,
-      pickup.id
-    );
-    logAudit(
-      actorOf(req),
-      "return_pickup_sent",
-      "sale",
-      pickup.sale_id,
-      `${pickup.invoice}: courier return on its way back${service ? ` with ${service.label}` : ""}${tracking ? ` (tracking ${tracking})` : ` — ${NO_TRACKING}`}`
-    );
-    res.json(pickupById(pickup.id));
-  })
-);
-
 // PUT /api/return-pickups/:id/received — the parcel is on hand: with which service, its tracking number, what we paid for it (if we did —
-// often the customer paid their own way, so 0) and a quick look at each item: ok / damaged / missing from the parcel. Anyone can tick
-// them; Damaged or Missing needs an admin's password. Every tick is recorded with who and when. A charge for one of our couriers is
+// often the customer paid their own way, so 0) and a quick look at each item: good or bad (stored ok / damaged; "missing" is still accepted),
+// with an optional reason. Anyone can tick them; a bad or missing one needs an admin's password. Every tick is recorded with who and when. A charge for one of our couriers is
 // booked against them once; any other service is paid outside the system. Stock and money don't move yet — the parcel still has to be
 // inspected and the report approved.
 returnPickupsRouter.put(
@@ -290,7 +254,9 @@ returnPickupsRouter.put(
         ...serviceInput,
         pickup_charge: z.number().nonnegative().default(0),
         no_tracking_ack: z.boolean().optional(),
-        items: z.array(z.object({ sale_item_id: z.number().int().positive(), condition: z.enum(["ok", "damaged", "missing"]) })).min(1),
+        items: z
+          .array(z.object({ sale_item_id: z.number().int().positive(), condition: z.enum(["ok", "damaged", "missing"]), note: z.string().trim().max(200).optional() }))
+          .min(1),
       })
       .parse(req.body ?? {});
     const pickup = load(req.params.id);
@@ -329,8 +295,9 @@ returnPickupsRouter.put(
          WHERE id = ?`
       ).run(actor.id, code, service ? service.name : pickup.service_name, data.package_weight_kg ?? null, data.tracking_number || null, data.pickup_charge, tracking ? 0 : 1, pickup.id);
       for (const o of data.items) {
-        db.prepare(`UPDATE online_return_items SET arrival_condition = ?, arrival_by = ?, arrival_at = ${NOW} WHERE pickup_id = ? AND sale_item_id = ?`).run(
+        db.prepare(`UPDATE online_return_items SET arrival_condition = ?, arrival_note = ?, arrival_by = ?, arrival_at = ${NOW} WHERE pickup_id = ? AND sale_item_id = ?`).run(
           o.condition,
+          o.note || null,
           actor.id,
           pickup.id,
           o.sale_item_id
@@ -342,7 +309,7 @@ returnPickupsRouter.put(
       }
     })();
     const after = pickupById(pickup.id) as any;
-    const label = { ok: "OK", damaged: "Damaged", missing: "Missing item" } as const;
+    const label = { ok: "Good", damaged: "Bad", missing: "Missing item" } as const;
     logAudit(
       actor,
       "return_pickup_parcel_received",
@@ -355,7 +322,13 @@ returnPickupsRouter.put(
     // One record per tick: who, when, condition.
     for (const o of data.items) {
       const item = waiting.get(o.sale_item_id);
-      logAudit(actor, "return_pickup_item_checked", "sale", pickup.sale_id, `${pickup.invoice}: ${item.title ?? "item"} — ${label[o.condition]}`);
+      logAudit(
+        actor,
+        "return_pickup_item_checked",
+        "sale",
+        pickup.sale_id,
+        `${pickup.invoice}: ${item.title ?? "item"} — ${label[o.condition]}${o.note ? `: ${o.note}` : ""}`
+      );
     }
     res.json(after);
   })
