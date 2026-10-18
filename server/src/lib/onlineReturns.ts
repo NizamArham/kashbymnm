@@ -13,7 +13,8 @@ import { db } from "../db/connection";
 //                 (on_the_way, "the customer says it is sent", is still understood but the screens skip it: it is marked received when it arrives)
 //   report_pending the inspection report (per item: sellable / damaged / can't take back, who pays the delivery) waits for an admin
 //   refund_due    the admin approved the report: stock is back, the refund is owed — paid once the customer's bank details are in
-//   completed     refund paid and in the cash book (or store credit granted); declined / cancelled end it early
+//   completed     refund paid and in the cash book (or store credit granted); declined / cancelled / rejected (the parcel came but the return
+//                 was not accepted — nothing refunded) end it early
 // Nothing about stock or money moves until the admin approves the report (routes/returnPickups.ts): then each item that is taken back
 // is a normal return — stock, loyalty points, the credit — with the customer's share of the delivery charge held back; a cash or
 // bank refund reaches the cash book only when it is marked paid.
@@ -103,7 +104,7 @@ if (!(db.prepare(`PRAGMA table_info(returns)`).all() as { name: string }[]).some
   add("received_at", "TEXT"); // it is on hand
   add("received_by", "INTEGER REFERENCES users(id)");
   // The inspection report: none → pending (waiting for an admin) → approved, or sent_back for another look.
-  add("report_status", "TEXT NOT NULL DEFAULT 'none'");
+  add("report_status", "TEXT NOT NULL DEFAULT 'none'"); // none / pending / approved / sent_back / rejected
   add("report_note", "TEXT");
   add("report_by", "INTEGER REFERENCES users(id)");
   add("report_at", "TEXT");
@@ -206,7 +207,7 @@ export function listPickups(status: "open" | "closed" | "all" | "pending" | "rep
       : status === "report"
       ? "WHERE op.stage = 'report_pending'"
       : status === "closed"
-      ? "WHERE op.stage IN ('completed', 'declined', 'cancelled')"
+      ? "WHERE op.stage IN ('completed', 'declined', 'cancelled', 'rejected')"
       : "WHERE op.stage <> 'requested'";
   return (db.prepare(`${PICKUP_SELECT} ${where} ORDER BY op.id DESC`).all() as any[]).map(withItems);
 }

@@ -539,6 +539,34 @@ returnPickupsRouter.put(
   })
 );
 
+// PUT /api/return-pickups/:id/report/reject — the parcel is on hand and the return is NOT accepted (worn, outside the policy…): an admin's
+// decision (or a cashier with an admin's password), made while the parcel waits for its report or while its report waits for approval.
+// Nothing is refunded and no stock moves — the customer's purchase stands and the parcel is still with the shop, to send back or keep as
+// the policy says. The reason is kept on the record and in the audit log.
+returnPickupsRouter.put(
+  "/:id/report/reject",
+  requireAdminOrApproval("Rejecting a returned parcel"),
+  asyncHandler(async (req, res) => {
+    const data = z.object({ reason: z.string().trim().max(200).optional() }).parse(req.body ?? {});
+    const pickup = load(req.params.id);
+    needStage(pickup, ["received", "report_pending"], "Rejecting it");
+    const actor = actorOf(req);
+    db.transaction(() => {
+      for (const item of pickup.items.filter((i: any) => i.status === "awaiting")) {
+        db.prepare(`UPDATE online_return_items SET status = 'not_returned', verdict = ? WHERE id = ?`).run(item.arrival_condition === "missing" ? "not_received" : "not_per_policy", item.id);
+      }
+      db.prepare(
+        `UPDATE online_returns
+         SET status = 'not_returned', stage = 'rejected', report_status = 'rejected', report_decided_by = ?, report_decided_at = ${NOW},
+             report_decision_reason = ?, refund_due = 0, closed_at = ${NOW}
+         WHERE id = ?`
+      ).run(actor.id, data.reason || null, pickup.id);
+    })();
+    logAudit(actor, "return_pickup_rejected", "sale", pickup.sale_id, `${pickup.invoice}: courier return rejected after inspection — nothing refunded${data.reason ? ` (${data.reason})` : ""}`);
+    res.json(pickupById(pickup.id));
+  })
+);
+
 // PUT /api/return-pickups/:id/refund — the refund has been paid (cash from the till, or a transfer to one of the customer's saved bank
 // accounts): THIS is when it reaches the cash book. The return is then completed.
 returnPickupsRouter.put(
