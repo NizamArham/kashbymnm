@@ -91,33 +91,32 @@ function ChequeSeal({ status, settledAt, chequeNumber, className = "" }: { statu
         {/* … and under the bottom, left to right, so it also reads upright */}
         <path id={`bot-${uid}`} d="M16,80 a64,64 0 0,0 128,0" />
         <filter id={`ink-${uid}`} x="-8%" y="-8%" width="116%" height="116%" colorInterpolationFilters="sRGB">
-          {/* rough, slightly bled edges */}
-          <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="7" result="fine" />
-          <feDisplacementMap in="SourceGraphic" in2="fine" scale="2.4" result="rough" />
-          <feGaussianBlur in="rough" stdDeviation="0.3" result="bled" />
-          {/* uneven pressure: wide soft patches where the ink went on lighter or heavier */}
+          {/* Worn ink without softening the letters: the shapes stay crisp (only a hair of edge roughness, no blur), and the age is in
+              how much ink went on — wide patches where it pressed lighter, and tiny specks where it didn't take. */}
+          <feTurbulence type="fractalNoise" baseFrequency="1.4" numOctaves="2" seed="7" result="fine" />
+          <feDisplacementMap in="SourceGraphic" in2="fine" scale="0.9" result="rough" />
           <feTurbulence type="fractalNoise" baseFrequency="0.03" numOctaves="2" seed="12" result="patch" />
-          <feColorMatrix in="patch" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  -1.6 0 0 0 1.7" result="pressure" />
-          {/* tiny specks where the ink didn't take */}
-          <feColorMatrix in="fine" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  -2.1 0 0 0 2.1" result="specks" />
-          <feComposite in="bled" in2="pressure" operator="in" result="pressed" />
+          <feColorMatrix in="patch" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  -1.5 0 0 0 1.75" result="pressure" />
+          <feTurbulence type="fractalNoise" baseFrequency="0.7" numOctaves="1" seed="3" result="grain" />
+          <feColorMatrix in="grain" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  -4 0 0 0 3.15" result="specks" />
+          <feComposite in="rough" in2="pressure" operator="in" result="pressed" />
           <feComposite in="pressed" in2="specks" operator="in" />
         </filter>
       </defs>
-      <g filter={`url(#ink-${uid})`} opacity="0.85" transform="rotate(-8 80 80)" fill="currentColor" fontFamily={font} fontWeight="800">
+      <g filter={`url(#ink-${uid})`} opacity="0.9" fill="currentColor" fontFamily={font} fontWeight="800" textRendering="geometricPrecision" shapeRendering="geometricPrecision">
         <circle cx="80" cy="80" r="74" fill="none" stroke="currentColor" strokeWidth="5" />
-        <text fontSize="11.5" letterSpacing="1.4">
+        <text fontSize="11.5" letterSpacing="1.4" transform="rotate(-8 80 80)">
           <textPath href={`#top-${uid}`} startOffset="25%" textAnchor="middle">
             {top}
           </textPath>
         </text>
-        <text x="80" y={date ? 84 : 90} textAnchor="middle" fontSize="13.6" letterSpacing="2.2">
+        <text x="80" y={date ? 84 : 90} textAnchor="middle" fontSize="13.6" letterSpacing="2.2" transform="rotate(-8 80 80)">
           {date ?? ""}
         </text>
-        <text x="80" y={date ? 104 : 90} textAnchor="middle" fontSize="13" fontWeight="800" letterSpacing="2.6">
+        <text x="80" y={date ? 104 : 90} textAnchor="middle" fontSize="13" fontWeight="800" letterSpacing="2.6" transform="rotate(-8 80 80)">
           {passed ? "CLEARED" : "BOUNCED"}
         </text>
-        <text fontSize="11.5" letterSpacing="1.4">
+        <text fontSize="11.5" letterSpacing="1.4" transform="rotate(-8 80 80)">
           <textPath href={`#bot-${uid}`} startOffset="50%" textAnchor="middle">
             {bottom}
           </textPath>
