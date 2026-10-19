@@ -1183,6 +1183,10 @@ export function DateRangePicker({
 }) {
   const idleRange = idle && typeof idle === "object" ? idle : null;
   const [open, setOpen] = useState(false);
+  // Where the calendar sits, in pixels from the button's left edge. It normally hangs from the button's right edge and grows
+  // leftwards (right for a button at the right of the page), but a button near the left (Cheques) would push it under the
+  // sidebar, and on a phone it can overflow either side — so it is kept inside the screen when it opens.
+  const [panelOffset, setPanelOffset] = useState<number | null>(null);
   const [viewMonth, setViewMonth] = useState(() => {
     const base = startDate ? new Date(startDate) : new Date();
     return new Date(base.getFullYear(), base.getMonth(), 1);
@@ -1211,6 +1215,21 @@ export function DateRangePicker({
 
   function formatDisplay(iso: string): string {
     return formatDate(iso);
+  }
+
+  function toggleOpen() {
+    if (!open && ref.current) {
+      const r = ref.current.getBoundingClientRect();
+      const sidebar = window.innerWidth >= 1024 ? 256 : 0; // the fixed menu on a wide screen (lg:ml-64)
+      const PANEL = 320;
+      const MARGIN = 8;
+      const minLeft = sidebar + MARGIN;
+      const maxLeft = Math.max(minLeft, window.innerWidth - MARGIN - PANEL);
+      const hangFromRight = r.right - PANEL;
+      const wanted = hangFromRight >= minLeft ? hangFromRight : r.left;
+      setPanelOffset(Math.min(Math.max(wanted, minLeft), maxLeft) - r.left);
+    }
+    setOpen((o) => !o);
   }
 
   function applyPreset(days: number | "month" | "today") {
@@ -1261,7 +1280,7 @@ export function DateRangePicker({
     <div className="relative inline-block" ref={ref}>
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggleOpen}
         className="flex items-center gap-2 px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-sm hover:border-gray-300 transition-all"
       >
         <CalendarDays size={14} className="text-gray-400" />
@@ -1269,7 +1288,7 @@ export function DateRangePicker({
       </button>
 
       {open && (
-        <div className="absolute z-20 mt-1.5 right-0 bg-white border border-gray-200 rounded-xl shadow-lg p-3 w-[320px]">
+        <div style={panelOffset === null ? { right: 0 } : { left: panelOffset }} className="absolute z-20 mt-1.5 bg-white border border-gray-200 rounded-xl shadow-lg p-3 w-[320px]">
           <div className="flex gap-1.5 flex-wrap mb-3 pb-3 border-b border-gray-100">
             <button onClick={() => applyPreset("today")} className="px-2.5 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded-lg transition">
               Today
