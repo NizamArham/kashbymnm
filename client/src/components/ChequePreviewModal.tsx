@@ -71,11 +71,27 @@ function CrossingMark() {
   );
 }
 
-// The bank's verdict, stamped onto the cheque like a small round logo: a thin double ring, a tick (passed) or cross (bounced) in the
-// middle, the one-word verdict curved over the top and the date curved under the bottom. Thin lines and a light weight so it stays quiet;
-// drawn as clean solid vectors with sharp edges (no blur, no filter), in muted dusty blue when it passed and dusty red when it bounced, so
-// it sits in the plain black-and-white cheque, behind the printed text. The only wear is a slightly lighter side, and it sits a few degrees off
-// level the way a hand-pressed stamp does.
+// The bank's verdict, stamped onto the cheque like a small round seal: a fine scalloped edge (the wavy rim of a notary or post-office
+// seal) with a hairline ring inside it, a tick (passed) or cross (bounced) in the middle, the one-word verdict curved over the top and the
+// date curved under the bottom. Thin lines and a light weight so it stays quiet; drawn as clean solid vectors with sharp edges (no blur,
+// no filter), in muted dusty blue when it passed and dusty red when it bounced, so it sits in the plain black-and-white cheque, behind
+// the printed text. The only wear is a slightly lighter side, and it sits a few degrees off level the way a hand-pressed stamp does.
+
+// The wavy rim: 40 shallow bumps round a circle, each one a small arc, in the seal's 160-unit square.
+const SCALLOP = (() => {
+  const n = 40;
+  const r = 71;
+  const half = r * Math.sin(Math.PI / n);
+  const bump = (half * 1.25).toFixed(2);
+  const at = (k: number) => {
+    const a = (k / n) * Math.PI * 2 - Math.PI / 2;
+    return `${(80 + r * Math.cos(a)).toFixed(2)},${(80 + r * Math.sin(a)).toFixed(2)}`;
+  };
+  let d = `M${at(0)}`;
+  for (let k = 1; k <= n; k++) d += ` A${bump},${bump} 0 0,1 ${at(k)}`;
+  return d + "Z";
+})();
+
 function ChequeSeal({ status, settledAt, className = "" }: { status: string; settledAt?: string | null; chequeNumber?: string; className?: string }) {
   const passed = status === "cleared";
   const uid = useId().replace(/:/g, "");
@@ -87,9 +103,9 @@ function ChequeSeal({ status, settledAt, className = "" }: { status: string; set
     <svg viewBox="0 0 160 160" className={`pointer-events-none absolute aspect-square -rotate-[6deg] ${className}`} style={{ color: ink, mixBlendMode: "multiply" }} aria-hidden="true">
       <defs>
         {/* over the top, left to right … */}
-        <path id={`top-${uid}`} d="M26,80 a54,54 0 0,1 108,0" />
+        <path id={`top-${uid}`} d="M31,80 a49,49 0 0,1 98,0" />
         {/* … and under the bottom, left to right, so it also reads upright */}
-        <path id={`bot-${uid}`} d="M17,80 a63,63 0 0,0 126,0" />
+        <path id={`bot-${uid}`} d="M22,80 a58,58 0 0,0 116,0" />
         <linearGradient id={`press-${uid}`} x1="0" y1="0" x2="1" y2="1">
           <stop offset="0" stopColor="#fff" />
           <stop offset="1" stopColor="#c4c4c4" />
@@ -99,30 +115,30 @@ function ChequeSeal({ status, settledAt, className = "" }: { status: string; set
         </mask>
       </defs>
       <g mask={`url(#wear-${uid})`} opacity="0.92" fill="currentColor" stroke="none" textRendering="geometricPrecision" shapeRendering="geometricPrecision">
-        {/* the double ring: a firm outer line and a hairline inside it */}
-        <circle cx="80" cy="80" r="76" fill="none" stroke="currentColor" strokeWidth="1.8" />
-        <circle cx="80" cy="80" r="70" fill="none" stroke="currentColor" strokeWidth="0.8" />
+        {/* the scalloped rim, and a hairline ring just inside it */}
+        <path d={SCALLOP} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+        <circle cx="80" cy="80" r="65" fill="none" stroke="currentColor" strokeWidth="0.8" />
 
         {/* the mark in the middle */}
-        <g fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.6">
-          {passed ? <path d="M60,82 L74,96 L101,63" /> : <path d="M62,62 L98,98 M98,62 L62,98" />}
+        <g fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.4">
+          {passed ? <path d="M62,82 L74,94 L98,65" /> : <path d="M64,64 L96,96 M96,64 L64,96" />}
         </g>
 
-        <text fontFamily={sans} fontSize="13" fontWeight="600" letterSpacing="4">
+        <text fontFamily={sans} fontSize="12.5" fontWeight="600" letterSpacing="3.6">
           <textPath href={`#top-${uid}`} startOffset="50%" textAnchor="middle">
             {passed ? "CLEARED" : "BOUNCED"}
           </textPath>
         </text>
         {date && (
-          <text fontFamily={mono} fontSize="9.4" fontWeight="600" letterSpacing="2">
+          <text fontFamily={mono} fontSize="9" fontWeight="600" letterSpacing="2">
             <textPath href={`#bot-${uid}`} startOffset="50%" textAnchor="middle">
               {date}
             </textPath>
           </text>
         )}
         {/* a dot each side, where the two curved lines meet */}
-        <circle cx="21.5" cy="80" r="1.7" />
-        <circle cx="138.5" cy="80" r="1.7" />
+        <circle cx="26.5" cy="80" r="1.6" />
+        <circle cx="133.5" cy="80" r="1.6" />
       </g>
     </svg>
   );
