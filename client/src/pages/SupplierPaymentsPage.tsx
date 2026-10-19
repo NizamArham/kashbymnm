@@ -201,19 +201,18 @@ export default function SupplierPaymentsPage() {
     load();
   }, []);
 
-  // Arriving back from the full Payment History page (via its Back
-  // button) re-expands the same supplier's row, so it genuinely feels
-  // like returning to where you were.
+  // Coming from "Record payment" on a supplier's profile page: open the payment dialog with that supplier already chosen.
   useEffect(() => {
-    const state = location.state as { expandSupplierId?: number } | null;
-    if (!state?.expandSupplierId || balances.length === 0) return;
-    const target = balances.find((b) => b.id === state.expandSupplierId);
-    if (target) {
-      toggleSupplierExpand(target.id);
-      navigate(location.pathname, { replace: true, state: {} });
+    const state = location.state as { paySupplierId?: number } | null;
+    if (!state?.paySupplierId || suppliers.length === 0) return;
+    if (suppliers.some((s) => s.id === state.paySupplierId)) {
+      setSupplierId(String(state.paySupplierId));
+      setShowRecord(true);
+      setPaymentStep(1);
     }
+    navigate(location.pathname, { replace: true, state: {} });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [balances]);
+  }, [suppliers]);
 
   // Two-tier ordering, most actionable first:
   //   1. Owing  — you still owe this supplier money (balance_owed > 0)
@@ -858,11 +857,7 @@ export default function SupplierPaymentsPage() {
                                     <h3 className="text-sm font-semibold text-gray-900">Recent activity</h3>
                                     {ledgerEntries.length > 0 && (
                                       <button
-                                        onClick={() =>
-                                          navigate(`/suppliers/${b.id}/payment-history`, {
-                                            state: { from: "supplier-payments", supplierId: b.id },
-                                          })
-                                        }
+                                        onClick={() => navigate(`/suppliers/${b.id}?tab=payments`)}
                                         className="text-xs text-gray-500 hover:text-gray-800 underline"
                                       >
                                         View all ({ledgerEntries.length})

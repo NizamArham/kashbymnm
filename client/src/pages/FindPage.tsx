@@ -350,7 +350,7 @@ function buildViewFor(result: FindResult): ResultView {
           ["Phone", d.phone ? <>{d.phone}<CopyButton text={d.phone} /></> : "—"],
           ["City", d.city ?? "—"],
         ],
-        actions: [{ label: "Payment history", to: `/suppliers/${d.id}/payment-history`, primary: true }],
+        actions: [{ label: "View supplier", to: `/suppliers/${d.id}`, primary: true }, { label: "Payment history", to: `/suppliers/${d.id}?tab=payments` }],
       };
     }
     case "purchase": {

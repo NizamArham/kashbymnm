@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { PageLoader } from "../components/Loader";
-import { useParams, useNavigate, useLocation } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Receipt, Download, CreditCard } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Supplier, BusinessInfo, ChequeInfo } from "../lib/types";
@@ -41,28 +41,12 @@ function ninetyDaysAgoISO(): string {
   return toISODate(d);
 }
 
-export default function SupplierPaymentHistoryPage() {
-  const { id } = useParams<{ id: string }>();
+// `supplierId` set = shown as a tab on the supplier's profile page: no Back button and no page title of its own.
+export default function SupplierPaymentHistoryPage({ supplierId }: { supplierId?: number } = {}) {
+  const params = useParams<{ id: string }>();
+  const id = supplierId !== undefined ? String(supplierId) : params.id;
+  const embedded = supplierId !== undefined;
   const navigate = useNavigate();
-  const location = useLocation();
-
-  // Which page actually linked here, passed explicitly as navigation
-  // state rather than inferred from browser history — history alone is
-  // unreliable (a refresh, a new tab, or a shared link all break it),
-  // but the calling page always knows exactly where it sent the person
-  // from. Falls back to plain browser-back if this page was reached
-  // some other way (e.g. a bookmarked URL) and there's no state to read.
-  const origin = (location.state as { from?: "suppliers" | "supplier-payments"; supplierId?: number } | null) ?? null;
-
-  function goBack() {
-    if (origin?.from === "suppliers") {
-      navigate("/suppliers", { state: { expandSupplierId: origin.supplierId } });
-    } else if (origin?.from === "supplier-payments") {
-      navigate("/supplier-payments", { state: { expandSupplierId: origin.supplierId } });
-    } else {
-      navigate(-1);
-    }
-  }
 
   const [supplier, setSupplier] = useState<Supplier | null>(null);
   // The FULL, unfiltered history — always fetched in full and never
@@ -175,61 +159,73 @@ export default function SupplierPaymentHistoryPage() {
 
   useKeyboardShortcut("d", downloadPdf, { ctrlOrCmd: true, shift: true, enabled: !!supplier && filteredEntries.length > 0 });
 
+  const downloadButton = (
+    <Button
+      variant="primary"
+      onClick={downloadPdf}
+      disabled={!supplier || filteredEntries.length === 0}
+      className="inline-flex items-center gap-1.5"
+      title="Download PDF (Ctrl/Cmd+Shift+D)"
+    >
+      <Download size={14} />
+      Download PDF
+    </Button>
+  );
+
+  const dateRangeRow = (
+    <div className="flex items-center gap-3 flex-wrap">
+      <p className="text-xs text-gray-500">Date range</p>
+      <DateRangePicker startDate={startDate} endDate={endDate} onChange={(s, e) => { setStartDate(s); setEndDate(e); }} />
+      <button
+        onClick={() => {
+          setStartDate(ninetyDaysAgoISO());
+          setEndDate(toISODate(new Date()));
+        }}
+        className="text-xs text-gray-400 hover:text-gray-700 underline"
+      >
+        Reset to last 90 days
+      </button>
+      <button
+        onClick={() => {
+          setStartDate(null);
+          setEndDate(null);
+        }}
+        className="text-xs text-gray-400 hover:text-gray-700 underline"
+      >
+        Show everything
+      </button>
+    </div>
+  );
+
   return (
     <div>
-      <button
-        onClick={goBack}
-        className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 mb-3"
-      >
-        <ArrowLeft size={14} />
-        Back
-      </button>
+      {!embedded && (
+        <button onClick={() => navigate(-1)} className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 mb-3">
+          <ArrowLeft size={14} />
+          Back
+        </button>
+      )}
 
-      <PageHeader
-        title={supplier ? `${supplier.name}'s payment history` : "Payment history"}
-        subtitle={
-          supplier
-            ? `${filteredEntries.length} of ${allEntries.length} record${allEntries.length === 1 ? "" : "s"} shown · Rs. ${finalBalance.toLocaleString()} currently owed`
-            : undefined
-        }
-        action={
-          <Button
-            variant="primary"
-            onClick={downloadPdf}
-            disabled={!supplier || filteredEntries.length === 0}
-            className="inline-flex items-center gap-1.5"
-            title="Download PDF (Ctrl/Cmd+Shift+D)"
-          >
-            <Download size={14} />
-            Download PDF
-          </Button>
-        }
-      />
-
-      <Card className="mb-4">
-        <div className="flex items-center gap-3 flex-wrap">
-          <p className="text-xs text-gray-500">Date range</p>
-          <DateRangePicker startDate={startDate} endDate={endDate} onChange={(s, e) => { setStartDate(s); setEndDate(e); }} />
-          <button
-            onClick={() => {
-              setStartDate(ninetyDaysAgoISO());
-              setEndDate(toISODate(new Date()));
-            }}
-            className="text-xs text-gray-400 hover:text-gray-700 underline"
-          >
-            Reset to last 90 days
-          </button>
-          <button
-            onClick={() => {
-              setStartDate(null);
-              setEndDate(null);
-            }}
-            className="text-xs text-gray-400 hover:text-gray-700 underline"
-          >
-            Show everything
-          </button>
+      {embedded ? (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm text-gray-500">
+            {supplier ? `${filteredEntries.length} of ${allEntries.length} record${allEntries.length === 1 ? "" : "s"} shown` : ""}
+          </p>
+          {downloadButton}
         </div>
-      </Card>
+      ) : (
+        <PageHeader
+          title={supplier ? `${supplier.name}'s payment history` : "Payment history"}
+          subtitle={
+            supplier
+              ? `${filteredEntries.length} of ${allEntries.length} record${allEntries.length === 1 ? "" : "s"} shown · Rs. ${finalBalance.toLocaleString()} currently owed`
+              : undefined
+          }
+          action={downloadButton}
+        />
+      )}
+
+      {embedded ? <div className="mb-3">{dateRangeRow}</div> : <Card className="mb-4">{dateRangeRow}</Card>}
 
       {error && <ErrorText>{error}</ErrorText>}
 

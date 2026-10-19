@@ -78,17 +78,21 @@ function normalizeColor(color: string | undefined): string | null {
 
 
 // GET /api/purchases
+// Optionally just one supplier's purchases: GET /api/purchases?supplier_id=3
 purchasesRouter.get(
   "/",
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
+    const supplierId = Number(req.query.supplier_id);
+    const bySupplier = Number.isInteger(supplierId) && supplierId > 0;
     const rows = db
       .prepare(
         `SELECT purchases.*, suppliers.name as supplier_name, suppliers.supplier_code
          FROM purchases
          JOIN suppliers ON suppliers.id = purchases.supplier_id
+         ${bySupplier ? "WHERE purchases.supplier_id = ?" : ""}
          ORDER BY purchases.id DESC`
       )
-      .all();
+      .all(...(bySupplier ? [supplierId] : []));
     res.json(rows);
   })
 );

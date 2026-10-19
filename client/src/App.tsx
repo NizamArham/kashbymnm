@@ -11,7 +11,7 @@ import AddProductPage from "./pages/AddProductPage";
 import ManageProductsPage from "./pages/ManageProductsPage";
 import AddCustomerPage from "./pages/AddCustomerPage";
 import WaybillGeneratorPage from "./pages/WaybillGeneratorPage";
-import SupplierPaymentHistoryPage from "./pages/SupplierPaymentHistoryPage";
+import SupplierProfilePage from "./pages/SupplierProfilePage";
 import ViewCustomersPage from "./pages/ViewCustomersPage";
 import CustomerProfilePage from "./pages/CustomerProfilePage";
 import PosPage from "./pages/PosPage";
@@ -54,6 +54,12 @@ function RoleAwareHome() {
 function ToCustomerTab({ tab }: { tab: string }) {
   const { id } = useParams();
   return <Navigate to={`/customers/${id}${tab === "orders" ? "" : `?tab=${tab}`}`} replace />;
+}
+
+// The supplier's payment history is a tab on their page now; the old address leads there.
+function ToSupplierPayments() {
+  const { id } = useParams();
+  return <Navigate to={`/suppliers/${id}?tab=payments`} replace />;
 }
 
 export default function App() {
@@ -133,7 +139,15 @@ export default function App() {
           path="/suppliers/:id/payment-history"
           element={
             <ProtectedRoute adminOnly>
-              <SupplierPaymentHistoryPage />
+              <ToSupplierPayments />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/suppliers/:id"
+          element={
+            <ProtectedRoute adminOnly>
+              <SupplierProfilePage />
             </ProtectedRoute>
           }
         />

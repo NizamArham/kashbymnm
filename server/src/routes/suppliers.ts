@@ -80,7 +80,24 @@ suppliersRouter.get(
       .prepare(`SELECT * FROM supplier_bank_accounts WHERE supplier_id = ? ORDER BY is_default DESC, id ASC`)
       .all(req.params.id);
 
-    res.json({ ...row, bank_accounts: bankAccounts });
+    // The figures at the top of the supplier's profile page: how much has been bought from them and when, when they were last paid,
+    // how many deliveries are still waiting to be sorted, how many products they supply, and the cheques already written to them that
+    // haven't cleared yet (the payment is on record, but the money hasn't actually left the bank).
+    const stats = db
+      .prepare(
+        `SELECT
+           (SELECT COUNT(*) FROM purchases WHERE supplier_id = @id) AS purchase_count,
+           COALESCE((SELECT SUM(total_cost) FROM purchases WHERE supplier_id = @id), 0) AS total_purchased,
+           (SELECT MAX(purchase_date) FROM purchases WHERE supplier_id = @id) AS last_purchase_date,
+           (SELECT MAX(payment_date) FROM supplier_payments WHERE supplier_id = @id) AS last_payment_date,
+           (SELECT COUNT(*) FROM purchases WHERE supplier_id = @id AND fulfillment_status = 'pending') AS pending_sort_count,
+           (SELECT COUNT(*) FROM products WHERE supplier_id = @id) AS product_count,
+           (SELECT COUNT(*) FROM cheques_issued WHERE supplier_id = @id AND status = 'pending') AS pending_cheque_count,
+           COALESCE((SELECT SUM(amount) FROM cheques_issued WHERE supplier_id = @id AND status = 'pending'), 0) AS pending_cheque_total`
+      )
+      .get({ id: Number(req.params.id) }) as Record<string, unknown>;
+
+    res.json({ ...row, ...stats, bank_accounts: bankAccounts });
   })
 );
 

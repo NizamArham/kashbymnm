@@ -81,6 +81,16 @@ export interface Supplier {
   balance_owed: number;
   credit_balance: number;
   bank_accounts?: BankAccount[];
+  // Only on the single-supplier fetch (the profile page's figures).
+  purchase_count?: number;
+  total_purchased?: number;
+  last_purchase_date?: string | null;
+  last_payment_date?: string | null;
+  pending_sort_count?: number;
+  product_count?: number;
+  // Cheques written to them that haven't cleared yet.
+  pending_cheque_count?: number;
+  pending_cheque_total?: number;
 }
 
 export interface Product {
