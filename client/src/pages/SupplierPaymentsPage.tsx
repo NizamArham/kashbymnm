@@ -840,7 +840,7 @@ export default function SupplierPaymentsPage() {
                                   <h2 className="text-base font-semibold text-gray-900">{b.name}</h2>
                                   <p className="text-xs text-gray-400">{b.supplier_code}</p>
                                 </div>
-                                <button onClick={() => setExpandedSupplierId(null)} className="text-gray-400 hover:text-gray-600">
+                                <button onClick={() => setExpandedSupplierId(null)} aria-label="Close" title="Close" className="text-gray-400 hover:text-gray-600">
                                   <X size={18} />
                                 </button>
                               </div>

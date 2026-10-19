@@ -402,7 +402,7 @@ export default function SuppliersPage() {
                                   <h2 className="text-base font-semibold text-gray-900">{expandedDetail.name}</h2>
                                   <p className="text-xs text-gray-400">{expandedDetail.supplier_code}</p>
                                 </div>
-                                <button onClick={() => setExpandedId(null)} className="text-gray-400 hover:text-gray-600">
+                                <button onClick={() => setExpandedId(null)} aria-label="Close" title="Close" className="text-gray-400 hover:text-gray-600">
                                   <X size={18} />
                                 </button>
                               </div>

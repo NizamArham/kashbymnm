@@ -1770,12 +1770,16 @@ export default function PosPage() {
                             />
                             <button
                               onClick={() => saveEditPrice(lineKey)}
+                              aria-label="Save price"
+                              title="Save price"
                               className="flex items-center justify-center w-7 h-7 bg-black hover:bg-gray-800 text-white rounded-lg transition flex-shrink-0"
                             >
                               <CheckCircle size={14} />
                             </button>
                             <button
                               onClick={cancelEditPrice}
+                              aria-label="Cancel price change"
+                              title="Cancel price change"
                               className="flex items-center justify-center w-7 h-7 border border-gray-300 hover:bg-gray-100 text-gray-600 rounded-lg transition flex-shrink-0"
                             >
                               <X size={14} />
@@ -2211,7 +2215,7 @@ export default function PosPage() {
             <div className="p-3.5 border-b border-gray-200 bg-gray-50 rounded-t-2xl flex-shrink-0">
               <div className="flex items-center justify-between">
                 <h3 className="font-semibold text-gray-900 text-sm">Product catalog</h3>
-                <button onClick={toggleBrowser} className="text-gray-400 hover:text-gray-600">
+                <button onClick={toggleBrowser} aria-label="Hide product catalog" title="Hide product catalog" className="text-gray-400 hover:text-gray-600">
                   <X size={16} />
                 </button>
               </div>
@@ -2275,7 +2279,7 @@ export default function PosPage() {
           <div className="p-3.5 border-b border-gray-200 bg-gray-50 flex-shrink-0">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold text-gray-900 text-sm">Product catalog</h3>
-              <button onClick={toggleBrowser} className="text-gray-400 hover:text-gray-600 p-1">
+              <button onClick={toggleBrowser} aria-label="Hide product catalog" title="Hide product catalog" className="text-gray-400 hover:text-gray-600 p-1">
                 <X size={20} />
               </button>
             </div>

@@ -680,7 +680,7 @@ export default function AddProductPage() {
                       {colors.map((c) => (
                         <span key={c} className="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 border border-gray-200 rounded-full text-xs">
                           {c}
-                          <button type="button" onClick={() => removeColor(c)} className="text-gray-400 hover:text-red-500">
+                          <button type="button" onClick={() => removeColor(c)} aria-label={`Remove ${c}`} title={`Remove ${c}`} className="text-gray-400 hover:text-red-500">
                             <X size={12} />
                           </button>
                         </span>
@@ -754,7 +754,7 @@ export default function AddProductPage() {
                       {sizes.map((s) => (
                         <span key={s} className="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 border border-gray-200 rounded-full text-xs font-medium">
                           {s}
-                          <button type="button" onClick={() => removeSize(s)} className="text-gray-400 hover:text-red-500">
+                          <button type="button" onClick={() => removeSize(s)} aria-label={`Remove ${s}`} title={`Remove ${s}`} className="text-gray-400 hover:text-red-500">
                             <X size={12} />
                           </button>
                         </span>

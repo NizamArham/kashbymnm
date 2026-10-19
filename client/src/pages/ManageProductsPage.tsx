@@ -181,6 +181,8 @@ function ComboPicker({
               <button
                 type="button"
                 onClick={() => onDeselect(v)}
+                aria-label={`Remove ${v}`}
+                title={`Remove ${v}`}
                 className="text-gray-400 hover:text-red-500"
               >
                 <X size={12} />
@@ -1002,7 +1004,7 @@ export default function ManageProductsPage() {
                 }}
               />
               {searchQuery && (
-                <button onClick={() => setSearchQuery("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                <button onClick={() => setSearchQuery("")} aria-label="Clear search" className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
                   <X size={14} />
                 </button>
               )}

@@ -309,7 +309,7 @@ export default function DeliveryPartnersPage() {
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <Badge label={p.is_active ? "active" : "off"} tone={p.is_active ? "success" : "neutral"} />
-                    <button onClick={() => setEditing(p)} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition">
+                    <button onClick={() => setEditing(p)} aria-label={`Edit ${p.name}`} title={`Edit ${p.name}`} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition">
                       <Pencil size={14} />
                     </button>
                   </div>

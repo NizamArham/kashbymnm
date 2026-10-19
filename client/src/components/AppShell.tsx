@@ -296,7 +296,7 @@ export default function AppShell() {
                 <span className="text-xs italic font-light text-gray-400 hidden lg:inline">by M&amp;M</span>
               </h1>
             </div>
-            <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-gray-400 hover:text-white transition">
+            <button onClick={() => setSidebarOpen(false)} aria-label="Close menu" className="lg:hidden text-gray-400 hover:text-white transition">
               <X size={20} />
             </button>
             {/* The whole app, full screen — on desktop; a phone's sidebar is a drawer and its browser can't. */}

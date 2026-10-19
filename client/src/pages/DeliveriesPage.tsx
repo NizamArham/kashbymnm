@@ -208,6 +208,8 @@ function ExpandedDetail({ d, onReload, onNotDelivered }: { d: Delivery; onReload
               e.stopPropagation();
               setMenuOpen((v) => !v);
             }}
+            aria-label="More actions"
+            title="More actions"
             className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition"
           >
             <MoreHorizontal size={16} />

@@ -612,6 +612,7 @@ export default function InventoryCategoriesPage() {
               {query && (
                 <button
                   onClick={clearSearch}
+                  aria-label="Clear search"
                   className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                 >
                   <X size={14} />
@@ -676,6 +677,8 @@ export default function InventoryCategoriesPage() {
             <button
               onClick={load}
               disabled={loading}
+              aria-label="Refresh"
+              title="Refresh"
               className="p-2.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all"
             >
               <RefreshCw size={18} className={loading ? "animate-spin" : ""} />

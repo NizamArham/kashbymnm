@@ -1276,6 +1276,7 @@ export function DateRangePicker({
           <div className="flex items-center justify-between mb-2">
             <button
               onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() - 1, 1))}
+              aria-label="Previous month"
               className="p-1 hover:bg-gray-100 rounded-lg transition"
             >
               <ChevronLeft size={14} />
@@ -1283,6 +1284,7 @@ export function DateRangePicker({
             <span className="text-sm font-medium text-gray-900">{monthLabel}</span>
             <button
               onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 1))}
+              aria-label="Next month"
               className="p-1 hover:bg-gray-100 rounded-lg transition"
             >
               <ChevronRight size={14} />
@@ -1458,6 +1460,7 @@ export function DatePicker({
               <button
                 type="button"
                 onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() - 1, 1))}
+                aria-label="Previous month"
                 className="p-1 hover:bg-gray-100 rounded-lg transition"
               >
                 <ChevronLeft size={14} />
@@ -1466,6 +1469,7 @@ export function DatePicker({
               <button
                 type="button"
                 onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 1))}
+                aria-label="Next month"
                 className="p-1 hover:bg-gray-100 rounded-lg transition"
               >
                 <ChevronRight size={14} />

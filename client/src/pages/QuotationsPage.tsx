@@ -5,7 +5,7 @@ import { FileText, Printer, ShoppingCart, XCircle, MessageCircle, Receipt } from
 import { api, ApiRequestError } from "../lib/api";
 import { Sale } from "../lib/types";
 import { downloadA4Pdf, downloadThermalPdf, sendWhatsAppBill } from "../lib/receipts";
-import { PageHeader, Card, Table, Th, Td, Badge, EmptyState, ErrorText, Button, RowCard, RowCardStats, RowCardStat } from "../components/ui";
+import { PageHeader, Card, Table, Th, Td, Badge, EmptyState, ErrorText, Button, RowCard, RowCardStats, RowCardStat, ActionMenu } from "../components/ui";
 import ReceiptOptionsModal, { ModalOption } from "../components/ReceiptOptionsModal";
 import { hasDraftInProgress } from "../lib/posDraft";
 import { useConfirm } from "../components/Feedback";
@@ -103,6 +103,31 @@ export default function QuotationsPage() {
     }
   }
 
+  // The one thing you do with a payment request is turn it into the sale (an exchange request is opened on its own page instead, where the
+  // order is made once it's approved). Printing and cancelling are tucked into the menu beside it.
+  function rowActions(q: Sale) {
+    return (
+      <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={() => openInPos(q)}
+          title={q.exchange_draft ? "Open this exchange request" : "Edit it, or turn it into the sale, in POS"}
+          className="inline-flex items-center gap-1.5 whitespace-nowrap"
+        >
+          {!q.exchange_draft && <ShoppingCart size={13} />}
+          {q.exchange_draft ? "Open" : "Make sale"}
+        </Button>
+        <ActionMenu
+          items={[
+            { label: "Get payment request", icon: <Printer size={14} />, onClick: () => openReceipt(q) },
+            { label: "Cancel request", icon: <XCircle size={14} />, danger: true, onClick: () => (cancellingId === q.id ? undefined : handleCancel(q)) },
+          ]}
+        />
+      </div>
+    );
+  }
+
   function statusBadge(sale: Sale) {
     return (
       <span className="inline-flex items-center gap-1">
@@ -158,32 +183,7 @@ export default function QuotationsPage() {
                     <Td>Rs. {q.total.toLocaleString()}</Td>
                     <Td>{q.quotation_valid_until ? q.quotation_valid_until.slice(0, 16).replace("T", " ") : "—"}</Td>
                     <Td>{statusBadge(q)}</Td>
-                    <Td>
-                      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          onClick={() => openReceipt(q)}
-                          title="Get payment request"
-                          className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition"
-                        >
-                          <Printer size={14} />
-                        </button>
-                        <button
-                          onClick={() => openInPos(q)}
-                          title="Edit / convert to sale in POS"
-                          className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition"
-                        >
-                          <ShoppingCart size={14} />
-                        </button>
-                        <button
-                          onClick={() => handleCancel(q)}
-                          disabled={cancellingId === q.id}
-                          title="Cancel payment request"
-                          className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition disabled:opacity-50"
-                        >
-                          <XCircle size={14} />
-                        </button>
-                      </div>
-                    </Td>
+                    <Td>{rowActions(q)}</Td>
                   </tr>
                 ))}
               </tbody>
@@ -202,33 +202,13 @@ export default function QuotationsPage() {
                       {q.customer_name ?? "Walk-in"} · {q.sale_type === "online" ? "Online" : "In-Store"}
                     </p>
                   </div>
-                  <div className="flex-shrink-0 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                    {statusBadge(q)}
-                    <button
-                      onClick={() => openReceipt(q)}
-                      className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition"
-                    >
-                      <Printer size={14} />
-                    </button>
-                    <button
-                      onClick={() => openInPos(q)}
-                      className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition"
-                    >
-                      <ShoppingCart size={14} />
-                    </button>
-                    <button
-                      onClick={() => handleCancel(q)}
-                      disabled={cancellingId === q.id}
-                      className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition disabled:opacity-50"
-                    >
-                      <XCircle size={14} />
-                    </button>
-                  </div>
+                  <div className="flex-shrink-0">{statusBadge(q)}</div>
                 </div>
                 <RowCardStats>
                   <RowCardStat label="Total" value={`Rs. ${q.total.toLocaleString()}`} />
                   <RowCardStat label="Pay by" value={q.quotation_valid_until ? q.quotation_valid_until.slice(0, 10) : "—"} />
                 </RowCardStats>
+                <div className="mt-3 flex justify-end border-t border-gray-100 pt-3">{rowActions(q)}</div>
               </RowCard>
             ))}
           </div>
