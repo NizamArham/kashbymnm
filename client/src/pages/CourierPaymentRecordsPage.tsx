@@ -5,7 +5,7 @@ import { api, ApiRequestError } from "../lib/api";
 import { CourierPaymentRecords } from "../lib/types";
 import { partnerLabel, useDeliveryPartners } from "../lib/delivery";
 import { useSortableData } from "../lib/useSortableData";
-import { Badge, Card, DateRangePicker, Dropdown, ErrorText, HelpHint, PageHeader, SortHeader, TabToggle, Table, Td, Th } from "../components/ui";
+import { Badge, Card, DateRangePicker, Dropdown, EmptyState, ErrorText, HelpHint, PageHeader, SortHeader, TabToggle, Table, Td, Th } from "../components/ui";
 import { useConfirm } from "../components/Feedback";
 import { formatDate } from "../lib/dates";
 
@@ -215,9 +215,21 @@ export default function CourierPaymentRecordsPage() {
         {!loaded ? (
           <p className="p-5 text-sm text-gray-400">Loading…</p>
         ) : sorted.length === 0 ? (
-          <p className="p-5 text-sm text-gray-400">
-            {rows.length === 0 ? "No payments or corrections recorded yet." : "Nothing in this date range — widen it, or choose Show everything."}
-          </p>
+          <EmptyState
+            bare
+            title={rows.length === 0 ? "No payments or corrections recorded yet" : "Nothing in this date range"}
+            actions={[
+              rows.length === 0
+                ? { label: "Record a settlement", onClick: () => navigate("/couriers") }
+                : {
+                    label: "Show everything",
+                    onClick: () => {
+                      setStartDate(null);
+                      setEndDate(null);
+                    },
+                  },
+            ]}
+          />
         ) : (
           <Table>
             <thead>

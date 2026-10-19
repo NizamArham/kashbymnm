@@ -662,7 +662,7 @@ export default function SuppliersPage() {
       {loading ? (
         <PageLoader />
       ) : suppliers.length === 0 ? (
-        <EmptyState icon={Truck} title="No suppliers yet" />
+        <EmptyState icon={Truck} title="No suppliers yet" actions={[{ label: "Add supplier", primary: true, onClick: () => setShowAddModal(true) }]} />
       ) : (
         <>
           <p className="text-xs text-gray-400 mb-3">

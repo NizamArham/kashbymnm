@@ -954,7 +954,22 @@ export default function SupplierPaymentsPage() {
           {paymentsLoading ? (
             <PageLoader />
           ) : payments.length === 0 ? (
-            <EmptyState icon={Landmark} title="No payments recorded in this range" />
+            <EmptyState
+              icon={Landmark}
+              title={dateStart && dateEnd ? "No payments recorded in this range" : "No payments recorded yet"}
+              actions={[
+                dateStart && dateEnd
+                  ? {
+                      label: "Show all dates",
+                      onClick: () => {
+                        setDateStart("");
+                        setDateEnd("");
+                        setPaymentsPage(1);
+                      },
+                    }
+                  : null,
+              ]}
+            />
           ) : (
             <>
               <Card className="p-0 overflow-clip">

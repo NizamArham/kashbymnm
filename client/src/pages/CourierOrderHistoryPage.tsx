@@ -6,7 +6,7 @@ import { CourierReconciliationData, CourierReconciliationOrder } from "../lib/ty
 import CourierChargeModal from "../components/CourierChargeModal";
 import { useDeliveryPartners, partnerLabel as labelFor } from "../lib/delivery";
 import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
-import { Card, Button, DateRangePicker, ErrorText, HelpHint, PageHeader, Table, Td, Th, RefLink } from "../components/ui";
+import { Card, Button, DateRangePicker, EmptyState, ErrorText, HelpHint, PageHeader, Table, Td, Th, RefLink } from "../components/ui";
 
 const money = (value: number) => `Rs. ${value.toLocaleString()}`;
 
@@ -200,7 +200,22 @@ export default function CourierOrderHistoryPage() {
           </div>
         </div>
         {filteredOrders.length === 0 ? (
-          <p className="p-5 text-sm text-gray-400">{data.orders.length === 0 ? "Dispatch an online order to start reconciliation." : "No orders in this date range."}</p>
+          <EmptyState
+            bare
+            title={data.orders.length === 0 ? "No courier orders yet" : "No orders in this date range"}
+            subtitle={data.orders.length === 0 ? "Dispatch an online order to start reconciliation." : undefined}
+            actions={[
+              data.orders.length === 0
+                ? { label: "Open Shipping", onClick: () => navigate("/deliveries") }
+                : {
+                    label: "Show everything",
+                    onClick: () => {
+                      setOrderDateStart(null);
+                      setOrderDateEnd(null);
+                    },
+                  },
+            ]}
+          />
         ) : (
           <Table>
             <thead>

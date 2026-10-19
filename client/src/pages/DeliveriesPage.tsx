@@ -3,7 +3,7 @@ import { PageLoader } from "../components/Loader";
 import { Truck, Package, PackageCheck, Send, CheckCircle2, RotateCcw, FileDown, Ban, ExternalLink, ChevronDown, ChevronRight, MoreHorizontal, Download, MessageCircle } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Delivery, DeliveryStatus, BusinessInfo } from "../lib/types";
-import { PageHeader, Card, Table, Th, Td, Button, EmptyState, ErrorText, DateRangePicker, Badge, RowCard, RowCardStats, RowCardStat, RefLink } from "../components/ui";
+import { PageHeader, Card, Table, Th, Td, Button, EmptyState, EmptyAction, ErrorText, DateRangePicker, Badge, RowCard, RowCardStats, RowCardStat, RefLink } from "../components/ui";
 import ExchangeNotice from "../components/ExchangeNotice";
 import ReturnPickupList from "../components/ReturnsOnTheWay";
 import PackWaybillModal from "../components/PackWaybillModal";
@@ -396,6 +396,40 @@ export default function DeliveriesPage() {
     });
   }, [deliveries, activeTab, startDate, endDate]);
 
+  // An empty stage is never a dead end: it points at the next stage that has orders in it, and at the orders hidden by the date range.
+  const inDateRange = (d: Delivery) => {
+    if (!startDate || !endDate || !d.sale_date) return true;
+    const saleDate = d.sale_date.slice(0, 10);
+    return saleDate >= startDate && saleDate <= endDate;
+  };
+  const waitingIn = (status: DeliveryStatus) => deliveries.filter((d) => d.delivery_status === status && onThePipeline(d) && inDateRange(d)).length;
+  const emptyActions = (): EmptyAction[] => {
+    const goTo = (status: DeliveryStatus) => () => {
+      tabChosen.current = true;
+      setActiveTab(status);
+      setExpandedId(null);
+    };
+    const WORDS: Record<string, (n: number) => string> = {
+      pending: (n) => `${n} waiting to be packed`,
+      packed: (n) => `${n} packed, waiting to dispatch`,
+      dispatched: (n) => `${n} on the way to customers`,
+    };
+    const actions: EmptyAction[] = [];
+    const nextStage = (["pending", "packed", "dispatched"] as DeliveryStatus[]).find((st) => st !== activeTab && waitingIn(st) > 0);
+    if (nextStage) actions.push({ label: WORDS[nextStage](waitingIn(nextStage)), onClick: goTo(nextStage) });
+    const hidden = deliveries.filter((d) => d.delivery_status === activeTab && onThePipeline(d) && !inDateRange(d)).length;
+    if (hidden > 0) {
+      actions.push({
+        label: `${hidden} more outside this date range`,
+        onClick: () => {
+          setStartDate(null);
+          setEndDate(null);
+        },
+      });
+    }
+    return actions;
+  };
+
   useEffect(() => {
     if (loading || tabChosen.current) return;
     tabChosen.current = true;
@@ -687,6 +721,7 @@ export default function DeliveriesPage() {
             <DateRangePicker
               startDate={startDate}
               endDate={endDate}
+              idle="All dates"
               onChange={(s, e) => {
                 setStartDate(s);
                 setEndDate(e);
@@ -785,7 +820,7 @@ export default function DeliveriesPage() {
       ) : loading ? (
         <PageLoader />
       ) : filtered.length === 0 ? (
-        <EmptyState icon={Truck} title={`No ${activeTab} orders in this date range`} />
+        <EmptyState icon={Truck} title={`No ${activeTab} orders${startDate && endDate ? " in this date range" : ""}`} actions={emptyActions()} />
       ) : (
         <>
           {/* Desktop table — detail lives INSIDE the row */}

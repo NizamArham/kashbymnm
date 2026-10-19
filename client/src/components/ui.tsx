@@ -1,7 +1,7 @@
 import { Fragment, ReactNode, useState, useRef, useEffect, useLayoutEffect, forwardRef } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
-import { ChevronDown, ChevronUp, Check, Plus, CalendarDays, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, Minus, X, MoreVertical } from "lucide-react";
+import { ChevronDown, ChevronUp, Check, Plus, CalendarDays, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowRight, Minus, X, MoreVertical } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { formatDate } from "../lib/dates";
 
@@ -636,12 +636,42 @@ export function HelperText({ children }: { children: ReactNode }) {
   return <p className="text-xs text-gray-400 mt-1">{children}</p>;
 }
 
-export function EmptyState({ icon: Icon, title, subtitle }: { icon?: any; title: string; subtitle?: string }) {
+// A way forward from an empty page: what to open, add or widen. "primary" is the thing to create (a black button); the others
+// are pointers to somewhere that does have something ("2 packed, waiting to dispatch →").
+export interface EmptyAction {
+  label: string;
+  onClick: () => void;
+  primary?: boolean;
+}
+
+// A list of actions may hold "nothing" entries (a condition that was false), which are simply skipped.
+export type EmptyActions = (EmptyAction | null | false | undefined)[];
+
+// bare: for an empty list that already sits inside a card — no box of its own.
+export function EmptyState({ icon: Icon, title, subtitle, actions, bare }: { icon?: any; title: string; subtitle?: string; actions?: EmptyActions; bare?: boolean }) {
+  const shown = (actions ?? []).filter((a): a is EmptyAction => !!a);
   return (
-    <div className="text-center py-16 bg-white border border-gray-200 rounded-2xl">
+    <div className={bare ? "text-center py-10 px-4" : "text-center py-16 bg-white border border-gray-200 rounded-2xl px-4"}>
       {Icon && <Icon size={48} className="text-gray-300 mx-auto mb-3" />}
       <h3 className="text-base font-medium text-gray-700">{title}</h3>
       {subtitle && <p className="text-sm text-gray-400 mt-1">{subtitle}</p>}
+      {shown.length > 0 && (
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+          {shown.map((a) => (
+            <button
+              key={a.label}
+              type="button"
+              onClick={a.onClick}
+              className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 ${
+                a.primary ? "bg-black text-white hover:bg-gray-800" : "border border-gray-200 bg-white text-gray-900 hover:bg-gray-50"
+              }`}
+            >
+              {a.label}
+              {!a.primary && <ArrowRight size={14} className="text-gray-400" />}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

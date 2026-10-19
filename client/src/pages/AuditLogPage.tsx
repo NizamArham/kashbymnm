@@ -237,7 +237,20 @@ export default function AuditLogPage() {
       ) : entries.length === 0 ? (
         <EmptyState icon={ClipboardList} title="No activity recorded yet" subtitle="Sensitive actions will show up here as they happen." />
       ) : filtered.length === 0 ? (
-        <EmptyState icon={Search} title={group !== "all" || actionFilter ? "Nothing in this view" : "No entries match your search"} />
+        <EmptyState
+          icon={Search}
+          title={group !== "all" || actionFilter ? "Nothing in this view" : "No entries match your search"}
+          actions={[
+            !!query.trim() && { label: "Clear search", onClick: () => setQuery("") },
+            (group !== "all" || !!actionFilter) && {
+              label: "Show everything",
+              onClick: () => {
+                setGroup("all");
+                setActionFilter("");
+              },
+            },
+          ]}
+        />
       ) : (
         <Card className="p-0 overflow-clip">
           <Table>

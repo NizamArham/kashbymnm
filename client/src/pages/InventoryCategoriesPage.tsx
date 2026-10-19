@@ -780,6 +780,7 @@ export default function InventoryCategoriesPage() {
                   ? `No products match "${appliedQuery}"`
                   : "No products in this selection"
               }
+              actions={[appliedQuery ? { label: "Clear search", onClick: clearSearch } : { label: "Show all products", onClick: () => selectGender(ALL) }]}
             />
           ) : (
             <>

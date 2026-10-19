@@ -160,7 +160,7 @@ export default function QuotationsPage() {
       {loading ? (
         <PageLoader />
       ) : quotations.length === 0 ? (
-        <EmptyState icon={FileText} title="No payment requests saved yet" subtitle={'Save a cart as a payment request from the POS page using the "Payment request" button.'} />
+        <EmptyState icon={FileText} title="No payment requests saved yet" subtitle={'Save a cart as a payment request from the POS page using the "Payment request" button.'} actions={[{ label: "Open the till", onClick: () => navigate("/pos") }]} />
       ) : (
         <>
           {/* Desktop / tablet-landscape */}

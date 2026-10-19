@@ -541,7 +541,7 @@ export default function DashboardPage() {
         {loading ? (
           <Loader size={34} label="" className="py-8" />
         ) : activity.length === 0 ? (
-          <EmptyState title="No activity recorded yet." />
+          <EmptyState title="No activity recorded yet." actions={[{ label: "Open the till", onClick: () => navigate("/pos") }]} />
         ) : (
           <div className="space-y-4">
             {activity.map((ev) => {

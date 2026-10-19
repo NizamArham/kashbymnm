@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { PageLoader } from "../components/Loader";
 import { ChevronUp, ChevronDown, Download, BarChart3 } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
-import { PageHeader, Card, StatCard, Table, Th, Td, ErrorText, DateRangePicker, Button, EmptyState } from "../components/ui";
+import { PageHeader, Card, StatCard, Table, Th, Td, ErrorText, DateRangePicker, Button, EmptyState, EmptyActions } from "../components/ui";
 import { RevenueProfitChart, RevenueProfitPoint } from "../components/RevenueChart";
 import { downloadTabularReport, buildReportFilename, todayLongDate, rangeLabelFor } from "../lib/reportPdf";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
@@ -120,6 +120,23 @@ export default function AnalyticsPage() {
   const [productSortDir, setProductSortDir] = useState<SortDir>("desc");
   const [categorySortKey, setCategorySortKey] = useState<CategorySortKey>("revenue");
   const [categorySortDir, setCategorySortDir] = useState<SortDir>("desc");
+
+  // A period with no sales points at the next wider one — a custom range goes to the whole year.
+  const widerTab = (() => {
+    if (startDate) return TABS[TABS.length - 1];
+    const at = TABS.findIndex((t) => t.value === activeTab);
+    return at >= 0 && at < TABS.length - 1 ? TABS[at + 1] : null;
+  })();
+  const emptyActions: EmptyActions = [
+    widerTab && {
+      label: `Look at ${widerTab.label}`,
+      onClick: () => {
+        setActiveTab(widerTab.value);
+        setStartDate(null);
+        setEndDate(null);
+      },
+    },
+  ];
 
   // Resolves whichever preset tab (or explicit custom range) is active
   // into concrete start/end dates — same derivation Sale History uses.
@@ -346,7 +363,7 @@ export default function AnalyticsPage() {
           <Card className="mb-5">
             <h3 className="text-sm font-semibold text-gray-900 mb-3">Revenue & Profit over time</h3>
             {chartData.length === 0 ? (
-              <EmptyState icon={BarChart3} title="No sales in this period" />
+              <EmptyState icon={BarChart3} title="No sales in this period" actions={emptyActions} />
             ) : (
               <RevenueProfitChart data={chartData} />
             )}
@@ -358,7 +375,7 @@ export default function AnalyticsPage() {
             </div>
             {sortedProducts.length === 0 ? (
               <div className="p-5">
-                <EmptyState icon={BarChart3} title="No sales in this period" />
+                <EmptyState icon={BarChart3} title="No sales in this period" actions={emptyActions} />
               </div>
             ) : (
               <Table>
@@ -403,7 +420,7 @@ export default function AnalyticsPage() {
             </div>
             {sortedCategories.length === 0 ? (
               <div className="p-5">
-                <EmptyState icon={BarChart3} title="No sales in this period" />
+                <EmptyState icon={BarChart3} title="No sales in this period" actions={emptyActions} />
               </div>
             ) : (
               <Table>

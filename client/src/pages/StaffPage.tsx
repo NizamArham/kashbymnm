@@ -22,6 +22,7 @@ import {
   SortHeader,
   Dropdown,
   DatePicker,
+  EmptyState,
   HelpHint,
   Modal,
 } from "../components/ui";
@@ -396,7 +397,7 @@ export default function StaffPage() {
             })}
           </tbody>
         </Table>
-        {filteredStaff.length === 0 && <p className="px-4 py-6 text-center text-sm text-gray-400">No staff members match your search.</p>}
+        {filteredStaff.length === 0 && <EmptyState bare title="No staff members match your search" actions={[{ label: "Clear search", onClick: () => setSearchQuery("") }]} />}
       </Card>
 
       {resettingUser && (

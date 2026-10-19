@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { PageLoader } from "../components/Loader";
 import { ClipboardCheck } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { DailyAttendanceRow, AttendanceStatus } from "../lib/types";
-import { PageHeader, Card, ErrorText } from "../components/ui";
+import { PageHeader, Card, EmptyState, ErrorText } from "../components/ui";
 import { formatDate, formatTime } from "../lib/dates";
 
 const STATUS_OPTIONS: { value: AttendanceStatus; label: string; activeClass: string }[] = [
@@ -18,6 +19,7 @@ function toISODate(d: Date): string {
 }
 
 export default function AttendancePage() {
+  const navigate = useNavigate();
   const [date, setDate] = useState(() => toISODate(new Date()));
   const [staff, setStaff] = useState<DailyAttendanceRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -82,10 +84,7 @@ export default function AttendancePage() {
       {loading ? (
         <PageLoader />
       ) : staff.length === 0 ? (
-        <div className="text-center py-16 text-gray-400">
-          <ClipboardCheck size={40} className="mx-auto mb-2" />
-          <p>No staff accounts yet.</p>
-        </div>
+        <EmptyState icon={ClipboardCheck} title="No staff accounts yet" actions={[{ label: "Add staff", primary: true, onClick: () => navigate("/staff/add") }]} />
       ) : (
         <div className="space-y-2">
           {staff.map((s) => (

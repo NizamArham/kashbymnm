@@ -842,7 +842,12 @@ export default function PurchasesPage() {
         <PageLoader />
       ) : activeTab === "pending" ? (
         pending.length === 0 ? (
-          <EmptyState icon={Clock} title="Nothing pending" subtitle="Goods you record as arrived but haven't fully sorted yet will show here." />
+          <EmptyState
+            icon={Clock}
+            title="Nothing pending"
+            subtitle="Goods you record as arrived but haven't fully sorted yet will show here."
+            actions={[{ label: "Record a purchase", primary: true, onClick: () => setActiveTab("record") }]}
+          />
         ) : (
           <div className="space-y-3">
             {pending.map((p) => (
@@ -980,7 +985,24 @@ export default function PurchasesPage() {
             </Button>
           </div>
           {filteredPurchases.length === 0 ? (
-            <EmptyState icon={Package} title={historyQuery ? "No purchases match that search" : "No purchases recorded in this range"} />
+            <EmptyState
+              icon={Package}
+              title={historyQuery ? "No purchases match that search" : historyStart && historyEnd ? "No purchases recorded in this range" : "No purchases recorded yet"}
+              actions={[
+                historyQuery ? { label: "Clear search", onClick: () => setHistorySearch("") } : null,
+                historyStart && historyEnd
+                  ? {
+                      label: "Show all dates",
+                      onClick: () => {
+                        setHistoryStart(null);
+                        setHistoryEnd(null);
+                      },
+                    }
+                  : !historyQuery
+                  ? { label: "Record a purchase", primary: true, onClick: () => setActiveTab("record") }
+                  : null,
+              ]}
+            />
           ) : (
             <>
               {/* Desktop / tablet-landscape */}
@@ -1257,7 +1279,19 @@ export default function PurchasesPage() {
           </div>
 
           {filteredReturns.length === 0 ? (
-            <EmptyState icon={Package} title="No returns recorded in this range" />
+            <EmptyState
+              icon={Package}
+              title={returnsDateStart && returnsDateEnd ? "No returns recorded in this range" : "No returns recorded yet"}
+              actions={[
+                !!returnsDateStart && !!returnsDateEnd && {
+                  label: "Show all dates",
+                  onClick: () => {
+                    setReturnsDateStart(null);
+                    setReturnsDateEnd(null);
+                  },
+                },
+              ]}
+            />
           ) : (
             <>
               {/* Desktop / tablet-landscape */}

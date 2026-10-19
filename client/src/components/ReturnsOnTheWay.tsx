@@ -316,7 +316,12 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
         />
       )}
       {tableRows.length > 0 && shownRows.length === 0 && (
-        <EmptyState icon={Search} title={q ? "Nothing matches that" : "Nothing here"} subtitle={q ? "Try an invoice number, a customer's name or the service." : "Try another view."} />
+        <EmptyState
+          icon={Search}
+          title={q ? "Nothing matches that" : "Nothing here"}
+          subtitle={q ? "Try an invoice number, a customer's name or the service." : "Try another view."}
+          actions={[q ? { label: "Clear search", onClick: () => setQuery("") } : { label: `Show all ${tableRows.length}`, onClick: () => setFilter("all") }]}
+        />
       )}
       {shownRows.length > 0 && (
         <Card className="overflow-clip p-0">

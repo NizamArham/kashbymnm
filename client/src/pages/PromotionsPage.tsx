@@ -146,7 +146,7 @@ function CouponsTab() {
       {loading ? (
         <PageLoader />
       ) : coupons.length === 0 ? (
-        <EmptyState icon={Ticket} title="No coupons yet" subtitle="Create one to offer a discount at checkout." />
+        <EmptyState icon={Ticket} title="No coupons yet" subtitle="Create one to offer a discount at checkout." actions={[{ label: "New coupon", primary: true, onClick: () => setShowCreate(true) }]} />
       ) : (
         <Card className="p-0 overflow-clip">
           <Table>
@@ -425,7 +425,7 @@ function VouchersTab() {
       {loading ? (
         <PageLoader />
       ) : vouchers.length === 0 ? (
-        <EmptyState icon={Gift} title="No gift vouchers yet" subtitle="Issue one to give a customer a fixed Rs. balance to spend." />
+        <EmptyState icon={Gift} title="No gift vouchers yet" subtitle="Issue one to give a customer a fixed Rs. balance to spend." actions={[{ label: "New gift voucher", primary: true, onClick: () => setShowCreate(true) }]} />
       ) : (
         <Card className="p-0 overflow-clip">
           <Table>

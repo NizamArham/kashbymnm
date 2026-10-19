@@ -529,6 +529,18 @@ export default function CashBookPage() {
                 <EmptyState
                   icon={Landmark}
                   title={isFiltered ? "No entries in this date range" : "No cash book entries yet"}
+                  actions={[
+                    isFiltered
+                      ? {
+                          label: "Clear filter",
+                          onClick: () => {
+                            setDateStart("");
+                            setDateEnd("");
+                            setEntriesPage(1);
+                          },
+                        }
+                      : { label: "Add entry", primary: true, onClick: () => setShowAdd(true) },
+                  ]}
                 />
               </div>
             ) : (

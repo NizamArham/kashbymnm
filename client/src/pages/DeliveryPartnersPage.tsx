@@ -240,7 +240,7 @@ export default function DeliveryPartnersPage() {
       {!loaded ? (
         <PageLoader />
       ) : partners.length === 0 ? (
-        <EmptyState icon={Truck} title="No delivery partners yet" />
+        <EmptyState icon={Truck} title="No delivery partners yet" actions={[{ label: "Add partner", primary: true, onClick: () => setAdding(true) }]} />
       ) : (
         <>
           <Card className="p-0 overflow-clip hidden lg:block">

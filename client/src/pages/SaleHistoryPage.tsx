@@ -11,7 +11,7 @@ import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { useSortableData } from "../lib/useSortableData";
 import { useCopyToClipboard } from "../lib/useCopyToClipboard";
 import { isAwaitingCod, salePaymentLabel, saleStatusLabel } from "../lib/salePayment";
-import { PageHeader, Card, Th, Td, Badge, SortHeader, paymentStatusTone, EmptyState, ErrorText, DateRangePicker, Button, RowCard, RowCardStats, RowCardStat, FormGroup, Label, Input, Modal, RefLink, TabToggle } from "../components/ui";
+import { PageHeader, Card, Th, Td, Badge, SortHeader, paymentStatusTone, EmptyState, EmptyAction, ErrorText, DateRangePicker, Button, RowCard, RowCardStats, RowCardStat, FormGroup, Label, Input, Modal, RefLink, TabToggle } from "../components/ui";
 import ReceiptOptionsModal, { ModalOption } from "../components/ReceiptOptionsModal";
 import ExchangeTag from "../components/ExchangeTag";
 import SaleProfitModal from "../components/SaleProfitModal";
@@ -788,11 +788,34 @@ export default function SaleHistoryPage() {
     );
   }
 
+  // When nothing matches, the way out: drop the search and the kind of sale, or widen the period.
+  const emptyActions: EmptyAction[] = [];
+  if (search.trim() || kind !== "all") {
+    emptyActions.push({
+      label: "Clear search and filters",
+      onClick: () => {
+        setSearch("");
+        setKind("all");
+      },
+    });
+  }
+  if (period !== "all" || (startDate && endDate)) {
+    emptyActions.push({
+      label: "Show all time",
+      onClick: async () => {
+        if (!(await unlockOlderSales())) return;
+        setPeriod("all");
+        setStartDate(null);
+        setEndDate(null);
+      },
+    });
+  }
+
   // Shown in place of the list while it loads or when nothing matches.
   const listMessage = loading ? (
     <PageLoader />
   ) : filteredSales.length === 0 ? (
-    <EmptyState icon={Receipt} title="No sales match these filters" subtitle="Try another period, or clear the filters." />
+    <EmptyState icon={Receipt} title="No sales match these filters" subtitle="Try another period, or clear the filters." actions={emptyActions} />
   ) : null;
 
   // The page buttons and "Showing a–b of n", under the table (desktop) or the cards (phones).

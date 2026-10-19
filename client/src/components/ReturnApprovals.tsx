@@ -7,7 +7,7 @@ import { useAdminApproval } from "./AdminApproval";
 import DecisionBox from "./DecisionBox";
 import ReturnRequestPanel, { NoReturnsWarning } from "./ReturnRequestPanel";
 import { shareSummary } from "./ReturnsOnTheWay";
-import { Badge, Card, EmptyState, RefLink } from "./ui";
+import { Badge, Card, EmptyState, EmptyActions, RefLink } from "./ui";
 import { formatDate, formatDateTime } from "../lib/dates";
 
 const money = (n: number) => `Rs. ${Math.round(n).toLocaleString()}`;
@@ -27,7 +27,7 @@ type Entry =
 
 // Everything waiting for an admin's yes, in the order it was asked — an in-store return, a courier return and a delivery exchange side by
 // side, each tagged with what it is. Click a row to see it in full and to approve or decline; nothing moves (no stock, no money) until then.
-export default function ReturnApprovalList({ approvals, onChanged }: { approvals: ReturnApprovals; onChanged: () => void }) {
+export default function ReturnApprovalList({ approvals, onChanged, emptyActions }: { approvals: ReturnApprovals; onChanged: () => void; emptyActions?: EmptyActions }) {
   const [open, setOpen] = useState<string | null>(null);
 
   const entries: Entry[] = [
@@ -38,7 +38,14 @@ export default function ReturnApprovalList({ approvals, onChanged }: { approvals
   ].sort((a, b) => a.at.localeCompare(b.at));
 
   if (entries.length === 0) {
-    return <EmptyState icon={CheckCircle2} title="Nothing waiting for approval" subtitle="Returns and exchanges that staff ask for show up here until an admin decides." />;
+    return (
+      <EmptyState
+        icon={CheckCircle2}
+        title="Nothing waiting for approval"
+        subtitle="Returns and exchanges that staff ask for show up here until an admin decides."
+        actions={emptyActions}
+      />
+    );
   }
 
   const done = () => {

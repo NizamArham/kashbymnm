@@ -306,6 +306,13 @@ export default function ViewCustomersPage() {
                 ? "Everyone has ordered recently"
                 : "No customers yet"
             }
+            actions={
+              query
+                ? [{ label: "Clear search", onClick: () => setQuery("") }]
+                : segment !== "all"
+                ? [{ label: "Show all customers", onClick: () => setSegment("all") }]
+                : [{ label: "Add customer", primary: true, onClick: () => navigate("/customers/add") }]
+            }
           />
         ) : (
           <EmptyState
@@ -318,6 +325,7 @@ export default function ViewCustomersPage() {
                 ? "Check the spelling, or try their phone number."
                 : "Type part of their name, or their phone number, above."
             }
+            actions={showingCredit || query.trim().length < CASHIER_SEARCH_MIN_CHARS ? undefined : [{ label: "Add as a new customer", primary: true, onClick: () => navigate("/customers/add") }]}
           />
         )
       ) : (

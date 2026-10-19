@@ -1548,7 +1548,7 @@ export default function ManageProductsPage() {
           <p className="mt-3 text-sm text-gray-400">Loading products…</p>
         </div>
       ) : products.length === 0 ? (
-        <EmptyState icon={Package} title="No products yet" subtitle="Add one to get started" />
+        <EmptyState icon={Package} title="No products yet" subtitle="Add one to get started" actions={[{ label: "Add product", primary: true, onClick: () => navigate("/products/add") }]} />
       ) : (
         <Card flatOnPhone className="lg:p-0 lg:overflow-clip">
           <div className="px-1 lg:px-5 py-3.5 lg:border-b lg:border-gray-100 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
@@ -1584,7 +1584,12 @@ export default function ManageProductsPage() {
           </div>
 
           {filteredProducts.length === 0 ? (
-            <EmptyState icon={Search} title="No products match" subtitle={searchQuery.trim() ? `Nothing found for "${searchQuery}"` : "Nothing in this selection"} />
+            <EmptyState
+              icon={Search}
+              title="No products match"
+              subtitle={searchQuery.trim() ? `Nothing found for "${searchQuery}"` : "Nothing in this selection"}
+              actions={[searchQuery.trim() ? { label: "Clear search", onClick: () => setSearchQuery("") } : { label: "Show all products", onClick: () => selectGender(ALL) }]}
+            />
           ) : (
             <>
             <div className="hidden lg:block">

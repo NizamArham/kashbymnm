@@ -6,7 +6,7 @@ import { CourierReconciliationData, CourierReconciliationOrder, CourierSummary }
 import { useDeliveryPartners, partnerLabel } from "../lib/delivery";
 import CourierChargeModal from "../components/CourierChargeModal";
 import CourierBalanceModal from "../components/CourierBalanceModal";
-import { Button, Card, DatePicker, Dropdown, ErrorText, FormGroup, HelpHint, Input, Label, PageHeader, RefLink, Table, TabToggle, Td, Th } from "../components/ui";
+import { Button, Card, DatePicker, Dropdown, EmptyState, ErrorText, FormGroup, HelpHint, Input, Label, PageHeader, RefLink, Table, TabToggle, Td, Th } from "../components/ui";
 import { useConfirm } from "../components/Feedback";
 import { formatDate } from "../lib/dates";
 
@@ -204,7 +204,7 @@ export default function CourierReconciliationPage() {
         ))}
         {data.summary.length === 0 && (
           <Card className="p-4 md:col-span-3">
-            <p className="text-sm text-gray-400">No dispatched courier orders yet.</p>
+            <EmptyState bare title="No dispatched courier orders yet" actions={[{ label: "Open Shipping", onClick: () => navigate("/deliveries") }]} />
           </Card>
         )}
       </div>
@@ -254,7 +254,11 @@ export default function CourierReconciliationPage() {
           )}
 
           {shownOrders.length === 0 ? (
-            <p className="p-5 text-sm text-gray-400">{view === "check" ? "Every charge has been checked." : "No courier orders in the last 7 days."}</p>
+            <EmptyState
+              bare
+              title={view === "check" ? "Every charge has been checked" : "No courier orders in the last 7 days"}
+              actions={[view === "check" ? { label: "See this week's orders", onClick: () => setView("week") } : { label: "View full history", onClick: () => navigate("/couriers/history") }]}
+            />
           ) : (
             <Table className="[&_th]:px-2 [&_td]:px-2">
               <thead>

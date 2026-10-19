@@ -94,6 +94,11 @@ export default function ReturnsPage() {
     loadApprovals();
   }, [loadApprovals, activeTab]);
   const waiting = approvals ? approvals.in_store.length + approvals.courier.length + (approvals.courier_reports?.length ?? 0) + approvals.exchanges.length : 0;
+  // When nothing is waiting for approval, the page points at what is on the way back, or at starting a return.
+  const [parcelsOnTheWay, setParcelsOnTheWay] = useState(0);
+  useEffect(() => {
+    countOpenPickups().then(setParcelsOnTheWay).catch(() => {});
+  }, [activeTab]);
 
   return (
     <div>
@@ -117,7 +122,14 @@ export default function ReturnsPage() {
       {activeTab === "request" && <RequestReturnTab onRequested={loadApprovals} waiting={waiting} onGoTo={setActiveTab} />}
       {activeTab === "approve" &&
         (approvals ? (
-          <ReturnApprovalList approvals={approvals} onChanged={loadApprovals} />
+          <ReturnApprovalList
+            approvals={approvals}
+            onChanged={loadApprovals}
+            emptyActions={[
+              parcelsOnTheWay > 0 && { label: `${parcelsOnTheWay} on the way back`, onClick: () => setActiveTab("pickups") },
+              { label: "Request a return", onClick: () => setActiveTab("request") },
+            ]}
+          />
         ) : approvalsError ? (
           <ErrorText>{approvalsError}</ErrorText>
         ) : (
@@ -991,7 +1003,17 @@ function AllReturnsTab({ onDecided }: { onDecided: () => void }) {
       {loading ? (
         <PageLoader />
       ) : filtered.length === 0 ? (
-        <EmptyState icon={RotateCcw} title="No returns match this view" />
+        <EmptyState
+          icon={RotateCcw}
+          title="No returns match this view"
+          actions={[
+            !!q && { label: "Clear search", onClick: () => setQuery("") },
+            (statusFilter !== "all" || (!q && !!startDate && !!endDate)) && {
+              label: statusFilter !== "all" ? "Show every status" : "Show all dates",
+              onClick: () => (statusFilter !== "all" ? setStatusFilter("all") : (setStartDate(null), setEndDate(null))),
+            },
+          ]}
+        />
       ) : (
         <>
           {/* Desktop / tablet-landscape: table with an inline-expand row */}

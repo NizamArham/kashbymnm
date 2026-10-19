@@ -448,7 +448,20 @@ export default function CustomerPaymentHistoryPage({ customerId }: { customerId?
       ) : allEntries.length === 0 ? (
         <EmptyState icon={Receipt} title="No records yet" subtitle="No sales, payments, cheques, or credit on file." />
       ) : filteredEntries.length === 0 ? (
-        <EmptyState icon={Receipt} title="No records in this range" subtitle="Try widening the date filter above." />
+        <EmptyState
+          icon={Receipt}
+          title="No records in this range"
+          subtitle="Try widening the date filter above."
+          actions={[
+            {
+              label: "Show everything",
+              onClick: () => {
+                setStartDate(null);
+                setEndDate(null);
+              },
+            },
+          ]}
+        />
       ) : (
         <Card className="p-0 overflow-clip">
           <p className="text-[11px] text-gray-400 text-right px-4 pt-3">All amounts in Rs.</p>

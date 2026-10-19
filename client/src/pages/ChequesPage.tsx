@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { PageLoader } from "../components/Loader";
 import { Banknote, Check, Plus, Pencil, Trash2, X, Download } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
@@ -77,6 +78,7 @@ function matchesStatusFilter(status: string, filter: StatusFilter, issued: boole
 export default function ChequesPage() {
   const { confirm: confirmDialog } = useConfirm();
   const { notice } = useConfirm();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<Tab>("in_hand");
   const [cheques, setCheques] = useState<ChequeRow[]>([]);
   const [issuedCheques, setIssuedCheques] = useState<IssuedChequeRow[]>([]);
@@ -95,6 +97,12 @@ export default function ChequesPage() {
   const statusApplies = activeTab !== "in_hand";
   const periodActive = !!(periodStart || periodEnd);
   const filtersActive = periodActive || (statusApplies && statusFilter !== "pending");
+
+  function resetFilters() {
+    setStatusFilter("pending");
+    setPeriodStart(null);
+    setPeriodEnd(null);
+  }
 
   function inPeriod(chequeDate: string): boolean {
     const day = chequeDate.slice(0, 10);
@@ -495,11 +503,7 @@ export default function ChequesPage() {
         {filtersActive && (
           <button
             type="button"
-            onClick={() => {
-              setStatusFilter("pending");
-              setPeriodStart(null);
-              setPeriodEnd(null);
-            }}
+            onClick={resetFilters}
             className="text-xs text-gray-500 hover:text-gray-800 underline"
           >
             Reset filters
@@ -522,9 +526,14 @@ export default function ChequesPage() {
         <PageLoader />
       ) : activeTab === "issued" ? (
         issuedCheques.length === 0 ? (
-          <EmptyState icon={Banknote} title="No self-written cheques recorded" subtitle="Cheques you write directly to a supplier will show here." />
+          <EmptyState
+            icon={Banknote}
+            title="No self-written cheques recorded"
+            subtitle="Cheques you write directly to a supplier will show here."
+            actions={[{ label: "Pay a supplier", onClick: () => navigate("/supplier-payments") }]}
+          />
         ) : sortedIssuedCheques.length === 0 ? (
-          <EmptyState icon={Banknote} title="No cheques match these filters" subtitle="Try “All” under status, or a wider period." />
+          <EmptyState icon={Banknote} title="No cheques match these filters" subtitle="Try “All” under status, or a wider period." actions={[{ label: "Reset filters", onClick: resetFilters }]} />
         ) : (
           <Card className="p-0 overflow-clip">
             <Table>
@@ -598,9 +607,10 @@ export default function ChequesPage() {
           subtitle={
             activeTab === "in_hand" ? "Cheques received from customers, not yet deposited or passed on, will show here." : undefined
           }
+          actions={[activeTab === "in_hand" && { label: "See all cheques", onClick: () => setActiveTab("all") }]}
         />
       ) : sortedCheques.length === 0 ? (
-        <EmptyState icon={Banknote} title="No cheques match these filters" subtitle="Try “All” under status, or a wider period." />
+        <EmptyState icon={Banknote} title="No cheques match these filters" subtitle="Try “All” under status, or a wider period." actions={[{ label: "Reset filters", onClick: resetFilters }]} />
       ) : (
         <Card className="p-0 overflow-clip">
           <Table>
