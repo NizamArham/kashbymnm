@@ -4,7 +4,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { Truck, ChevronDown, ChevronRight, ChevronUp, Pencil, Plus, X } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Supplier, BankAccount } from "../lib/types";
-import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Table, Th, Td, SortHeader, EmptyState, HelpHint, Modal } from "../components/ui";
+import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Table, Th, Td, SortHeader, EmptyState, HelpHint, Modal, RowCard, RowCardStats, RowCardStat } from "../components/ui";
 import { CityPicker } from "../components/CityPicker";
 import { useSortableData } from "../lib/useSortableData";
 import { useConfirm } from "../components/Feedback";
@@ -285,117 +285,10 @@ export default function SuppliersPage() {
   const totalOwed = suppliers.reduce((sum, s) => sum + (s.balance_owed ?? 0), 0);
   const owingCount = suppliers.filter((s) => (s.balance_owed ?? 0) > 0).length;
 
-  return (
-    <div>
-      <PageHeader
-        title="Suppliers"
-        subtitle="Click any supplier to manage it."
-        action={
-          <button
-            onClick={() => {
-              setShowAddModal(true);
-              setFormError(null);
-              setFormSuccess(null);
-            }}
-            className="flex items-center gap-2 px-4 py-2.5 bg-black text-white rounded-xl text-sm font-medium hover:bg-gray-800 transition"
-          >
-            <Plus size={16} />
-            Add supplier
-          </button>
-        }
-      />
-
-      {showAddModal && (
-        <form onSubmit={handleAdd}>
-          <Modal
-            size="md"
-            onClose={() => setShowAddModal(false)}
-            title="Add supplier"
-            footer={
-              <>
-                <Button type="button" onClick={() => setShowAddModal(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit" variant="primary" disabled={submitting}>
-                  {submitting ? "Adding..." : "Add supplier"}
-                </Button>
-              </>
-            }
-          >
-              <FormGroup>
-                <Label>Name</Label>
-                <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-              </FormGroup>
-              <FormGroup>
-                <Label>Contact</Label>
-                <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone number" />
-              </FormGroup>
-              <FormGroup>
-                <Label>Location</Label>
-                <CityPicker value={city} onChange={setCity} />
-              </FormGroup>
-              {formError && <ErrorText>{formError}</ErrorText>}
-              {formSuccess && <SuccessText>{formSuccess}</SuccessText>}
-          </Modal>
-        </form>
-      )}
-
-      {error && <ErrorText>{error}</ErrorText>}
-
-      {loading ? (
-        <PageLoader />
-      ) : suppliers.length === 0 ? (
-        <EmptyState icon={Truck} title="No suppliers yet" />
-      ) : (
-        <>
-          <p className="text-xs text-gray-400 mb-3">
-            {owingCount > 0
-              ? `${owingCount} supplier${owingCount === 1 ? "" : "s"} awaiting payment — Rs. ${totalOwed.toLocaleString()} total`
-              : "All suppliers settled"}
-          </p>
-
-          <Card className="p-0 overflow-hidden">
-            <Table>
-              <thead>
-                <tr>
-                  <Th></Th>
-                  <SortHeader<SupplierSortKey> label="Code" sortKey="code" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
-                  <SortHeader<SupplierSortKey> label="Name" sortKey="name" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
-                  <SortHeader<SupplierSortKey> label="Phone" sortKey="phone" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
-                  <SortHeader<SupplierSortKey> label="City" sortKey="city" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
-                  <Th>
-                    <button
-                      onClick={() => toggleSort("balance")}
-                      className={`inline-flex items-center gap-1 hover:text-gray-700 transition-colors ${sortKey === "balance" ? "text-gray-900" : ""}`}
-                    >
-                      Balance owed
-                      {sortKey === "balance" ? (sortDir === "asc" ? <ChevronUp size={12} /> : <ChevronDown size={12} />) : null}
-                    </button>
-                    <HelpHint text="Calculated live from purchases minus payments made." />
-                  </Th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedSuppliers.map((s) => {
-                  const isExpanded = expandedId === s.id;
-                  const owes = (s.balance_owed ?? 0) > 0;
-                  return (
-                    <Fragment key={s.id}>
-                      <tr onClick={() => toggleExpand(s)} className="cursor-pointer hover:bg-gray-50">
-                        <Td className="w-8">
-                          {isExpanded ? <ChevronDown size={14} className="text-gray-400" /> : <ChevronRight size={14} className="text-gray-400" />}
-                        </Td>
-                        <Td>{s.supplier_code}</Td>
-                        <Td className="font-medium">{s.name}</Td>
-                        <Td>{s.phone ?? "—"}</Td>
-                        <Td>{s.city ?? "—"}</Td>
-                        <Td className={owes ? "font-medium" : "text-gray-500"}>
-                          {owes ? `Rs. ${s.balance_owed.toLocaleString()}` : "Settled"}
-                        </Td>
-                      </tr>
-                      {isExpanded && expandedDetail && (
-                        <tr>
-                          <Td colSpan={6} className="bg-gray-50">
+  // The opened supplier: details, bank accounts, payment history. Shown under its row on a wide screen and under its card on a phone.
+  function renderDetail(s: Supplier) {
+    if (!expandedDetail) return null;
+    return (
                             <div className="py-3 px-1">
                               <div className="flex items-center justify-between mb-4">
                                 <div>
@@ -705,6 +598,122 @@ export default function SuppliersPage() {
                                 </div>
                               )}
                             </div>
+    );
+  }
+
+  return (
+    <div>
+      <PageHeader
+        title="Suppliers"
+        subtitle="Click any supplier to manage it."
+        action={
+          <button
+            onClick={() => {
+              setShowAddModal(true);
+              setFormError(null);
+              setFormSuccess(null);
+            }}
+            className="flex items-center gap-2 px-4 py-2.5 bg-black text-white rounded-xl text-sm font-medium hover:bg-gray-800 transition"
+          >
+            <Plus size={16} />
+            Add supplier
+          </button>
+        }
+      />
+
+      {showAddModal && (
+        <form onSubmit={handleAdd}>
+          <Modal
+            size="md"
+            onClose={() => setShowAddModal(false)}
+            title="Add supplier"
+            footer={
+              <>
+                <Button type="button" onClick={() => setShowAddModal(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" variant="primary" disabled={submitting}>
+                  {submitting ? "Adding..." : "Add supplier"}
+                </Button>
+              </>
+            }
+          >
+              <FormGroup>
+                <Label>Name</Label>
+                <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+              </FormGroup>
+              <FormGroup>
+                <Label>Contact</Label>
+                <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone number" />
+              </FormGroup>
+              <FormGroup>
+                <Label>Location</Label>
+                <CityPicker value={city} onChange={setCity} />
+              </FormGroup>
+              {formError && <ErrorText>{formError}</ErrorText>}
+              {formSuccess && <SuccessText>{formSuccess}</SuccessText>}
+          </Modal>
+        </form>
+      )}
+
+      {error && <ErrorText>{error}</ErrorText>}
+
+      {loading ? (
+        <PageLoader />
+      ) : suppliers.length === 0 ? (
+        <EmptyState icon={Truck} title="No suppliers yet" />
+      ) : (
+        <>
+          <p className="text-xs text-gray-400 mb-3">
+            {owingCount > 0
+              ? `${owingCount} supplier${owingCount === 1 ? "" : "s"} awaiting payment — Rs. ${totalOwed.toLocaleString()} total`
+              : "All suppliers settled"}
+          </p>
+
+          {/* Desktop / tablet-landscape */}
+          <Card className="p-0 overflow-hidden hidden lg:block">
+            <Table>
+              <thead>
+                <tr>
+                  <Th></Th>
+                  <SortHeader<SupplierSortKey> label="Code" sortKey="code" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+                  <SortHeader<SupplierSortKey> label="Name" sortKey="name" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+                  <SortHeader<SupplierSortKey> label="Phone" sortKey="phone" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+                  <SortHeader<SupplierSortKey> label="City" sortKey="city" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+                  <Th>
+                    <button
+                      onClick={() => toggleSort("balance")}
+                      className={`inline-flex items-center gap-1 hover:text-gray-700 transition-colors ${sortKey === "balance" ? "text-gray-900" : ""}`}
+                    >
+                      Balance owed
+                      {sortKey === "balance" ? (sortDir === "asc" ? <ChevronUp size={12} /> : <ChevronDown size={12} />) : null}
+                    </button>
+                    <HelpHint text="Calculated live from purchases minus payments made." />
+                  </Th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedSuppliers.map((s) => {
+                  const isExpanded = expandedId === s.id;
+                  const owes = (s.balance_owed ?? 0) > 0;
+                  return (
+                    <Fragment key={s.id}>
+                      <tr onClick={() => toggleExpand(s)} className="cursor-pointer hover:bg-gray-50">
+                        <Td className="w-8">
+                          {isExpanded ? <ChevronDown size={14} className="text-gray-400" /> : <ChevronRight size={14} className="text-gray-400" />}
+                        </Td>
+                        <Td>{s.supplier_code}</Td>
+                        <Td className="font-medium">{s.name}</Td>
+                        <Td>{s.phone ?? "—"}</Td>
+                        <Td>{s.city ?? "—"}</Td>
+                        <Td className={owes ? "font-medium" : "text-gray-500"}>
+                          {owes ? `Rs. ${s.balance_owed.toLocaleString()}` : "Settled"}
+                        </Td>
+                      </tr>
+                      {isExpanded && expandedDetail && (
+                        <tr>
+                          <Td colSpan={6} className="bg-gray-50">
+                            {renderDetail(s)}
                           </Td>
                         </tr>
                       )}
@@ -714,6 +723,37 @@ export default function SuppliersPage() {
               </tbody>
             </Table>
           </Card>
+
+          {/* Phone / tablet-portrait */}
+          <div className="lg:hidden space-y-2.5">
+            {sortedSuppliers.map((s) => {
+              const isExpanded = expandedId === s.id;
+              const owes = (s.balance_owed ?? 0) > 0;
+              return (
+                <RowCard key={s.id} onClick={() => toggleExpand(s)}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-medium text-gray-900 leading-snug">{s.name}</p>
+                      <p className="mt-0.5 text-xs text-gray-400">
+                        {s.supplier_code}
+                        {s.phone ? ` · ${s.phone}` : ""}
+                        {s.city ? ` · ${s.city}` : ""}
+                      </p>
+                    </div>
+                    {isExpanded ? <ChevronDown size={16} className="mt-0.5 flex-shrink-0 text-gray-400" /> : <ChevronRight size={16} className="mt-0.5 flex-shrink-0 text-gray-300" />}
+                  </div>
+                  <RowCardStats>
+                    <RowCardStat label="Balance owed" value={owes ? `Rs. ${s.balance_owed.toLocaleString()}` : <span className="font-normal text-gray-500">Settled</span>} />
+                  </RowCardStats>
+                  {isExpanded && expandedDetail && (
+                    <div className="mt-3 border-t border-gray-100 pt-3" onClick={(e) => e.stopPropagation()}>
+                      {renderDetail(s)}
+                    </div>
+                  )}
+                </RowCard>
+              );
+            })}
+          </div>
         </>
       )}
     </div>

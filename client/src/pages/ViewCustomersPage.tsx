@@ -5,7 +5,7 @@ import { api, ApiRequestError } from "../lib/api";
 import { Customer } from "../lib/types";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { PageHeader, Card, Table, Th, Td, Input, Button, EmptyState, ErrorText, SortHeader } from "../components/ui";
+import { PageHeader, Card, Table, Th, Td, Input, Button, EmptyState, ErrorText, SortHeader, RowCard, RowCardStats, RowCardStat } from "../components/ui";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { useSortableData } from "../lib/useSortableData";
 import { findCustomers, CASHIER_SEARCH_MIN_CHARS } from "../lib/customerSearch";
@@ -320,7 +320,9 @@ export default function ViewCustomersPage() {
           />
         )
       ) : (
-        <Card className="p-0 overflow-hidden">
+        <>
+        {/* Desktop / tablet-landscape */}
+        <Card className="p-0 overflow-hidden hidden lg:block">
           <Table>
             <thead>
               <tr>
@@ -366,6 +368,53 @@ export default function ViewCustomersPage() {
             </tbody>
           </Table>
         </Card>
+
+        {/* Phone / tablet-portrait: one card per customer, so nothing is squeezed or scrolls sideways */}
+        <div className="lg:hidden space-y-2.5">
+          {sortedCustomers.map((c) => {
+            const netBalance = (c.store_credit_balance ?? 0) - (c.balance_due ?? 0);
+            return (
+              <RowCard key={c.id} onClick={() => navigate(`/customers/${c.id}`)}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-medium text-gray-900 leading-snug">
+                      {c.name}
+                      {c.is_suspended === 1 && <span className="ml-1.5 text-xs font-normal text-red-600">(suspended)</span>}
+                    </p>
+                    <p className="mt-0.5 text-xs text-gray-400">
+                      {c.customer_code}
+                      {c.phone ? ` · ${c.phone}` : ""}
+                    </p>
+                  </div>
+                  <ChevronRight size={16} className="mt-0.5 flex-shrink-0 text-gray-300" />
+                </div>
+                <RowCardStats>
+                  {(isAdmin || showingCredit) && (
+                    <RowCardStat
+                      label="Balance"
+                      value={
+                        <span className={netBalance < 0 ? "text-red-600" : netBalance > 0 ? "text-green-700" : ""}>
+                          {netBalance === 0 ? "—" : netBalance > 0 ? `+Rs. ${netBalance.toLocaleString()}` : `-Rs. ${Math.abs(netBalance).toLocaleString()}`}
+                        </span>
+                      }
+                    />
+                  )}
+                  <RowCardStat
+                    label="Points"
+                    value={
+                      <span className="inline-flex items-center gap-1">
+                        <Star size={12} className="text-amber-400" />
+                        {c.loyalty_points}
+                      </span>
+                    }
+                  />
+                  <RowCardStat label="Last order" value={c.last_order_date ? c.last_order_date.slice(0, 10) : "—"} />
+                </RowCardStats>
+              </RowCard>
+            );
+          })}
+        </div>
+        </>
       )}
     </div>
   );

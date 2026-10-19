@@ -29,7 +29,7 @@ import {
 import { groupByProduct, summarizeProductVariants } from "../lib/sizeSort";
 import { createProductSearchIndex, searchProductUnits } from "../lib/productSearch";
 import { GenderNavTabs, GenderNavPanel, GenderNavItem } from "../components/GenderNav";
-import { Button, Card, Input, ErrorText, EmptyState, Modal, Table, Th, Td, Badge, inventoryStatusTone } from "../components/ui";
+import { Button, Card, Input, ErrorText, EmptyState, Modal, Table, Th, Td, Badge, inventoryStatusTone, RowCard, RowCardStats, RowCardStat, ActionMenu } from "../components/ui";
 import { downloadTabularReport, buildReportFilename, todayLongDate } from "../lib/reportPdf";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { readMemory, useRemembered, useRememberedScroll, writeMemory } from "../lib/viewMemory";
@@ -551,10 +551,10 @@ export default function InventoryCategoriesPage() {
     <div>
       {/* ================= Header ================= */}
       <div
-        className="sticky top-0 z-20 pb-3 mb-5 bg-white/95 backdrop-blur-sm border-b border-gray-200 relative"
+        className="lg:sticky lg:top-0 z-20 pb-3 mb-5 bg-white/95 backdrop-blur-sm border-b border-gray-200 relative"
         onMouseLeave={() => setHoveredNav(null)}
       >
-        <div className="flex items-center gap-6">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
           {isAdmin ? (
             <div className="flex-shrink-0">
               <ProductsViewToggle current="stock" />
@@ -568,14 +568,16 @@ export default function InventoryCategoriesPage() {
             </button>
           )}
 
-          <GenderNavTabs
-            items={genderNavItems}
-            activeValue={activeGender ?? ALL}
-            onHover={setHoveredNav}
-            onSelectGender={selectGender}
-          />
+          <div className="min-w-0 max-w-full overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <GenderNavTabs
+              items={genderNavItems}
+              activeValue={activeGender ?? ALL}
+              onHover={setHoveredNav}
+              onSelectGender={selectGender}
+            />
+          </div>
 
-          <div className="flex items-center gap-2 flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-1 min-w-[220px]">
             <div className="relative flex-1 min-w-0" ref={searchBoxRef}>
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <Search size={14} className="text-gray-400" />
@@ -785,6 +787,8 @@ export default function InventoryCategoriesPage() {
               }
             />
           ) : (
+            <>
+            <div className="hidden lg:block">
             <Table className="[table-layout:fixed]">
               <thead>
                 <tr>
@@ -1031,6 +1035,79 @@ export default function InventoryCategoriesPage() {
                 })}
               </tbody>
             </Table>
+            </div>
+
+            {/* Phone / tablet-portrait: a card per product; opening one lists its sizes and colours as short rows */}
+            <div className="lg:hidden space-y-2.5 p-3">
+              {groups.map((group) => {
+                const isExpanded = expandedProductId === group.product_id;
+                const variants = isExpanded ? summarizeVariants(group.units) : [];
+                const subCategory = splitCategoryWithGender(group.units[0]?.category).subCategory;
+                return (
+                  <RowCard
+                    key={group.product_id}
+                    onClick={() => {
+                      setExpandedProductId(isExpanded ? null : group.product_id);
+                      if (group.product_id !== pinnedProductId) setPinnedProductId(null);
+                    }}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-medium text-gray-900 leading-snug">{group.product_title}</p>
+                        {(subCategory || group.brand) && <p className="mt-0.5 text-xs text-gray-400">{[subCategory, group.brand].filter(Boolean).join(" · ")}</p>}
+                      </div>
+                      <div className="flex flex-shrink-0 items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                        <ActionMenu
+                          items={[
+                            { label: "Download report", icon: <Download size={14} />, onClick: () => setDownloadTarget({ title: group.product_title, rows: buildDownloadRows(group) }) },
+                            ...(isAdmin ? [{ label: "Sold invoices", icon: <Receipt size={14} />, onClick: () => setSalesFor({ id: group.product_id, title: group.product_title }) }] : []),
+                          ]}
+                        />
+                        {isExpanded ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-300" />}
+                      </div>
+                    </div>
+                    <RowCardStats>
+                      <RowCardStat label="In stock" value={group.units.length} />
+                      <RowCardStat label="Price" value={group.selling_price ? `Rs. ${group.selling_price.toLocaleString()}` : "—"} />
+                    </RowCardStats>
+                    {isExpanded && (
+                      <div className="mt-3 space-y-1.5 border-t border-gray-100 pt-3" onClick={(e) => e.stopPropagation()}>
+                        {variants.map((row, i) => (
+                          <div key={`${row.color}-${row.size}-${row.status}`} className="rounded-lg bg-gray-50 px-3 py-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-sm text-gray-900">
+                                <span className="font-medium">{row.size}</span>
+                                <span className="text-gray-500"> · {row.color}</span>
+                              </p>
+                              <span className="flex flex-shrink-0 items-center gap-2">
+                                <span className="text-sm tabular-nums text-gray-700">× {row.count}</span>
+                                <Badge label={row.status} tone={inventoryStatusTone(row.status)} />
+                              </span>
+                            </div>
+                            <p
+                              onClick={(e) => copyValue(`sku-${group.product_id}-${i}`, row.skuSample, e)}
+                              className="mt-1 cursor-pointer select-none break-all text-xs text-gray-500"
+                              title="Tap to copy the SKU"
+                            >
+                              {row.count > 1 ? `${row.skuSample} (+${row.count - 1} more)` : row.skuSample}
+                            </p>
+                            <p
+                              onClick={(e) => copyValue(`bc-${group.product_id}-${i}`, firstBarcode(row.barcodeRange), e)}
+                              className="cursor-pointer select-none break-all font-mono text-[11px] text-gray-400"
+                              title="Tap to copy the barcode"
+                            >
+                              {row.barcodeRange}
+                            </p>
+                            {isAdmin && row.batchSupplierCode && <p className="text-[11px] text-gray-400">Supplier {row.batchSupplierCode}</p>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </RowCard>
+                );
+              })}
+            </div>
+            </>
           )}
         </Card>
       )}

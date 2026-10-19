@@ -32,6 +32,9 @@ import {
   HelpHint,
   Modal,
   ActionMenu,
+  RowCard,
+  RowCardStats,
+  RowCardStat,
 } from "../components/ui";
 import ProductSalesModal from "../components/ProductSalesModal";
 import ProductsViewToggle from "../components/ProductsViewToggle";
@@ -971,200 +974,10 @@ export default function ManageProductsPage() {
 
   const editSelectedCategory = categories.find((c) => c.name === editForm.category);
 
-  return (
-    <div>
-      {/* ================= Header — the same as Stock ================= */}
-      <div
-        className="sticky top-0 z-20 pb-3 mb-5 bg-white/95 backdrop-blur-sm border-b border-gray-200 relative"
-        onMouseLeave={() => setHoveredNav(null)}
-      >
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-          <div className="flex-shrink-0">
-            <ProductsViewToggle current="manage" />
-          </div>
-
-          <GenderNavTabs items={genderNavItems} activeValue={activeGender ?? ALL} onHover={setHoveredNav} onSelectGender={selectGender} />
-
-          <div className="flex items-center gap-2 flex-1 min-w-[240px]">
-            <div className="relative flex-1 min-w-0">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Search size={14} className="text-gray-400" />
-              </div>
-              <Input
-                ref={searchInputRef}
-                className="pl-8 pr-7 py-2 text-sm"
-                placeholder="Search product, brand…"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") {
-                    setSearchQuery("");
-                    searchInputRef.current?.blur();
-                  }
-                }}
-              />
-              {searchQuery && (
-                <button onClick={() => setSearchQuery("")} aria-label="Clear search" className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                  <X size={14} />
-                </button>
-              )}
-            </div>
-            <button
-              onClick={load}
-              disabled={loading}
-              className="p-2.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all"
-              title="Refresh"
-            >
-              <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
-            </button>
-          </div>
-
-          {/* What's special about Manage: adding to the catalogue. */}
-          <Button variant="primary" onClick={() => navigate("/products/add")} className="inline-flex flex-shrink-0 items-center gap-1.5">
-            <Plus size={14} />
-            Add product
-          </Button>
-        </div>
-
-        {hoveredItem && (
-          <GenderNavPanel
-            key={hoveredItem.value}
-            item={hoveredItem}
-            selectedGender={selectedFilter.gender ?? ALL}
-            selectedCategory={selectedFilter.category}
-            selectedSubCategory={selectedFilter.subCategory}
-            onSelectCategory={selectCategory}
-            onSelectSubCategory={selectSubCategory}
-          />
-        )}
-      </div>
-
-      {/* ---- Active filter chips ---- */}
-      {selectedFilter.brand && (
-        <div className="flex flex-wrap items-center gap-2 mb-3">
-          <button
-            onClick={() => setSelectedFilter((f) => ({ ...f, brand: undefined }))}
-            className="inline-flex items-center gap-1.5 text-xs bg-gray-100 text-gray-900 hover:bg-gray-200 rounded-full pl-2.5 pr-1.5 py-1 transition"
-          >
-            Brand: {selectedFilter.brand}
-            <X size={12} />
-          </button>
-        </div>
-      )}
-
-      {error && <ErrorText>{error}</ErrorText>}
-
-      {loading && products.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-24">
-          <Loader2 size={28} className="animate-spin text-gray-300" />
-          <p className="mt-3 text-sm text-gray-400">Loading products…</p>
-        </div>
-      ) : products.length === 0 ? (
-        <EmptyState icon={Package} title="No products yet" subtitle="Add one to get started" />
-      ) : (
-        <Card className="p-0 overflow-hidden">
-          <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
-            <p className="text-sm text-gray-500 truncate">
-              {selectedFilter.gender ? genderGroups.find((g) => g.gender === selectedFilter.gender)?.label : "All"}
-              {selectedFilter.category && (
-                <>
-                  <span className="text-gray-300"> › </span>
-                  {selectedFilter.category}
-                </>
-              )}
-              {selectedFilter.subCategory && (
-                <>
-                  <span className="text-gray-300"> › </span>
-                  <span className="font-medium text-gray-900">{selectedFilter.subCategory}</span>
-                </>
-              )}
-              {searchQuery.trim() && <span className="text-gray-400"> · matching “{searchQuery.trim()}”</span>}
-            </p>
-            <div className="flex flex-shrink-0 items-center gap-4">
-              <p className="text-xs text-gray-400 tabular-nums">
-                {filteredProducts.length} product{filteredProducts.length === 1 ? "" : "s"}, {visibleUnits.toLocaleString()} unit{visibleUnits === 1 ? "" : "s"}
-              </p>
-              <button
-                onClick={() => setShowManageCategoriesModal(true)}
-                className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-900 transition"
-                title="Add, rename or remove categories"
-              >
-                <Settings size={13} />
-                Manage categories
-              </button>
-            </div>
-          </div>
-
-          {filteredProducts.length === 0 ? (
-            <EmptyState icon={Search} title="No products match" subtitle={searchQuery.trim() ? `Nothing found for "${searchQuery}"` : "Nothing in this selection"} />
-          ) : (
-            <Table className="[table-layout:fixed]">
-              <thead>
-                <tr>
-                  <Th className="w-6"></Th>
-                  <SortHeader<ProductSortKey> label="Product" sortKey="title" activeKey={sortKey} dir={sortDir} onClick={toggleSort} className={showSubCategoryColumn ? "w-[30%]" : "w-[40%]"} />
-                  {showSubCategoryColumn && (
-                    <SortHeader<ProductSortKey> label="Sub-category" sortKey="subCategory" activeKey={sortKey} dir={sortDir} onClick={toggleSort} className="w-[16%]" />
-                  )}
-                  <SortHeader<ProductSortKey> label="Brand" sortKey="brand" activeKey={sortKey} dir={sortDir} onClick={toggleSort} className={showSubCategoryColumn ? "w-[16%]" : "w-[20%]"} />
-                  <SortHeader<ProductSortKey> label="Qty" sortKey="qty" activeKey={sortKey} dir={sortDir} onClick={toggleSort} className="w-[14%]" align="right" />
-                  <SortHeader<ProductSortKey> label="Price" sortKey="price" activeKey={sortKey} dir={sortDir} onClick={toggleSort} className="w-[14%]" align="right" />
-                  <Th className="w-[8%]"></Th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedProducts.map((p) => {
-                  const isExpanded = expandedId === p.id;
-                  const units = inventoryByProduct[p.id] ?? [];
-                  const subCategory = splitCategory(p.category).subCategory;
-
-                  return (
-                    <Fragment key={p.id}>
-                      <tr onClick={() => toggleExpand(p)} className="cursor-pointer hover:bg-gray-50 transition-colors">
-                        <Td className="w-6">
-                          {isExpanded ? <ChevronDown size={12} className="text-gray-400" /> : <ChevronRight size={12} className="text-gray-400" />}
-                        </Td>
-                        <Td className="font-medium text-gray-900 truncate" title={p.product_title}>
-                          {p.product_title}
-                        </Td>
-                        {showSubCategoryColumn && <Td className="truncate text-gray-500">{subCategory || "—"}</Td>}
-                        <Td className="truncate" title={p.brand ?? undefined}>
-                          {p.brand ? (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedFilter((f) => ({ ...f, brand: p.brand ?? undefined }));
-                              }}
-                              className="hover:underline text-left"
-                              title={`Filter by ${p.brand}`}
-                            >
-                              {p.brand}
-                            </button>
-                          ) : (
-                            "—"
-                          )}
-                        </Td>
-                        <Td className="text-right tabular-nums">
-                          <span className="inline-flex items-center justify-end gap-2">
-                            {p.qty < LOW_STOCK_THRESHOLD && <Badge label={p.qty === 0 ? "Out" : "Low"} tone="warning" />}
-                            {p.qty}
-                          </span>
-                        </Td>
-                        <Td className="text-right tabular-nums">Rs. {p.selling_price.toLocaleString()}</Td>
-                        <Td className="text-right">
-                          <ActionMenu
-                            items={[
-                              { label: "Restock", icon: <Boxes size={14} />, onClick: () => manageProduct(p, "restock") },
-                              { label: "Edit details", icon: <SquarePen size={14} />, onClick: () => manageProduct(p, "details") },
-                              { label: "Sold invoices", icon: <Receipt size={14} />, onClick: () => setSalesFor({ id: p.id, title: p.product_title }) },
-                            ]}
-                          />
-                        </Td>
-                      </tr>
-
-                      {isExpanded && (
-                        <tr>
-                          <Td colSpan={showSubCategoryColumn ? 7 : 6} className="bg-gray-50/70 !py-3 !px-4">
+  // The opened product: stock, restock and details. Shown under its row on a wide screen and under its card on a phone.
+  function renderExpanded(p: Product) {
+    const units = inventoryByProduct[p.id] ?? [];
+    return (
                             <div className="bg-white rounded-xl shadow-sm p-4 space-y-4">
                                 <div className="flex items-center gap-1 border-b border-gray-200">
                                   {(["stock", "restock", "details"] as ExpandedTab[]).map((tab) => (
@@ -1191,7 +1004,7 @@ export default function ManageProductsPage() {
                                       <p className="text-xs text-gray-400 px-1 py-2">No inventory units yet for this product.</p>
                                     ) : (
                                       <>
-                                        <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
+                                        <div className="border border-gray-200 rounded-xl overflow-x-auto bg-white">
                                           <table className="w-full text-sm">
                                             <thead>
                                               <tr>
@@ -1641,6 +1454,208 @@ export default function ManageProductsPage() {
                                   </div>
                                 )}
                               </div>
+    );
+  }
+
+  return (
+    <div>
+      {/* ================= Header — the same as Stock ================= */}
+      <div
+        className="lg:sticky lg:top-0 z-20 pb-3 mb-5 bg-white/95 backdrop-blur-sm border-b border-gray-200 relative"
+        onMouseLeave={() => setHoveredNav(null)}
+      >
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+          <div className="flex-shrink-0">
+            <ProductsViewToggle current="manage" />
+          </div>
+
+          <div className="min-w-0 max-w-full overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <GenderNavTabs items={genderNavItems} activeValue={activeGender ?? ALL} onHover={setHoveredNav} onSelectGender={selectGender} />
+          </div>
+
+          <div className="flex items-center gap-2 flex-1 min-w-[240px]">
+            <div className="relative flex-1 min-w-0">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <Search size={14} className="text-gray-400" />
+              </div>
+              <Input
+                ref={searchInputRef}
+                className="pl-8 pr-7 py-2 text-sm"
+                placeholder="Search product, brand…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    setSearchQuery("");
+                    searchInputRef.current?.blur();
+                  }
+                }}
+              />
+              {searchQuery && (
+                <button onClick={() => setSearchQuery("")} aria-label="Clear search" className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+            <button
+              onClick={load}
+              disabled={loading}
+              className="p-2.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all"
+              title="Refresh"
+            >
+              <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
+            </button>
+          </div>
+
+          {/* What's special about Manage: adding to the catalogue. */}
+          <Button variant="primary" onClick={() => navigate("/products/add")} className="inline-flex flex-shrink-0 items-center gap-1.5">
+            <Plus size={14} />
+            Add product
+          </Button>
+        </div>
+
+        {hoveredItem && (
+          <GenderNavPanel
+            key={hoveredItem.value}
+            item={hoveredItem}
+            selectedGender={selectedFilter.gender ?? ALL}
+            selectedCategory={selectedFilter.category}
+            selectedSubCategory={selectedFilter.subCategory}
+            onSelectCategory={selectCategory}
+            onSelectSubCategory={selectSubCategory}
+          />
+        )}
+      </div>
+
+      {/* ---- Active filter chips ---- */}
+      {selectedFilter.brand && (
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <button
+            onClick={() => setSelectedFilter((f) => ({ ...f, brand: undefined }))}
+            className="inline-flex items-center gap-1.5 text-xs bg-gray-100 text-gray-900 hover:bg-gray-200 rounded-full pl-2.5 pr-1.5 py-1 transition"
+          >
+            Brand: {selectedFilter.brand}
+            <X size={12} />
+          </button>
+        </div>
+      )}
+
+      {error && <ErrorText>{error}</ErrorText>}
+
+      {loading && products.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-24">
+          <Loader2 size={28} className="animate-spin text-gray-300" />
+          <p className="mt-3 text-sm text-gray-400">Loading products…</p>
+        </div>
+      ) : products.length === 0 ? (
+        <EmptyState icon={Package} title="No products yet" subtitle="Add one to get started" />
+      ) : (
+        <Card className="p-0 overflow-hidden">
+          <div className="px-5 py-3.5 border-b border-gray-100 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+            <p className="text-sm text-gray-500 truncate">
+              {selectedFilter.gender ? genderGroups.find((g) => g.gender === selectedFilter.gender)?.label : "All"}
+              {selectedFilter.category && (
+                <>
+                  <span className="text-gray-300"> › </span>
+                  {selectedFilter.category}
+                </>
+              )}
+              {selectedFilter.subCategory && (
+                <>
+                  <span className="text-gray-300"> › </span>
+                  <span className="font-medium text-gray-900">{selectedFilter.subCategory}</span>
+                </>
+              )}
+              {searchQuery.trim() && <span className="text-gray-400"> · matching “{searchQuery.trim()}”</span>}
+            </p>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+              <p className="text-xs text-gray-400 tabular-nums">
+                {filteredProducts.length} product{filteredProducts.length === 1 ? "" : "s"}, {visibleUnits.toLocaleString()} unit{visibleUnits === 1 ? "" : "s"}
+              </p>
+              <button
+                onClick={() => setShowManageCategoriesModal(true)}
+                className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-900 transition"
+                title="Add, rename or remove categories"
+              >
+                <Settings size={13} />
+                Manage categories
+              </button>
+            </div>
+          </div>
+
+          {filteredProducts.length === 0 ? (
+            <EmptyState icon={Search} title="No products match" subtitle={searchQuery.trim() ? `Nothing found for "${searchQuery}"` : "Nothing in this selection"} />
+          ) : (
+            <>
+            <div className="hidden lg:block">
+            <Table className="[table-layout:fixed]">
+              <thead>
+                <tr>
+                  <Th className="w-6"></Th>
+                  <SortHeader<ProductSortKey> label="Product" sortKey="title" activeKey={sortKey} dir={sortDir} onClick={toggleSort} className={showSubCategoryColumn ? "w-[30%]" : "w-[40%]"} />
+                  {showSubCategoryColumn && (
+                    <SortHeader<ProductSortKey> label="Sub-category" sortKey="subCategory" activeKey={sortKey} dir={sortDir} onClick={toggleSort} className="w-[16%]" />
+                  )}
+                  <SortHeader<ProductSortKey> label="Brand" sortKey="brand" activeKey={sortKey} dir={sortDir} onClick={toggleSort} className={showSubCategoryColumn ? "w-[16%]" : "w-[20%]"} />
+                  <SortHeader<ProductSortKey> label="Qty" sortKey="qty" activeKey={sortKey} dir={sortDir} onClick={toggleSort} className="w-[14%]" align="right" />
+                  <SortHeader<ProductSortKey> label="Price" sortKey="price" activeKey={sortKey} dir={sortDir} onClick={toggleSort} className="w-[14%]" align="right" />
+                  <Th className="w-[8%]"></Th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedProducts.map((p) => {
+                  const isExpanded = expandedId === p.id;
+                  const units = inventoryByProduct[p.id] ?? [];
+                  const subCategory = splitCategory(p.category).subCategory;
+
+                  return (
+                    <Fragment key={p.id}>
+                      <tr onClick={() => toggleExpand(p)} className="cursor-pointer hover:bg-gray-50 transition-colors">
+                        <Td className="w-6">
+                          {isExpanded ? <ChevronDown size={12} className="text-gray-400" /> : <ChevronRight size={12} className="text-gray-400" />}
+                        </Td>
+                        <Td className="font-medium text-gray-900 truncate" title={p.product_title}>
+                          {p.product_title}
+                        </Td>
+                        {showSubCategoryColumn && <Td className="truncate text-gray-500">{subCategory || "—"}</Td>}
+                        <Td className="truncate" title={p.brand ?? undefined}>
+                          {p.brand ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedFilter((f) => ({ ...f, brand: p.brand ?? undefined }));
+                              }}
+                              className="hover:underline text-left"
+                              title={`Filter by ${p.brand}`}
+                            >
+                              {p.brand}
+                            </button>
+                          ) : (
+                            "—"
+                          )}
+                        </Td>
+                        <Td className="text-right tabular-nums">
+                          <span className="inline-flex items-center justify-end gap-2">
+                            {p.qty < LOW_STOCK_THRESHOLD && <Badge label={p.qty === 0 ? "Out" : "Low"} tone="warning" />}
+                            {p.qty}
+                          </span>
+                        </Td>
+                        <Td className="text-right tabular-nums">Rs. {p.selling_price.toLocaleString()}</Td>
+                        <Td className="text-right">
+                          <ActionMenu
+                            items={[
+                              { label: "Restock", icon: <Boxes size={14} />, onClick: () => manageProduct(p, "restock") },
+                              { label: "Edit details", icon: <SquarePen size={14} />, onClick: () => manageProduct(p, "details") },
+                              { label: "Sold invoices", icon: <Receipt size={14} />, onClick: () => setSalesFor({ id: p.id, title: p.product_title }) },
+                            ]}
+                          />
+                        </Td>
+                      </tr>
+
+                      {isExpanded && (
+                        <tr>
+                          <Td colSpan={showSubCategoryColumn ? 7 : 6} className="bg-gray-50/70 !py-3 !px-4">
+                            {renderExpanded(p)}
                             </Td>
                           </tr>
                         )}
@@ -1649,6 +1664,53 @@ export default function ManageProductsPage() {
                   })}
                 </tbody>
               </Table>
+            </div>
+
+            {/* Phone / tablet-portrait: a card per product; opening one shows the same stock / restock / details panel under it */}
+            <div className="lg:hidden space-y-2.5 p-3">
+              {sortedProducts.map((p) => {
+                const isExpanded = expandedId === p.id;
+                const subCategory = splitCategory(p.category).subCategory;
+                return (
+                  <RowCard key={p.id} onClick={() => toggleExpand(p)}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-medium text-gray-900 leading-snug">{p.product_title}</p>
+                        {(subCategory || p.brand) && <p className="mt-0.5 text-xs text-gray-400">{[subCategory, p.brand].filter(Boolean).join(" · ")}</p>}
+                      </div>
+                      <div className="flex flex-shrink-0 items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                        <ActionMenu
+                          items={[
+                            { label: "Restock", icon: <Boxes size={14} />, onClick: () => manageProduct(p, "restock") },
+                            { label: "Edit details", icon: <SquarePen size={14} />, onClick: () => manageProduct(p, "details") },
+                            { label: "Sold invoices", icon: <Receipt size={14} />, onClick: () => setSalesFor({ id: p.id, title: p.product_title }) },
+                          ]}
+                        />
+                        {isExpanded ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-300" />}
+                      </div>
+                    </div>
+                    <RowCardStats>
+                      <RowCardStat
+                        label="In stock"
+                        value={
+                          <span className="inline-flex items-center gap-2">
+                            {p.qty}
+                            {p.qty < LOW_STOCK_THRESHOLD && <Badge label={p.qty === 0 ? "Out" : "Low"} tone="warning" />}
+                          </span>
+                        }
+                      />
+                      <RowCardStat label="Price" value={`Rs. ${p.selling_price.toLocaleString()}`} />
+                    </RowCardStats>
+                    {isExpanded && (
+                      <div className="mt-3 border-t border-gray-100 pt-3" onClick={(e) => e.stopPropagation()}>
+                        {renderExpanded(p)}
+                      </div>
+                    )}
+                  </RowCard>
+                );
+              })}
+            </div>
+            </>
             )}
           </Card>
       )}
