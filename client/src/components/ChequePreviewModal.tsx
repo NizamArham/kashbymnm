@@ -71,16 +71,18 @@ function CrossingMark() {
   );
 }
 
-// The bank's verdict, stamped onto the cheque in the owner's own style: a plain thin rectangle, the verdict set big across the top, one
-// rule under it, and the date underneath in small spaced capitals — nothing else. Tilted well off square like a hand-pressed stamp.
-// Drawn as clean solid vectors with sharp edges (no blur, no filter), in muted dusty blue when the cheque passed and dusty red when it
-// bounced, so it sits in the plain black-and-white cheque, behind the printed text. The only wear is a slightly lighter side.
+// The bank's verdict, stamped onto the cheque in the owner's own style: a plain thin rectangle, the verdict across the top, one rule under
+// it, and the date underneath — nothing else. The lettering is quiet and classic rather than bold: the verdict in a regular-weight serif
+// with wide letter-spacing (the way a bank's name is set on a cheque), the date in a small italic serif beneath it. Tilted well off square
+// like a hand-pressed stamp. Drawn as clean solid vectors with sharp edges (no blur, no filter), in muted dusty blue when the cheque
+// passed and dusty red when it bounced, so it sits in the plain black-and-white cheque, behind the printed text. The only wear is a
+// slightly lighter side.
 function ChequeSeal({ status, settledAt, className = "" }: { status: string; settledAt?: string | null; chequeNumber?: string; className?: string }) {
   const passed = status === "cleared";
   const uid = useId().replace(/:/g, "");
   const ink = passed ? "#4d7099" : "#a4524e";
-  const under = settledAt ? formatDateDisplay(settledAt).toUpperCase() : passed ? "PASSED AT THE BANK" : "RETURNED UNPAID";
-  const sans = '"Helvetica Neue", Helvetica, Arial, sans-serif';
+  const under = settledAt ? formatDateDisplay(settledAt) : passed ? "Passed at the bank" : "Returned unpaid";
+  const serif = '"Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif';
   return (
     <svg viewBox="0 0 200 90" className={`pointer-events-none absolute aspect-[200/90] -rotate-[10deg] ${className}`} style={{ color: ink, mixBlendMode: "multiply" }} aria-hidden="true">
       <defs>
@@ -93,13 +95,13 @@ function ChequeSeal({ status, settledAt, className = "" }: { status: string; set
         </mask>
       </defs>
       <g mask={`url(#wear-${uid})`} opacity="0.92" fill="currentColor" stroke="none" textRendering="geometricPrecision" shapeRendering="geometricPrecision">
-        <rect x="1.5" y="1.5" width="197" height="87" fill="none" stroke="currentColor" strokeWidth="1.5" />
-        <line x1="1.5" y1="58" x2="198.5" y2="58" stroke="currentColor" strokeWidth="1.5" />
-        {/* the verdict fills the width whatever face the device has, so the stamp always looks the same */}
-        <text x="12" y="45" fontFamily={sans} fontSize="40" fontWeight="700" textLength="176" lengthAdjust="spacingAndGlyphs">
+        <rect x="1.5" y="1.5" width="197" height="87" fill="none" stroke="currentColor" strokeWidth="1.3" />
+        <line x1="1.5" y1="58" x2="198.5" y2="58" stroke="currentColor" strokeWidth="1.3" />
+        {/* the verdict is spread to the same width whatever face the device has, so the stamp always looks the same */}
+        <text x="16" y="40.5" fontFamily={serif} fontSize="28" fontWeight="400" stroke="currentColor" strokeWidth="0.55" strokeLinejoin="round" textLength="168" lengthAdjust="spacing">
           {passed ? "CLEARED" : "BOUNCED"}
         </text>
-        <text x="100" y="79" textAnchor="middle" fontFamily={sans} fontSize="15" fontWeight="500" letterSpacing="1.8">
+        <text x="100" y="78.5" textAnchor="middle" fontFamily={serif} fontSize="16" fontStyle="italic" fontWeight="400" letterSpacing="0.6">
           {under}
         </text>
       </g>
