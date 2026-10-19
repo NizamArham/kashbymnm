@@ -320,7 +320,7 @@ export default function ChequePreviewModal({
                   }}
                 />
 
-                {stamped && <ChequeSeal status={cheque.status} settledAt={cheque.settled_at} chequeNumber={cheque.cheque_number} className="right-[19%] top-[51%] w-[17%] -translate-y-1/2" />}
+                {stamped && <ChequeSeal status={cheque.status} settledAt={cheque.settled_at} chequeNumber={cheque.cheque_number} className="left-[57%] top-[63%] w-[17%] -translate-x-1/2 -translate-y-1/2" />}
                 <div className="relative flex min-h-0 flex-1 flex-col">
                 <p className="relative text-[10px] uppercase tracking-wider text-gray-400 mb-2">Endorsement history</p>
 
@@ -371,9 +371,11 @@ export default function ChequePreviewModal({
                         <p className="text-[9px] text-gray-400 uppercase tracking-wide">Given to</p>
                         <p className="text-sm text-gray-900 font-medium truncate">{supplierName}</p>
                       </div>
-                      <p className="text-xs text-gray-500 flex-shrink-0 ml-3">{formatDateDisplay(cheque.cheque_date)}</p>
+                      {cheque.date_issued && (
+                        <p className="text-xs text-gray-500 flex-shrink-0 ml-3">{formatDateDisplay(cheque.date_issued)}</p>
+                      )}
                     </div>
-                    <p className="text-center text-[10px] text-gray-400 mt-1">
+                    <p className="text-left text-[10px] text-gray-400 mt-1">
                       Written directly to this supplier — no prior holder.
                     </p>
                   </div>

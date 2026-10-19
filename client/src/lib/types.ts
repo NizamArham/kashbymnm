@@ -728,6 +728,8 @@ export interface ChequeInfo {
   bank_name: string;
   amount: number;
   cheque_date: string;
+  // When we gave an issued cheque to the supplier (not the date written on it).
+  date_issued?: string;
   status: string;
   date_received?: string;
   from_customer_name?: string;

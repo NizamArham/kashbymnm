@@ -216,7 +216,7 @@ supplierPaymentsRouter.get(
     function findChequeForPayment(supplierPaymentId: number) {
       const issued = db
         .prepare(
-          `SELECT cheque_number, bank_name, amount, cheque_date, status, branch, is_crossed, payee_name,
+          `SELECT cheque_number, bank_name, amount, cheque_date, date_issued, status, branch, is_crossed, payee_name,
                   CASE status WHEN 'cleared' THEN cleared_at WHEN 'bounced' THEN bounced_at END AS settled_at
            FROM cheques_issued WHERE supplier_payment_id = ?`
         )
@@ -226,6 +226,7 @@ supplierPaymentsRouter.get(
             bank_name: string;
             amount: number;
             cheque_date: string;
+            date_issued: string;
             status: string;
             branch: string | null;
             is_crossed: number;
@@ -298,6 +299,8 @@ supplierPaymentsRouter.get(
       bank_name: string;
       amount: number;
       cheque_date: string;
+      // When we gave an issued cheque to the supplier (not the date written on it).
+      date_issued?: string;
       status: string;
       date_received?: string;
       from_customer_name?: string;
