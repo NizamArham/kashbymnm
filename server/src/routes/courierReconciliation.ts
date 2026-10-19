@@ -230,6 +230,14 @@ function buildSummary(): CourierSummary[] {
   });
 }
 
+// GET /api/courier-reconciliation/owed — just the headline for the dashboard: what couriers are holding for the shop right now
+// (a courier the shop owes money to isn't netted off against another's balance).
+courierReconciliationRouter.get("/owed", asyncHandler(async (_req, res) => {
+  syncDispatchedRows();
+  const owing = buildSummary().filter((c) => c.balance > 0);
+  res.json({ total: round2(owing.reduce((sum, c) => sum + c.balance, 0)), couriers: owing.length });
+}));
+
 courierReconciliationRouter.get("/", asyncHandler(async (_req, res) => {
   syncDispatchedRows();
   const summary = buildSummary();

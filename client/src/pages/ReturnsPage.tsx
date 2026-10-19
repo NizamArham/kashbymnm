@@ -74,7 +74,13 @@ function statusTone(status: string): "success" | "warning" | "danger" | "neutral
 }
 
 export default function ReturnsPage() {
-  const [activeTab, setActiveTab] = useState<ReturnsTab>("request");
+  // The dashboard's "waiting for your approval" row lands straight on that tab (/returns?tab=approve).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<ReturnsTab>(() => (searchParams.get("tab") === "approve" ? "approve" : "request"));
+  useEffect(() => {
+    if (searchParams.get("tab")) setSearchParams({}, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Everything waiting for an admin's yes — read here so the tab can show how many there are, and refreshed after anything is asked or decided.
   const [approvals, setApprovals] = useState<ReturnApprovals | null>(null);

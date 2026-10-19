@@ -100,6 +100,9 @@ interface ChequeReminder {
   supplier_name?: string;
 }
 
+// Fewer than this many pieces of a product on the shelf and it counts as low (same as the "Low" badge on Manage products).
+const LOW_STOCK_THRESHOLD = 5;
+
 interface SupplierBalance {
   id: number;
   supplier_code: string;
@@ -120,7 +123,10 @@ export default function DashboardPage() {
   const [allSales, setAllSales] = useState<Sale[]>([]);
   const [cashTotal, setCashTotal] = useState<number | null>(null);
   const [bankTotal, setBankTotal] = useState<number | null>(null);
-  const [lowStockCount, setLowStockCount] = useState<number | null>(null);
+  // Products (not variants) with something on the shelf but fewer than 5 left — the same "Low" Manage products shows.
+  const [lowStockProducts, setLowStockProducts] = useState<number | null>(null);
+  const [approvalsWaiting, setApprovalsWaiting] = useState(0);
+  const [courierOwed, setCourierOwed] = useState<{ total: number; couriers: number } | null>(null);
   const [owingSuppliers, setOwingSuppliers] = useState<SupplierBalance[]>([]);
   const [owingCustomers, setOwingCustomers] = useState<Customer[]>([]);
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
@@ -162,16 +168,13 @@ export default function DashboardPage() {
         setReturns(returnsRes);
         setReturnedByDay(returnedRes.days);
 
-        // Low stock count: how many distinct (product, color, size) variants
-        // have 5 or fewer available units. Matches the threshold used on the
-        // Inventory page so it doesn't drift.
-        const counts = new Map<string, number>();
-        for (const u of inventory) {
-          const key = `${u.product_id}|${u.color ?? ""}|${u.size ?? ""}`;
-          counts.set(key, (counts.get(key) ?? 0) + 1);
-        }
-        const lowCount = Array.from(counts.values()).filter((n) => n <= 5).length;
-        setLowStockCount(lowCount);
+        // Low stock is counted by product, not by size/colour variant — a few
+        // hundred thin variants isn't a number anyone can act on. A product is
+        // low when its units add up to fewer than 5 (the "Low" badge on Manage
+        // products); one that is completely sold out isn't listed here.
+        const perProduct = new Map<number, number>();
+        for (const u of inventory) perProduct.set(u.product_id, (perProduct.get(u.product_id) ?? 0) + 1);
+        setLowStockProducts(Array.from(perProduct.values()).filter((n) => n < LOW_STOCK_THRESHOLD).length);
 
         setOwingSuppliers(suppliers.filter((s) => (s.balance_owed ?? 0) > 0));
 
@@ -196,6 +199,19 @@ export default function DashboardPage() {
         .catch(() => {
           // quietly skip the reminder card if this fails
         });
+      // Money and decisions only an admin can act on.
+      api
+        .get<{ count: number }>("/returns/approvals/count")
+        .then((r) => {
+          if (!cancelled) setApprovalsWaiting(r.count);
+        })
+        .catch(() => {});
+      api
+        .get<{ total: number; couriers: number }>("/courier-reconciliation/owed")
+        .then((r) => {
+          if (!cancelled) setCourierOwed(r);
+        })
+        .catch(() => {});
     }
 
     return () => {
@@ -253,11 +269,21 @@ export default function DashboardPage() {
   const chequesToPay = chequeReminders?.to_pay ?? [];
   const hasCheques = chequesToDeposit.length > 0 || chequesToPay.length > 0;
 
+  // Parcels that need hands on them: not yet packed, and packed but not yet with the courier.
+  const toPack = deliveries.filter((d) => d.delivery_status === "pending").length;
+  const packedWaiting = deliveries.filter((d) => d.delivery_status === "packed").length;
+  const hasParcels = toPack + packedWaiting > 0;
+  const hasCourierOwed = !!courierOwed && courierOwed.total > 0;
+  const hasLowStock = lowStockProducts !== null && lowStockProducts > 0;
+
   const needsAttentionCount =
+    (approvalsWaiting > 0 ? 1 : 0) +
+    (hasParcels ? 1 : 0) +
+    (hasCourierOwed ? 1 : 0) +
     (hasCheques ? 1 : 0) +
-    (lowStockCount !== null && lowStockCount > 0 ? 1 : 0) +
+    (owingCustomers.length > 0 ? 1 : 0) +
     (owingSuppliers.length > 0 ? 1 : 0) +
-    (owingCustomers.length > 0 ? 1 : 0);
+    (hasLowStock ? 1 : 0);
 
   return (
     <div>
@@ -316,6 +342,45 @@ export default function DashboardPage() {
             <p className="text-sm text-gray-400">Nothing pending. All clear.</p>
           ) : (
             <div className="divide-y divide-gray-100">
+              {approvalsWaiting > 0 && (
+                <button
+                  onClick={() => navigate("/returns?tab=approve")}
+                  className="w-full flex items-center justify-between py-2.5 text-left hover:bg-gray-50 -mx-2 px-2 rounded transition"
+                >
+                  <span className="text-sm text-gray-700">
+                    <span className="tabular-nums">{approvalsWaiting}</span> {approvalsWaiting === 1 ? "return or exchange" : "returns or exchanges"} waiting for your approval
+                  </span>
+                  <ArrowRight size={14} className="text-gray-400" />
+                </button>
+              )}
+
+              {hasParcels && (
+                <button
+                  onClick={() => navigate("/deliveries")}
+                  className="w-full flex items-center justify-between py-2.5 text-left hover:bg-gray-50 -mx-2 px-2 rounded transition"
+                >
+                  <span className="text-sm text-gray-700">
+                    {toPack > 0 && `${toPack} parcel${toPack === 1 ? "" : "s"} to pack`}
+                    {toPack > 0 && packedWaiting > 0 && " · "}
+                    {packedWaiting > 0 && `${packedWaiting} packed, waiting to dispatch`}
+                  </span>
+                  <ArrowRight size={14} className="text-gray-400" />
+                </button>
+              )}
+
+              {hasCourierOwed && courierOwed && (
+                <button
+                  onClick={() => navigate("/couriers")}
+                  className="w-full flex items-center justify-between py-2.5 text-left hover:bg-gray-50 -mx-2 px-2 rounded transition"
+                >
+                  <span className="text-sm text-gray-700">
+                    Couriers owe you — <span className="tabular-nums">Rs. {courierOwed.total.toLocaleString()}</span>
+                    <span className="text-gray-400"> ({courierOwed.couriers} courier{courierOwed.couriers === 1 ? "" : "s"})</span>
+                  </span>
+                  <ArrowRight size={14} className="text-gray-400" />
+                </button>
+              )}
+
               {hasCheques && (
                 <button
                   onClick={() => navigate("/cheques")}
@@ -330,13 +395,14 @@ export default function DashboardPage() {
                 </button>
               )}
 
-              {lowStockCount !== null && lowStockCount > 0 && (
+              {owingCustomers.length > 0 && (
                 <button
-                  onClick={() => navigate("/inventory")}
+                  onClick={() => navigate("/customers")}
                   className="w-full flex items-center justify-between py-2.5 text-left hover:bg-gray-50 -mx-2 px-2 rounded transition"
                 >
                   <span className="text-sm text-gray-700">
-                    {lowStockCount} low-stock variant{lowStockCount === 1 ? "" : "s"} (5 or fewer left)
+                    {owingCustomers.length} customer{owingCustomers.length === 1 ? "" : "s"} owe you —{" "}
+                    <span className="tabular-nums">Rs. {customerOwedTotal.toLocaleString()}</span>
                   </span>
                   <ArrowRight size={14} className="text-gray-400" />
                 </button>
@@ -355,14 +421,13 @@ export default function DashboardPage() {
                 </button>
               )}
 
-              {owingCustomers.length > 0 && (
+              {hasLowStock && (
                 <button
-                  onClick={() => navigate("/customers")}
+                  onClick={() => navigate("/products")}
                   className="w-full flex items-center justify-between py-2.5 text-left hover:bg-gray-50 -mx-2 px-2 rounded transition"
                 >
                   <span className="text-sm text-gray-700">
-                    {owingCustomers.length} customer{owingCustomers.length === 1 ? "" : "s"} owe you —{" "}
-                    <span className="tabular-nums">Rs. {customerOwedTotal.toLocaleString()}</span>
+                    {lowStockProducts} product{lowStockProducts === 1 ? "" : "s"} running low (under {LOW_STOCK_THRESHOLD} left)
                   </span>
                   <ArrowRight size={14} className="text-gray-400" />
                 </button>
