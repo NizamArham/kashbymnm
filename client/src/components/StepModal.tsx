@@ -25,7 +25,7 @@ export default function StepModal({
   buttons: ReactNode;
 }) {
   return (
-    <Modal size="3xl" height="h-[min(40rem,calc(100dvh-2rem))]" flush title={title} subtitle={subtitle} onClose={onClose}
+    <Modal size="xl" height="h-[min(40rem,calc(100dvh-2rem))]" flush title={title} subtitle={subtitle} onClose={onClose}
       footer={
         <>
           <span className={`mr-auto min-w-0 basis-full text-xs sm:basis-0 sm:flex-1 ${message ? "text-red-500" : "text-gray-400"}`}>{message}</span>

@@ -293,7 +293,7 @@ export default function PackWaybillModal({
   return (
     <>
       <Modal
-        size="2xl"
+        size="lg"
         onClose={onClose}
         title="Generate waybill"
         subtitle={`${delivery.invoice} — ${

@@ -405,7 +405,7 @@ export default function OnlineExchangeModal({
 
   return (
     <Modal
-      size="3xl"
+      size="xl"
       height="h-[min(44rem,calc(100dvh-2rem))]"
       flush
       onClose={onClose}

@@ -761,7 +761,7 @@ export default function CashBookPage() {
 
       {showAdd && (
         <Modal
-          size="sm"
+          size="md"
           onClose={() => setShowAdd(false)}
           title="Add entry"
           subtitle="For anything with no other source — rent, utilities, misc income."

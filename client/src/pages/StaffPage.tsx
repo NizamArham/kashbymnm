@@ -403,7 +403,7 @@ export default function StaffPage() {
 
       {resettingUser && (
         <Modal
-          size="md"
+          size="sm"
           onClose={() => setResettingUser(null)}
           title="Reset password"
           footer={

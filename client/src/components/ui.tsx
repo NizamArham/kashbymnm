@@ -560,13 +560,17 @@ export function HelpHint({ text, className = "" }: { text: string; className?: s
 // the body between them does — so the title and the action buttons are always
 // in reach however long the content gets. Escape and a click outside close it
 // (only the top-most one, when a dialog opens another).
-//   size   — sm 448px · md 512px (default) · lg 576px · xl 672px · 2xl 896px · 3xl 1024px
+//   size   — one of four widths, chosen by what the dialog is for:
+//              sm 448px  a question or a one-field prompt (confirm, reason, a single amount)
+//              md 576px  a form with several fields (the default)
+//              lg 896px  two columns, steps, or a table
+//              xl 1024px the biggest two-panel flows only (the exchange order, step wizards)
 //   footer — the action buttons, right-aligned (usually Cancel then the main one)
 //   stacked — set when it opens on top of another dialog
 //   height — a fixed panel height instead of "as tall as the content" (wizards
 //            with side-by-side columns); flush — a body with no padding that
 //            doesn't scroll itself, for content that lays out and scrolls its own columns
-const MODAL_WIDTH = { sm: "max-w-md", md: "max-w-lg", lg: "max-w-xl", xl: "max-w-2xl", "2xl": "max-w-4xl", "3xl": "max-w-5xl" } as const;
+const MODAL_WIDTH = { sm: "max-w-md", md: "max-w-xl", lg: "max-w-4xl", xl: "max-w-5xl" } as const;
 const openModals: symbol[] = [];
 
 export function Modal({

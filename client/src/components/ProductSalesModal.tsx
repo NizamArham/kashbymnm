@@ -91,7 +91,7 @@ export default function ProductSalesModal({ productId, productTitle, onClose }: 
     : "Loading…";
 
   return (
-    <Modal size="2xl" onClose={onClose} title={`Sold invoices — ${productTitle}`} subtitle={subtitle} footer={<Button onClick={onClose}>Close</Button>}>
+    <Modal size="lg" onClose={onClose} title={`Sold invoices — ${productTitle}`} subtitle={subtitle} footer={<Button onClick={onClose}>Close</Button>}>
       {error && <ErrorText>{error}</ErrorText>}
       {data && data.rows.length === 0 && <p className="text-sm text-gray-500">No piece of this product has been sold on an invoice yet.</p>}
       {priceRange && (

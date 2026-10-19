@@ -757,7 +757,7 @@ export default function ChequesPage() {
 
       {showIssueForm && (
         <Modal
-          size="xl"
+          size="md"
           onClose={() => setShowIssueForm(false)}
           title="Issue a cheque"
           subtitle="A cheque written from your own account, straight to a supplier. Their balance reduces now; the Cash Book updates once it clears."
@@ -839,7 +839,7 @@ export default function ChequesPage() {
 
       {editingCheque && (
         <Modal
-          size="sm"
+          size="md"
           onClose={() => setEditingCheque(null)}
           title="Edit cheque"
           subtitle={

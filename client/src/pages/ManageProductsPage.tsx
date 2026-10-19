@@ -492,7 +492,7 @@ function ManageCategoriesModal({
   return (
     <>
       <Modal
-        size="lg"
+        size="md"
         onClose={onClose}
         title="Manage categories"
         subtitle="Renaming or deleting here is blocked while a product still uses it."

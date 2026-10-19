@@ -94,7 +94,7 @@ function PartnerFormModal({
 
   return (
     <Modal
-      size="lg"
+      size="md"
       onClose={onClose}
       title={editing ? `Edit ${partner!.name}` : "Add delivery partner"}
       footer={

@@ -42,7 +42,7 @@ export default function CancelReasonModal({
 
   return (
     <Modal
-      size="md"
+      size="sm"
       stacked={stacked}
       title={title}
       onClose={onClose}

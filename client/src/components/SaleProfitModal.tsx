@@ -109,7 +109,7 @@ export default function SaleProfitModal({ saleId, invoice, onClose }: { saleId: 
 
   return (
     <Modal
-      size="xl"
+      size="md"
       onClose={onClose}
       title={`Profit on ${invoice}`}
       subtitle="What this bill earned, after what each piece cost you"

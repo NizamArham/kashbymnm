@@ -93,7 +93,7 @@ export default function ChequePreviewModal({
 
   return (
     <Modal
-      size="xl"
+      size="md"
       onClose={onClose}
       title={
         <span className="inline-flex items-center gap-2">

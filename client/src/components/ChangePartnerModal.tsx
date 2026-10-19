@@ -79,7 +79,7 @@ export default function ChangePartnerModal({
 
   return (
     <Modal
-      size="lg"
+      size="md"
       stacked
       onClose={onClose}
       title="Change courier"

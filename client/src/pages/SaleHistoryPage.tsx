@@ -1158,7 +1158,7 @@ export default function SaleHistoryPage() {
 
       {wholesaleSale && (
         <Modal
-          size="md"
+          size="sm"
           onClose={() => setWholesaleSale(null)}
           title="Mark as wholesale"
           subtitle="Takes back the loyalty points this sale earned. It's added to the customer's points history; nothing else about the sale changes."

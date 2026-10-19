@@ -1256,7 +1256,7 @@ export default function CustomerProfilePage() {
       {/* ================= RECORD PAYMENT WIZARD ================= */}
       {payingCustomer && (
         <Modal
-          size="2xl"
+          size="lg"
           height="h-[min(640px,calc(100dvh-2rem))]"
           flush
           onClose={() => setPayingCustomer(null)}
@@ -1548,7 +1548,7 @@ export default function CustomerProfilePage() {
 
       {receiptAfterPayment && (
         <Modal
-          size="md"
+          size="sm"
           onClose={() => setReceiptAfterPayment(null)}
           title="Payment recorded"
           footer={
@@ -1606,7 +1606,7 @@ export default function CustomerProfilePage() {
 
       {redeemTarget && (
         <Modal
-          size="md"
+          size="sm"
           onClose={() => setRedeemTarget(null)}
           title={`Redeem points — ${redeemTarget.name}`}
           subtitle="1 point = Rs. 1 of store credit. Redeemable now that this customer has reached the 500-point minimum."
@@ -1643,7 +1643,7 @@ export default function CustomerProfilePage() {
 
       {suspendTarget && (
         <Modal
-          size="md"
+          size="sm"
           onClose={() => setSuspendTarget(null)}
           title={`Suspend ${suspendTarget.name}`}
           subtitle="They'll stay fully in the system — every sale, loyalty point, and credit is untouched — they just can't be selected for a new sale until reactivated."
@@ -1666,7 +1666,7 @@ export default function CustomerProfilePage() {
 
       {reactivateTarget && (
         <Modal
-          size="md"
+          size="sm"
           onClose={() => setReactivateTarget(null)}
           title={`Reactivate ${reactivateTarget.name}`}
           footer={
@@ -1691,7 +1691,7 @@ export default function CustomerProfilePage() {
 
       {deleteTarget && (
         <Modal
-          size="md"
+          size="sm"
           onClose={() => {
             setDeleteTarget(null);
             setDeleteWarning(null);

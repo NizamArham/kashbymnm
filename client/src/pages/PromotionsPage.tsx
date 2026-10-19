@@ -251,7 +251,7 @@ function CouponFormModal({ coupon, onClose, onSaved }: { coupon?: Coupon; onClos
 
   return (
     <Modal
-      size="lg"
+      size="md"
       onClose={onClose}
       title={isEdit ? "Edit coupon" : "New coupon"}
       footer={
@@ -597,7 +597,7 @@ function VoucherFormModal({ voucher, onClose, onSaved }: { voucher?: GiftVoucher
 
   return (
     <Modal
-      size="lg"
+      size="md"
       onClose={onClose}
       title={isEdit ? "Edit gift voucher" : "New gift voucher"}
       footer={

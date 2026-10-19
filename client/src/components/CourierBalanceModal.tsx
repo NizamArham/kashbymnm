@@ -71,7 +71,7 @@ export default function CourierBalanceModal({
   return (
     <form onSubmit={handleSubmit}>
       <Modal
-        size="lg"
+        size="md"
         stacked
         onClose={onClose}
         title={`Correct ${partnerLabel(courier.courier_partner)} balance`}

@@ -73,7 +73,7 @@ export default function CourierChargeModal({
   return (
     <form onSubmit={handleSubmit}>
       <Modal
-        size="lg"
+        size="md"
         stacked
         onClose={onClose}
         title={

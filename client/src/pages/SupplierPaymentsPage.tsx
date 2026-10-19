@@ -426,7 +426,7 @@ export default function SupplierPaymentsPage() {
 
       {showRecord && (
         <Modal
-          size="2xl"
+          size="lg"
           height="h-[min(640px,calc(100dvh-2rem))]"
           flush
           onClose={() => {

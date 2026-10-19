@@ -2339,7 +2339,7 @@ export default function PosPage() {
           phone2 (optional), address line 1/2, and city. */}
       {showAddCustomer && (
         <Modal
-          size="2xl"
+          size="lg"
           onClose={() => setShowAddCustomer(false)}
           title="New customer"
           footer={
@@ -2500,7 +2500,7 @@ export default function PosPage() {
 
       {showCheckoutModal && (
         <Modal
-          size="lg"
+          size="md"
           onClose={() => setShowCheckoutModal(false)}
           title="Confirm sale"
           footer={
