@@ -84,7 +84,7 @@ function ChequeSeal({ status, settledAt, className = "" }: { status: string; set
   const mono = 'ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace';
   const sans = '"Helvetica Neue", Helvetica, Arial, sans-serif';
   return (
-    <svg viewBox="0 0 190 92" className={`pointer-events-none absolute aspect-[190/92] -rotate-[3deg] ${className}`} style={{ color: ink, mixBlendMode: "multiply" }} aria-hidden="true">
+    <svg viewBox="0 0 190 92" className={`pointer-events-none absolute aspect-[190/92] -rotate-[6deg] ${className}`} style={{ color: ink, mixBlendMode: "multiply" }} aria-hidden="true">
       <defs>
         <linearGradient id={`press-${uid}`} x1="0" y1="0" x2="1" y2="1">
           <stop offset="0" stopColor="#fff" />
@@ -220,7 +220,7 @@ export default function ChequePreviewModal({
                 />
 
                 {isCrossed && <CrossingMark />}
-                {stamped && <ChequeSeal status={cheque.status} settledAt={cheque.settled_at} chequeNumber={cheque.cheque_number} className="left-[55%] top-[56%] w-[26%] -translate-x-1/2 -translate-y-1/2" />}
+                {stamped && <ChequeSeal status={cheque.status} settledAt={cheque.settled_at} chequeNumber={cheque.cheque_number} className="left-[56.5%] top-[67%] w-[27%] -translate-x-1/2 -translate-y-1/2" />}
 
                 <div className="relative flex min-h-0 flex-1 flex-col">
                 <div
