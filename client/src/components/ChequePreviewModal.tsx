@@ -247,7 +247,7 @@ export default function ChequePreviewModal({
                 />
 
                 {isCrossed && <CrossingMark />}
-                {stamped && <ChequeSeal status={cheque.status} settledAt={cheque.settled_at} chequeNumber={cheque.cheque_number} className="bottom-[2.5%] right-[7%] w-[21%]" />}
+                {stamped && <ChequeSeal status={cheque.status} settledAt={cheque.settled_at} chequeNumber={cheque.cheque_number} className="left-[58%] top-[56%] w-[21%] -translate-x-1/2 -translate-y-1/2" />}
 
                 <div className="relative flex min-h-0 flex-1 flex-col">
                 <div
