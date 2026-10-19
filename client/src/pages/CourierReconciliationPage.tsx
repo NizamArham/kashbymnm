@@ -89,7 +89,7 @@ export default function CourierReconciliationPage() {
         title="Courier settlements"
         subtitle="Track COD collected, courier charges, weekly settlements, and carry-forward balances."
         action={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button onClick={() => navigate("/couriers/history")} className="inline-flex items-center gap-1.5 whitespace-nowrap">
               <History size={14} />
               Order history
