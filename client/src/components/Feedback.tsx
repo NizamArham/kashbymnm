@@ -210,8 +210,8 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
         </Modal>
       )}
 
-      {/* Toasts: short, at the top, out of the way of the till's buttons at the bottom. */}
-      <div className="pointer-events-none fixed inset-x-0 top-4 z-[120] flex flex-col items-center gap-2 px-4" role="status" aria-live="polite">
+      {/* Toasts: short, at the top, out of the way of the till's buttons at the bottom — and on a phone just under the top bar, so the menu button stays reachable. */}
+      <div className="pointer-events-none fixed inset-x-0 top-[4.25rem] z-[120] lg:top-4 flex flex-col items-center gap-2 px-4" role="status" aria-live="polite">
         {toasts.map((t) => (
           <div
             key={t.id}
