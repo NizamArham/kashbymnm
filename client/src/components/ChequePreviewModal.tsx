@@ -71,14 +71,28 @@ function CrossingMark() {
   );
 }
 
-// The bank's verdict, pressed onto the paper like a rubber stamp — laid out like a post-office postmark: one heavy ring, the cheque
-// number curved over the top, the date across the middle, the verdict under it, and the wording curved under the bottom. The ink is
-// uneven the way a real impression is (rough edges, patches where it pressed lighter, a few specks that didn't take), muted so it sits in
-// the plain black-and-white cheque: dusty blue when the cheque passed, dusty red when it bounced. Drawn behind the printed text.
+// The bank's verdict, stamped onto the cheque — laid out like a post-office postmark: one heavy ring, the cheque number curved over the
+// top, the date across the middle, the verdict under it, and the wording curved under the bottom. Drawn as clean, solid lines with sharp
+// edges (no blur, no filter): the ink is a muted dusty blue when the cheque passed and a dusty red when it bounced, so it sits in the plain
+// black-and-white cheque, and it is behind the printed text. The only wear is a scatter of tiny hard-edged specks where the ink didn't take
+// and a slightly lighter side, like a stamp pressed a little unevenly.
+const SPECKS = (() => {
+  // A fixed scatter (so the stamp looks the same every time it is opened): [x, y, radius] in the seal's 160-unit square.
+  let seed = 7;
+  const next = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const dots: [number, number, number][] = [];
+  while (dots.length < 46) {
+    const a = next() * Math.PI * 2;
+    const r = Math.sqrt(next()) * 78;
+    dots.push([80 + Math.cos(a) * r, 80 + Math.sin(a) * r, 0.45 + next() * 0.65]);
+  }
+  return dots;
+})();
+
 function ChequeSeal({ status, settledAt, chequeNumber, className = "" }: { status: string; settledAt?: string | null; chequeNumber: string; className?: string }) {
   const passed = status === "cleared";
   const uid = useId().replace(/:/g, "");
-  const ink = passed ? "#587a9f" : "#a85b57";
+  const ink = passed ? "#4d7099" : "#a4524e";
   const date = settledAt ? formatDateDisplay(settledAt).toUpperCase() : null;
   const top = `CHEQUE No. ${chequeNumber}`.toUpperCase();
   const bottom = passed ? "PASSED AT THE BANK" : "RETURNED UNPAID";
@@ -90,21 +104,19 @@ function ChequeSeal({ status, settledAt, chequeNumber, className = "" }: { statu
         <path id={`top-${uid}`} d="M24,80 a56,56 0 1,1 112,0 a56,56 0 1,1 -112,0" />
         {/* … and under the bottom, left to right, so it also reads upright */}
         <path id={`bot-${uid}`} d="M16,80 a64,64 0 0,0 128,0" />
-        <filter id={`ink-${uid}`} x="-8%" y="-8%" width="116%" height="116%" colorInterpolationFilters="sRGB">
-          {/* Worn ink without softening the letters: the shapes stay crisp (only a hair of edge roughness, no blur), and the age is in
-              how much ink went on — wide patches where it pressed lighter, and tiny specks where it didn't take. */}
-          <feTurbulence type="fractalNoise" baseFrequency="1.4" numOctaves="2" seed="7" result="fine" />
-          <feDisplacementMap in="SourceGraphic" in2="fine" scale="0.9" result="rough" />
-          <feTurbulence type="fractalNoise" baseFrequency="0.03" numOctaves="2" seed="12" result="patch" />
-          <feColorMatrix in="patch" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  -1.5 0 0 0 1.75" result="pressure" />
-          <feTurbulence type="fractalNoise" baseFrequency="0.7" numOctaves="1" seed="3" result="grain" />
-          <feColorMatrix in="grain" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  -4 0 0 0 3.15" result="specks" />
-          <feComposite in="rough" in2="pressure" operator="in" result="pressed" />
-          <feComposite in="pressed" in2="specks" operator="in" />
-        </filter>
+        <linearGradient id={`press-${uid}`} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#fff" />
+          <stop offset="1" stopColor="#bbb" />
+        </linearGradient>
+        <mask id={`wear-${uid}`} maskUnits="userSpaceOnUse" x="0" y="0" width="160" height="160">
+          <rect width="160" height="160" fill={`url(#press-${uid})`} />
+          {SPECKS.map(([x, y, r], k) => (
+            <circle key={k} cx={x} cy={y} r={r} fill="#000" />
+          ))}
+        </mask>
       </defs>
-      <g filter={`url(#ink-${uid})`} opacity="0.9" fill="currentColor" fontFamily={font} fontWeight="800" textRendering="geometricPrecision" shapeRendering="geometricPrecision">
-        <circle cx="80" cy="80" r="74" fill="none" stroke="currentColor" strokeWidth="5" />
+      <g mask={`url(#wear-${uid})`} opacity="0.9" fill="currentColor" fontFamily={font} fontWeight="800" textRendering="geometricPrecision" shapeRendering="geometricPrecision">
+        <circle cx="80" cy="80" r="74" fill="none" stroke="currentColor" strokeWidth="4.2" />
         <text fontSize="11.5" letterSpacing="1.4" transform="rotate(-8 80 80)">
           <textPath href={`#top-${uid}`} startOffset="25%" textAnchor="middle">
             {top}
@@ -113,7 +125,7 @@ function ChequeSeal({ status, settledAt, chequeNumber, className = "" }: { statu
         <text x="80" y={date ? 84 : 90} textAnchor="middle" fontSize="13.6" letterSpacing="2.2" transform="rotate(-8 80 80)">
           {date ?? ""}
         </text>
-        <text x="80" y={date ? 104 : 90} textAnchor="middle" fontSize="13" fontWeight="800" letterSpacing="2.6" transform="rotate(-8 80 80)">
+        <text x="80" y={date ? 104 : 90} textAnchor="middle" fontSize="13" letterSpacing="2.6" transform="rotate(-8 80 80)">
           {passed ? "CLEARED" : "BOUNCED"}
         </text>
         <text fontSize="11.5" letterSpacing="1.4" transform="rotate(-8 80 80)">
