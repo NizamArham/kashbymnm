@@ -344,8 +344,20 @@ salesRouter.get(
       conditions.push("LOWER(sales.invoice) = LOWER(?)");
       params.push(invoiceLookup);
     }
+    // The last characters of an invoice number ("0331" for "STR288X0331") — what staff say when they read a receipt. A handful of bills at
+    // most; a cashier's reach is the recent window, like their plain list (anything older needs the full number).
+    const invoiceEnds = String(req.query.invoice_ends ?? "").trim();
+    if (invoiceEnds) {
+      if (!/^[A-Za-z0-9]{3,12}$/.test(invoiceEnds)) throw new ApiError(400, "Type at least the last 3 characters of the invoice number");
+      conditions.push("LOWER(sales.invoice) LIKE LOWER(?)");
+      params.push(`%${invoiceEnds}`);
+      if (req.user!.role === "staff") {
+        conditions.push("sales.date >= date('now', '+330 minutes', ?)");
+        params.push(`-${CASHIER_HISTORY_DAYS - 1} days`);
+      }
+    }
     // A cashier's plain list is the recent window; the whole history needs an admin's password.
-    if (req.user!.role === "staff" && !invoiceLookup && !req.query.customer_id && req.query.status !== "quotation") {
+    if (req.user!.role === "staff" && !invoiceLookup && !invoiceEnds && !req.query.customer_id && req.query.status !== "quotation") {
       if (req.query.window === "all") {
         approveIfNeeded(req, res, [`sales older than the last ${CASHIER_HISTORY_DAYS} days`], "This sales history");
       } else {
@@ -367,7 +379,7 @@ salesRouter.get(
          LEFT JOIN deliveries ON deliveries.sale_id = sales.id
          LEFT JOIN delivery_partners ON delivery_partners.code = deliveries.delivery_partner
          ${where}
-         ORDER BY sales.id DESC`
+         ORDER BY sales.id DESC${invoiceEnds ? " LIMIT 8" : ""}`
       )
       .all(...params);
     res.json(rows);

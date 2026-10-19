@@ -3,7 +3,9 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { PageLoader } from "../components/Loader";
 import { RotateCcw, AlertTriangle, ChevronDown, ChevronRight, Download, Search } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
-import { Sale, ReturnRequest, ReturnApprovals } from "../lib/types";
+import { Sale, ReturnRequest, ReturnApprovals, Customer } from "../lib/types";
+import { findCustomers, CASHIER_SEARCH_MIN_CHARS } from "../lib/customerSearch";
+import { countOpenPickups } from "../lib/returnsCounts";
 import { useAuth } from "../context/AuthContext";
 import ReturnByDeliveryForm from "../components/ReturnByDeliveryForm";
 import OnlineExchangeModal from "../components/OnlineExchangeModal";
@@ -111,7 +113,7 @@ export default function ReturnsPage() {
         }
       />
 
-      {activeTab === "request" && <RequestReturnTab onRequested={loadApprovals} />}
+      {activeTab === "request" && <RequestReturnTab onRequested={loadApprovals} waiting={waiting} onGoTo={setActiveTab} />}
       {activeTab === "approve" &&
         (approvals ? (
           <ReturnApprovalList approvals={approvals} onChanged={loadApprovals} />
@@ -149,7 +151,7 @@ function defaultLineConfig(): ReturnLineConfig {
   };
 }
 
-function RequestReturnTab({ onRequested }: { onRequested: () => void }) {
+function RequestReturnTab({ onRequested, waiting, onGoTo }: { onRequested: () => void; waiting: number; onGoTo: (tab: ReturnsTab) => void }) {
   // An admin's own return is approved in the same step ("Auto-approved (recorded by admin)"), so how a refund is paid is chosen here;
   // anyone else's waits in To approve, where the admin chooses it.
   const { user } = useAuth();
@@ -159,6 +161,22 @@ function RequestReturnTab({ onRequested }: { onRequested: () => void }) {
   const [invoiceQuery, setInvoiceQuery] = useState("");
   const [sale, setSale] = useState<Sale | null>(null);
   const [lookupError, setLookupError] = useState<string | null>(null);
+  const invoiceInput = useRef<HTMLInputElement>(null);
+  // Typed only the last few digits and more than one bill ends that way: pick the right one.
+  const [matches, setMatches] = useState<Sale[] | null>(null);
+  // "No receipt?": find the customer, then choose from their recent bills.
+  const [findingCustomer, setFindingCustomer] = useState(false);
+  const [customerQuery, setCustomerQuery] = useState("");
+  const [customerResults, setCustomerResults] = useState<Customer[]>([]);
+  const [allCustomers, setAllCustomers] = useState<Customer[] | null>(null);
+  const [pickedCustomer, setPickedCustomer] = useState<Customer | null>(null);
+  const [customerBills, setCustomerBills] = useState<Sale[] | null>(null);
+  const customerSearchSeq = useRef(0);
+  // How many parcels are on their way back, for the quiet line under the box.
+  const [onTheWay, setOnTheWay] = useState(0);
+  useEffect(() => {
+    countOpenPickups().then(setOnTheWay).catch(() => {});
+  }, []);
 
   const [selectedItemIds, setSelectedItemIds] = useState<Set<number>>(new Set());
   const [lineConfigs, setLineConfigs] = useState<Record<number, ReturnLineConfig>>({});
@@ -184,7 +202,11 @@ function RequestReturnTab({ onRequested }: { onRequested: () => void }) {
   const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
     const invoice = searchParams.get("invoice");
-    if (!invoice) return;
+    // Otherwise the box is ready for a scanner (or typing) the moment the page opens.
+    if (!invoice) {
+      invoiceInput.current?.focus();
+      return;
+    }
     setInvoiceQuery(invoice);
     setSearchParams({}, { replace: true });
     handleLookup(invoice);
@@ -193,6 +215,7 @@ function RequestReturnTab({ onRequested }: { onRequested: () => void }) {
 
   async function handleLookup(invoiceOverride?: string) {
     setLookupError(null);
+    setMatches(null);
     setHow("shop");
     setSale(null);
     setSelectedItemIds(new Set());
@@ -209,13 +232,80 @@ function RequestReturnTab({ onRequested }: { onRequested: () => void }) {
       const found = await api.get<Sale[]>(`/sales?invoice=${encodeURIComponent(value)}`);
       const match = found[0];
       if (!match) {
-        setLookupError("No sale found with that invoice number");
+        // Not a whole invoice number — maybe just its last digits, as read off a receipt.
+        if (/^[A-Za-z0-9]{3,12}$/.test(value)) {
+          const ends = await api.get<Sale[]>(`/sales?invoice_ends=${encodeURIComponent(value)}`);
+          if (ends.length === 1) {
+            setInvoiceQuery(ends[0].invoice);
+            setSale(await api.get<Sale>(`/sales/${ends[0].id}`));
+            return;
+          }
+          if (ends.length > 1) {
+            setMatches(ends);
+            return;
+          }
+        }
+        setLookupError(
+          isAdmin
+            ? "No sale found with that invoice number"
+            : "No sale found. Check the number — the last digits find sales from the past week; an older one needs the whole invoice number."
+        );
         return;
       }
       setSale(await api.get<Sale>(`/sales/${match.id}`));
     } catch (err) {
       setLookupError(err instanceof ApiRequestError ? err.message : "Lookup failed");
     }
+  }
+
+  // ---- "No receipt?" — find the customer, then one of their recent bills
+  async function openFinder() {
+    setFindingCustomer(true);
+    // An admin searches the whole list; a cashier's search is answered by the server (3+ letters, a few people at most).
+    if (isAdmin && !allCustomers) api.get<Customer[]>("/customers").then(setAllCustomers).catch(() => {});
+  }
+  function searchCustomers(text: string) {
+    setCustomerQuery(text);
+    setPickedCustomer(null);
+    setCustomerBills(null);
+    const q = text.trim();
+    const seq = ++customerSearchSeq.current;
+    if (q.length < (isAdmin ? 2 : CASHIER_SEARCH_MIN_CHARS)) {
+      setCustomerResults([]);
+      return;
+    }
+    if (isAdmin) {
+      const lower = q.toLowerCase();
+      setCustomerResults(
+        (allCustomers ?? []).filter((c) => c.name.toLowerCase().includes(lower) || (c.phone ?? "").includes(q) || c.customer_code.toLowerCase().includes(lower)).slice(0, 6)
+      );
+      return;
+    }
+    findCustomers(q)
+      .then((found) => {
+        if (seq === customerSearchSeq.current) setCustomerResults(found.slice(0, 6));
+      })
+      .catch(() => {
+        if (seq === customerSearchSeq.current) setCustomerResults([]);
+      });
+  }
+  async function pickCustomer(c: Customer) {
+    setPickedCustomer(c);
+    setCustomerResults([]);
+    setCustomerBills(null);
+    try {
+      setCustomerBills((await api.get<Sale[]>(`/sales?customer_id=${c.id}`)).slice(0, 10));
+    } catch (err) {
+      setLookupError(err instanceof ApiRequestError ? err.message : "Couldn't load their bills");
+    }
+  }
+  function openBill(invoice: string) {
+    setInvoiceQuery(invoice);
+    setFindingCustomer(false);
+    setCustomerQuery("");
+    setPickedCustomer(null);
+    setCustomerBills(null);
+    handleLookup(invoice);
   }
 
   function toggleItem(itemId: number) {
@@ -344,7 +434,8 @@ function RequestReturnTab({ onRequested }: { onRequested: () => void }) {
       <Card className="mb-5">
         <div className="flex gap-2">
           <Input
-            placeholder="Invoice number"
+            ref={invoiceInput}
+            placeholder="Scan the receipt, or type the invoice number (or just its last digits)"
             value={invoiceQuery}
             onChange={(e) => setInvoiceQuery(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleLookup()}
@@ -354,7 +445,88 @@ function RequestReturnTab({ onRequested }: { onRequested: () => void }) {
           </Button>
         </div>
         {lookupError && <ErrorText>{lookupError}</ErrorText>}
+
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs text-gray-500">
+          <button type="button" onClick={() => (findingCustomer ? setFindingCustomer(false) : openFinder())} className="underline hover:text-gray-900">
+            {findingCustomer ? "Close the customer search" : "No receipt? Find the customer"}
+          </button>
+          {(waiting > 0 || onTheWay > 0) && (
+            <span>
+              Also waiting:{" "}
+              {waiting > 0 && (
+                <button type="button" onClick={() => onGoTo("approve")} className="font-medium text-gray-700 underline hover:text-gray-900">
+                  {waiting} to approve
+                </button>
+              )}
+              {waiting > 0 && onTheWay > 0 && " · "}
+              {onTheWay > 0 && (
+                <button type="button" onClick={() => onGoTo("pickups")} className="font-medium text-gray-700 underline hover:text-gray-900">
+                  {onTheWay} on the way back
+                </button>
+              )}
+            </span>
+          )}
+        </div>
+
+        {findingCustomer && (
+          <div className="mt-3 border-t border-gray-100 pt-3">
+            <Input
+              autoFocus
+              placeholder={isAdmin ? "Customer name or phone" : `Part of the name, or the phone number (at least ${CASHIER_SEARCH_MIN_CHARS} characters)`}
+              value={customerQuery}
+              onChange={(e) => searchCustomers(e.target.value)}
+            />
+            {customerResults.length > 0 && (
+              <div className="mt-2 divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200">
+                {customerResults.map((c) => (
+                  <button key={c.id} type="button" onClick={() => pickCustomer(c)} className="flex w-full items-center justify-between gap-3 px-3.5 py-2 text-left text-sm hover:bg-gray-50">
+                    <span className="min-w-0 truncate font-medium text-gray-900">{c.name}</span>
+                    <span className="flex-shrink-0 text-xs text-gray-400">{c.phone ?? c.customer_code}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {pickedCustomer && (
+              <div className="mt-3">
+                <p className="mb-1.5 text-xs text-gray-500">
+                  {pickedCustomer.name}'s recent bills — pick the one they're returning from
+                </p>
+                {customerBills === null ? (
+                  <p className="text-xs text-gray-400">Loading…</p>
+                ) : customerBills.length === 0 ? (
+                  <p className="text-xs text-gray-400">No bills on record for this customer.</p>
+                ) : (
+                  <div className="divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200">
+                    {customerBills.map((b) => (
+                      <button key={b.id} type="button" onClick={() => openBill(b.invoice)} className="flex w-full items-center justify-between gap-3 px-3.5 py-2 text-left text-sm hover:bg-gray-50">
+                        <span className="font-medium text-gray-900">{b.invoice}</span>
+                        <span className="text-xs text-gray-400">{b.date.slice(0, 10)}</span>
+                        <span className="tabular-nums text-gray-700">Rs. {b.total.toLocaleString()}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </Card>
+
+      {matches && (
+        <Card className="mb-5">
+          <p className="mb-2 text-sm font-medium text-gray-900">More than one bill ends that way — which one?</p>
+          <div className="divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200">
+            {matches.map((m) => (
+              <button key={m.id} type="button" onClick={() => openBill(m.invoice)} className="flex w-full items-center justify-between gap-3 px-3.5 py-2 text-left text-sm hover:bg-gray-50">
+                <span className="font-medium text-gray-900">{m.invoice}</span>
+                <span className="text-xs text-gray-400">{m.date.slice(0, 10)}</span>
+                <span className="min-w-0 flex-1 truncate text-right text-gray-600">{m.customer_name ?? "Walk-in"}</span>
+                <span className="tabular-nums text-gray-700">Rs. {m.total.toLocaleString()}</span>
+              </button>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {sale && (
         <Card>

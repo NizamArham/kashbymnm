@@ -15,6 +15,7 @@ import { generateWaybillLabelPdf, generateExchangeWaybillsPdf, returnItemsOf } f
 import { WaybillLabelData } from "../components/WaybillLabel";
 import { applyBusinessInfoToReturnAddress } from "../lib/businessInfo";
 import { previewPdf } from "../lib/pdfPreview";
+import { countOpenPickups } from "../lib/returnsCounts";
 import { whatsappNumber } from "../lib/phone";
 import { useConfirm } from "../components/Feedback";
 
@@ -341,15 +342,7 @@ export default function DeliveriesPage() {
   const [showPickups, setShowPickups] = useState(false);
   const [openPickups, setOpenPickups] = useState(0);
   // Everything on its way back: returns by delivery, the old items of delivered exchanges, and parcels the courier couldn't deliver.
-  const countPickups = () =>
-    Promise.all([
-      api.get<unknown[]>("/return-pickups?status=open"),
-      api.get<{ delivery_status: string | null }[]>("/exchanges?status=open"),
-      api.get<unknown[]>("/deliveries/coming-back"),
-    ])
-      // An exchange's old items are on their way back once its replacement has been delivered.
-      .then(([returns, exchanges, parcels]) => setOpenPickups(returns.length + exchanges.filter((x) => x.delivery_status === "delivered").length + parcels.length))
-      .catch(() => {});
+  const countPickups = () => countOpenPickups().then(setOpenPickups).catch(() => {});
   useEffect(() => {
     countPickups();
   }, []);
