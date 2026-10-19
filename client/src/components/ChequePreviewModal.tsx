@@ -71,46 +71,57 @@ function CrossingMark() {
   );
 }
 
-// The bank's verdict, pressed onto the paper like a rubber seal: ink-coloured and worn rather than a bright banner, so it sits in the
-// plain black-and-white cheque — dusty blue when the cheque passed, dusty red when it bounced. It is drawn behind the printed text.
-function ChequeSeal({ status, settledAt, className = "" }: { status: string; settledAt?: string | null; className?: string }) {
+// The bank's verdict, pressed onto the paper like a rubber stamp — laid out like a post-office postmark: one heavy ring, the cheque
+// number curved over the top, the date across the middle, the verdict under it, and the wording curved under the bottom. The ink is
+// uneven the way a real impression is (rough edges, patches where it pressed lighter, a few specks that didn't take), muted so it sits in
+// the plain black-and-white cheque: dusty blue when the cheque passed, dusty red when it bounced. Drawn behind the printed text.
+function ChequeSeal({ status, settledAt, chequeNumber, className = "" }: { status: string; settledAt?: string | null; chequeNumber: string; className?: string }) {
   const passed = status === "cleared";
   const uid = useId().replace(/:/g, "");
-  const ink = passed ? "#5d7d9a" : "#a45f5b";
-  const ringText = passed ? "PASSED AT THE BANK \u2022 PASSED AT THE BANK \u2022" : "RETURNED UNPAID \u2022 RETURNED UNPAID \u2022";
+  const ink = passed ? "#587a9f" : "#a85b57";
   const date = settledAt ? formatDateDisplay(settledAt).toUpperCase() : null;
+  const top = `CHEQUE No. ${chequeNumber}`.toUpperCase();
+  const bottom = passed ? "PASSED AT THE BANK" : "RETURNED UNPAID";
+  const font = '"Helvetica Neue", Helvetica, Arial, sans-serif';
   return (
     <svg viewBox="0 0 160 160" className={`pointer-events-none absolute aspect-square ${className}`} style={{ color: ink, mixBlendMode: "multiply" }} aria-hidden="true">
       <defs>
-        <path id={`ring-${uid}`} d="M80,80 m-57,0 a57,57 0 1,1 114,0 a57,57 0 1,1 -114,0" />
-        {/* Uneven edges and a few gaps in the ink, so it reads as a real impression. */}
-        <filter id={`worn-${uid}`} x="-5%" y="-5%" width="110%" height="110%">
-          <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" seed="4" result="noise" />
-          <feDisplacementMap in="SourceGraphic" in2="noise" scale="2" result="rough" />
-          <feColorMatrix in="noise" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  -2.6 0 0 0 1.95" result="gaps" />
-          <feComposite in="rough" in2="gaps" operator="in" />
+        {/* over the top, left to right (the text reads along the outside of the curve) … */}
+        <path id={`top-${uid}`} d="M24,80 a56,56 0 1,1 112,0 a56,56 0 1,1 -112,0" />
+        {/* … and under the bottom, left to right, so it also reads upright */}
+        <path id={`bot-${uid}`} d="M16,80 a64,64 0 0,0 128,0" />
+        <filter id={`ink-${uid}`} x="-8%" y="-8%" width="116%" height="116%" colorInterpolationFilters="sRGB">
+          {/* rough, slightly bled edges */}
+          <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="7" result="fine" />
+          <feDisplacementMap in="SourceGraphic" in2="fine" scale="2.4" result="rough" />
+          <feGaussianBlur in="rough" stdDeviation="0.3" result="bled" />
+          {/* uneven pressure: wide soft patches where the ink went on lighter or heavier */}
+          <feTurbulence type="fractalNoise" baseFrequency="0.03" numOctaves="2" seed="12" result="patch" />
+          <feColorMatrix in="patch" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  -1.6 0 0 0 1.7" result="pressure" />
+          {/* tiny specks where the ink didn't take */}
+          <feColorMatrix in="fine" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  -2.1 0 0 0 2.1" result="specks" />
+          <feComposite in="bled" in2="pressure" operator="in" result="pressed" />
+          <feComposite in="pressed" in2="specks" operator="in" />
         </filter>
       </defs>
-      <g filter={`url(#worn-${uid})`} opacity="0.62" transform="rotate(-11 80 80)">
-        <circle cx="80" cy="80" r="75" fill="none" stroke="currentColor" strokeWidth="3.4" />
-        <circle cx="80" cy="80" r="69" fill="none" stroke="currentColor" strokeWidth="1" />
-        <circle cx="80" cy="80" r="46" fill="none" stroke="currentColor" strokeWidth="1.2" />
-        <text fontSize="9.5" fontWeight="700" fill="currentColor">
-          <textPath href={`#ring-${uid}`} textLength="352" lengthAdjust="spacing">
-            {ringText}
+      <g filter={`url(#ink-${uid})`} opacity="0.85" transform="rotate(-8 80 80)" fill="currentColor" fontFamily={font} fontWeight="800">
+        <circle cx="80" cy="80" r="74" fill="none" stroke="currentColor" strokeWidth="5" />
+        <text fontSize="11.5" letterSpacing="1.4">
+          <textPath href={`#top-${uid}`} startOffset="25%" textAnchor="middle">
+            {top}
           </textPath>
         </text>
-        <text x="80" y={date ? 76 : 85} textAnchor="middle" fontSize="14.5" fontWeight="800" letterSpacing="1.2" fill="currentColor">
+        <text x="80" y={date ? 84 : 90} textAnchor="middle" fontSize="13.6" letterSpacing="2.2">
+          {date ?? ""}
+        </text>
+        <text x="80" y={date ? 104 : 90} textAnchor="middle" fontSize="13" fontWeight="800" letterSpacing="2.6">
           {passed ? "CLEARED" : "BOUNCED"}
         </text>
-        {date && (
-          <>
-            <line x1="56" y1="83" x2="104" y2="83" stroke="currentColor" strokeWidth="1" />
-            <text x="80" y="96" textAnchor="middle" fontSize="8.2" fontWeight="600" letterSpacing="0.8" fill="currentColor">
-              {date}
-            </text>
-          </>
-        )}
+        <text fontSize="11.5" letterSpacing="1.4">
+          <textPath href={`#bot-${uid}`} startOffset="50%" textAnchor="middle">
+            {bottom}
+          </textPath>
+        </text>
       </g>
     </svg>
   );
@@ -219,7 +230,7 @@ export default function ChequePreviewModal({
                 />
 
                 {isCrossed && <CrossingMark />}
-                {stamped && <ChequeSeal status={cheque.status} settledAt={cheque.settled_at} className="bottom-[5%] right-[10%] w-[20%]" />}
+                {stamped && <ChequeSeal status={cheque.status} settledAt={cheque.settled_at} chequeNumber={cheque.cheque_number} className="bottom-[3%] left-[52%] w-[27%]" />}
 
                 <div className="relative flex min-h-0 flex-1 flex-col">
                 <div
@@ -321,7 +332,7 @@ export default function ChequePreviewModal({
                   }}
                 />
 
-                {stamped && <ChequeSeal status={cheque.status} settledAt={cheque.settled_at} className="right-[17%] top-1/2 w-[22%] -translate-y-1/2" />}
+                {stamped && <ChequeSeal status={cheque.status} settledAt={cheque.settled_at} chequeNumber={cheque.cheque_number} className="right-[16%] top-1/2 w-[24%] -translate-y-1/2" />}
                 <div className="relative flex min-h-0 flex-1 flex-col">
                 <p className="relative text-[10px] uppercase tracking-wider text-gray-400 mb-2">Endorsement history</p>
 
