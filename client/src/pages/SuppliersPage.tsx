@@ -318,7 +318,7 @@ export default function SuppliersPage() {
                               </div>
 
                               {expandedTab === "details" && (
-                                <div className="bg-white border border-gray-200 rounded-xl p-4">
+                                <div className="bg-white rounded-xl p-4">
                                   <div className="flex items-center justify-between mb-3">
                                     <h3 className="text-sm font-semibold text-gray-900">Supplier details</h3>
                                     {!isEditing && (
@@ -395,7 +395,7 @@ export default function SuppliersPage() {
                               )}
 
                               {expandedTab === "bank" && (
-                                <div className="bg-white border border-gray-200 rounded-xl p-4">
+                                <div className="bg-white rounded-xl p-4">
                                   <div className="flex items-center justify-between mb-3">
                                     <h3 className="text-sm font-semibold text-gray-900">Bank accounts</h3>
                                     {!showAddBankAccount && (
@@ -417,7 +417,7 @@ export default function SuppliersPage() {
                                     <div className="space-y-2">
                                       {expandedDetail.bank_accounts?.map((a) =>
                                         editingBankAccountId === a.id ? (
-                                          <div key={a.id} className="bg-gray-50 border border-gray-200 rounded-xl p-3">
+                                          <div key={a.id} className="bg-gray-50 rounded-xl p-3">
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                               <FormGroup>
                                                 <Label>Bank name</Label>
@@ -491,7 +491,7 @@ export default function SuppliersPage() {
                                   )}
 
                                   {showAddBankAccount && (
-                                    <div className="mt-3 bg-gray-50 border border-gray-200 rounded-xl p-3">
+                                    <div className="mt-3 bg-gray-50 rounded-xl p-3">
                                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                         <FormGroup>
                                           <Label>Bank name</Label>
@@ -537,7 +537,7 @@ export default function SuppliersPage() {
                               )}
 
                               {expandedTab === "payment_history" && (
-                                <div className="bg-white border border-gray-200 rounded-xl p-4">
+                                <div className="bg-white rounded-xl p-4">
                                   <div className="flex items-center justify-between mb-3">
                                     <h3 className="text-sm font-semibold text-gray-900">Payment history</h3>
                                     {ledger && ledger.entries.length > 0 && (
@@ -558,7 +558,7 @@ export default function SuppliersPage() {
                                   ) : !ledger || ledger.entries.length === 0 ? (
                                     <p className="text-xs text-gray-400">No purchases, payments, credits, or returns on record yet.</p>
                                   ) : (
-                                    <div className="border border-gray-200 rounded-xl overflow-hidden">
+                                    <div className="rounded-xl overflow-hidden">
                                       <table className="w-full text-sm">
                                         <thead>
                                           <tr className="bg-gray-50">
@@ -681,10 +681,10 @@ export default function SuppliersPage() {
                   <SortHeader<SupplierSortKey> label="Name" sortKey="name" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
                   <SortHeader<SupplierSortKey> label="Phone" sortKey="phone" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
                   <SortHeader<SupplierSortKey> label="City" sortKey="city" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
-                  <Th>
+                  <Th align="right">
                     <button
                       onClick={() => toggleSort("balance")}
-                      className={`inline-flex items-center gap-1 hover:text-gray-700 transition-colors ${sortKey === "balance" ? "text-gray-900" : ""}`}
+                      className={`inline-flex flex-row-reverse items-center gap-1 hover:text-gray-700 transition-colors ${sortKey === "balance" ? "text-gray-900" : ""}`}
                     >
                       Balance owed
                       {sortKey === "balance" ? (sortDir === "asc" ? <ChevronUp size={12} /> : <ChevronDown size={12} />) : null}
@@ -707,7 +707,7 @@ export default function SuppliersPage() {
                         <Td className="font-medium">{s.name}</Td>
                         <Td>{s.phone ?? "—"}</Td>
                         <Td>{s.city ?? "—"}</Td>
-                        <Td className={owes ? "font-medium" : "text-gray-500"}>
+                        <Td align="right" className={owes ? "font-medium" : "text-gray-500"}>
                           {owes ? `Rs. ${s.balance_owed.toLocaleString()}` : "Settled"}
                         </Td>
                       </tr>

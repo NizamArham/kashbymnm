@@ -332,7 +332,7 @@ export default function ViewCustomersPage() {
                 <SortHeader<CustomerSortKey> label="Phone" sortKey="phone" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
                 <SortHeader<CustomerSortKey> label="Loyalty points" sortKey="loyalty" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
                 {/* A customer's balance is for admins in the list; a cashier sees it once that customer is opened. */}
-                {(isAdmin || showingCredit) && <SortHeader<CustomerSortKey> label="Balance" sortKey="balance" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />}
+                {(isAdmin || showingCredit) && <SortHeader<CustomerSortKey> label="Balance" sortKey="balance" activeKey={sortKey} dir={sortDir} onClick={toggleSort} align="right" />}
                 <SortHeader<CustomerSortKey> label="Last order" sortKey="last_order" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
                 <Th></Th>
               </tr>
@@ -355,7 +355,7 @@ export default function ViewCustomersPage() {
                       </span>
                     </Td>
                     {(isAdmin || showingCredit) && (
-                      <Td className={netBalance < 0 ? "text-red-600 font-medium" : netBalance > 0 ? "text-green-700 font-medium" : ""}>
+                      <Td align="right" className={netBalance < 0 ? "text-red-600 font-medium" : netBalance > 0 ? "text-green-700 font-medium" : ""}>
                         {netBalance === 0 ? "—" : netBalance > 0 ? `+Rs. ${netBalance.toLocaleString()}` : `-Rs. ${Math.abs(netBalance).toLocaleString()}`}
                       </Td>
                     )}

@@ -183,20 +183,14 @@ function SortHeader({
     <Th className={className}>
       <button
         onClick={() => onSort(sortKey)}
+        // A right-aligned header keeps its label flush with the figures below it: the sort arrow goes before the label, and only
+        // shows on the column being sorted (an invisible arrow would still take up room and push the label off the edge).
         className={`inline-flex items-center gap-1 hover:text-gray-900 transition ${
           isActive ? "text-gray-900" : ""
-        } ${align === "right" ? "justify-end w-full" : ""}`}
+        } ${align === "right" ? "flex-row-reverse justify-end w-full" : ""}`}
       >
         <span>{label}</span>
-        {isActive ? (
-          currentDir === "asc" ? (
-            <ChevronUp size={12} />
-          ) : (
-            <ChevronDown size={12} />
-          )
-        ) : (
-          <ChevronDown size={12} className="opacity-0 group-hover:opacity-30" />
-        )}
+        {isActive ? currentDir === "asc" ? <ChevronUp size={12} /> : <ChevronDown size={12} /> : null}
       </button>
     </Th>
   );
@@ -551,7 +545,7 @@ export default function InventoryCategoriesPage() {
     <div>
       {/* ================= Header ================= */}
       <div
-        className="lg:sticky lg:top-0 z-20 pb-3 mb-5 bg-white/95 backdrop-blur-sm border-b border-gray-200 relative"
+        className="lg:sticky lg:top-0 z-20 pb-3 mb-5 bg-gray-50/95 backdrop-blur-sm lg:border-b lg:border-gray-200 relative"
         onMouseLeave={() => setHoveredNav(null)}
       >
         <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
@@ -728,8 +722,8 @@ export default function InventoryCategoriesPage() {
           <p className="mt-3 text-sm text-gray-400">Loading categories…</p>
         </div>
       ) : (
-        <Card className="p-0 overflow-hidden">
-          <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
+        <Card flatOnPhone className="lg:p-0 lg:overflow-hidden">
+          <div className="px-1 lg:px-5 py-3.5 lg:border-b lg:border-gray-100 flex items-center justify-between">
             <div className="flex items-center gap-2 min-w-0">
               {appliedQuery && (
                 <button
@@ -1038,7 +1032,7 @@ export default function InventoryCategoriesPage() {
             </div>
 
             {/* Phone / tablet-portrait: a card per product; opening one lists its sizes and colours as short rows */}
-            <div className="lg:hidden space-y-2.5 p-3">
+            <div className="lg:hidden space-y-2.5">
               {groups.map((group) => {
                 const isExpanded = expandedProductId === group.product_id;
                 const variants = isExpanded ? summarizeVariants(group.units) : [];

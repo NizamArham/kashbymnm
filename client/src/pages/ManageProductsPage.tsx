@@ -1004,7 +1004,7 @@ export default function ManageProductsPage() {
                                       <p className="text-xs text-gray-400 px-1 py-2">No inventory units yet for this product.</p>
                                     ) : (
                                       <>
-                                        <div className="border border-gray-200 rounded-xl overflow-x-auto bg-white">
+                                        <div className="rounded-xl overflow-x-auto bg-white">
                                           <table className="w-full text-sm">
                                             <thead>
                                               <tr>
@@ -1099,7 +1099,7 @@ export default function ManageProductsPage() {
                                           (() => {
                                             const [color, size, status] = removeOpenKey.split("::");
                                             return (
-                                              <div className="bg-white border border-gray-200 rounded-xl p-4 mt-4">
+                                              <div className="bg-white rounded-xl p-4 mt-4">
                                                 <div className="flex flex-wrap items-end gap-3">
                                                   <FormGroup>
                                                     <Label>Reason</Label>
@@ -1138,7 +1138,7 @@ export default function ManageProductsPage() {
 
                                 {/* RESTOCK TAB */}
                                 {expandedTab === "restock" && (
-                                  <div className="bg-white border border-gray-200 rounded-xl p-4">
+                                  <div className="bg-white rounded-xl p-4">
                                     <div className="flex items-center justify-between mb-3">
                                       <h3 className="text-sm font-semibold text-gray-900">Restock this product</h3>
                                     </div>
@@ -1295,7 +1295,7 @@ export default function ManageProductsPage() {
 
                                 {/* DETAILS TAB */}
                                 {expandedTab === "details" && (
-                                  <div className="bg-white border border-gray-200 rounded-xl p-4">
+                                  <div className="bg-white rounded-xl p-4">
                                     <div className="flex items-center justify-between mb-3">
                                       <h3 className="text-sm font-semibold text-gray-900">Product details</h3>
                                       {!isEditingDetails && (
@@ -1461,7 +1461,7 @@ export default function ManageProductsPage() {
     <div>
       {/* ================= Header — the same as Stock ================= */}
       <div
-        className="lg:sticky lg:top-0 z-20 pb-3 mb-5 bg-white/95 backdrop-blur-sm border-b border-gray-200 relative"
+        className="lg:sticky lg:top-0 z-20 pb-3 mb-5 bg-gray-50/95 backdrop-blur-sm lg:border-b lg:border-gray-200 relative"
         onMouseLeave={() => setHoveredNav(null)}
       >
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
@@ -1550,8 +1550,8 @@ export default function ManageProductsPage() {
       ) : products.length === 0 ? (
         <EmptyState icon={Package} title="No products yet" subtitle="Add one to get started" />
       ) : (
-        <Card className="p-0 overflow-hidden">
-          <div className="px-5 py-3.5 border-b border-gray-100 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+        <Card flatOnPhone className="lg:p-0 lg:overflow-hidden">
+          <div className="px-1 lg:px-5 py-3.5 lg:border-b lg:border-gray-100 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
             <p className="text-sm text-gray-500 truncate">
               {selectedFilter.gender ? genderGroups.find((g) => g.gender === selectedFilter.gender)?.label : "All"}
               {selectedFilter.category && (
@@ -1667,7 +1667,7 @@ export default function ManageProductsPage() {
             </div>
 
             {/* Phone / tablet-portrait: a card per product; opening one shows the same stock / restock / details panel under it */}
-            <div className="lg:hidden space-y-2.5 p-3">
+            <div className="lg:hidden space-y-2.5">
               {sortedProducts.map((p) => {
                 const isExpanded = expandedId === p.id;
                 const subCategory = splitCategory(p.category).subCategory;

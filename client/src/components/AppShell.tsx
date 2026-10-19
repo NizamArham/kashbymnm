@@ -404,7 +404,7 @@ export default function AppShell() {
 
       {/* The POS is a till, not a document: it takes exactly the screen's
           height (its cart scrolls inside, its buttons stay put) instead of
-          sitting in the padded, scrolling page card the other screens use. */}
+          sitting in the padded, scrolling page the other screens use. */}
       <div className={`flex-1 min-w-0 lg:ml-64 bg-gray-50 ${
         isPosScreen
           ? "h-[100dvh] flex flex-col overflow-hidden"
@@ -432,16 +432,16 @@ export default function AppShell() {
             <Outlet />
           </div>
         ) : isFitScreen ? (
-          <div className="p-4 lg:p-6 lg:flex-1 lg:min-h-0 lg:flex lg:flex-col">
-            <div className="bg-white border border-gray-200 rounded-2xl p-4 lg:p-6 shadow-sm lg:flex-1 lg:min-h-0 lg:flex lg:flex-col">
+          <div className="p-4 lg:p-5 lg:flex-1 lg:min-h-0 lg:flex lg:flex-col">
+            <div className="lg:flex-1 lg:min-h-0 lg:flex lg:flex-col">
               <Outlet />
             </div>
           </div>
         ) : (
-          <div className="p-4 lg:p-6">
-            <div className="bg-white border border-gray-200 rounded-2xl p-4 lg:p-6 shadow-sm">
-              <Outlet />
-            </div>
+          // The page sits straight on the app background: each section is its own card, so there is one level of cards,
+          // not a card full of cards.
+          <div className="p-4 lg:p-5">
+            <Outlet />
           </div>
         )}
       </div>

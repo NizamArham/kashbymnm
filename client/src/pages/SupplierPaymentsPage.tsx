@@ -860,7 +860,7 @@ export default function SupplierPaymentsPage() {
                               </div>
 
                               {expandedTab === "activity" && (
-                                <div className="bg-white border border-gray-200 rounded-xl p-4">
+                                <div className="bg-white rounded-xl p-4">
                                   <div className="flex items-center justify-between mb-3">
                                     <h3 className="text-sm font-semibold text-gray-900">Recent activity</h3>
                                     {ledgerEntries.length > 0 && (
@@ -884,7 +884,7 @@ export default function SupplierPaymentsPage() {
                                   ) : ledgerEntries.length === 0 ? (
                                     <p className="text-sm text-gray-400">No activity recorded for this supplier yet.</p>
                                   ) : (
-                                    <div className="border border-gray-200 rounded-xl overflow-hidden">
+                                    <div className="rounded-xl overflow-hidden">
                                       <table className="w-full text-sm">
                                         <thead>
                                           <tr className="bg-gray-50">

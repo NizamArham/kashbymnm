@@ -241,7 +241,7 @@ export default function StaffPage() {
                     <tr>
                       <Td colSpan={6} className="bg-gray-50">
                         <div className="py-3">
-                          <div className="bg-white border border-gray-200 rounded-xl p-4">
+                          <div className="bg-white rounded-xl p-4">
                             <div className="flex items-center justify-between mb-3">
                               <h3 className="text-sm font-semibold text-gray-900">Staff details</h3>
                               {!isEditing && (
