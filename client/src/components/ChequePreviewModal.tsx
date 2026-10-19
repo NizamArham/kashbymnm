@@ -71,39 +71,44 @@ function CrossingMark() {
   );
 }
 
-// The bank's verdict, stamped onto the cheque in the owner's own style: a plain thin rectangle (about 1.8 : 1, like a compact rubber stamp),
-// the verdict across the top in condensed heavy capitals with a small margin either side, one hairline rule under it at a 65 / 35 split,
-// and the date beneath in bold typewriter capitals, widely spaced and a little smaller than the box. Tilted well off square like a
-// hand-pressed stamp. Drawn as clean solid vectors with sharp edges (no blur, no filter): slate blue when the cheque passed and a dark brick
-// red when it bounced, like old bank ink, at a little under full strength and printed with a multiply blend so it sits in the plain
-// black-and-white cheque, behind the printed text. The ink is a touch lighter toward the edges, as if the stamp hit the paper in the middle.
+// The bank's verdict, stamped onto the cheque like a plain "inspected by" office stamp: one thin ring, the verdict curved round the top in
+// light capitals, and the date set in two short centred lines inside (day and month, then the year). Nothing else — no tick, no box, no
+// ornament. Tilted a little off level like a hand-pressed stamp. Drawn as clean solid vectors with sharp edges (no blur, no filter), in soft
+// black ink to suit the plain black-and-white cheque, printed behind the cheque's own text. The only wear is a slightly lighter side.
 function ChequeSeal({ status, settledAt, className = "" }: { status: string; settledAt?: string | null; chequeNumber?: string; className?: string }) {
   const passed = status === "cleared";
   const uid = useId().replace(/:/g, "");
-  const ink = passed ? "#3a506b" : "#8b3a3a";
-  const under = settledAt ? formatDateDisplay(settledAt).toUpperCase() : passed ? "PASSED AT THE BANK" : "RETURNED UNPAID";
-  const condensed = '"HelveticaNeue-CondensedBlack", "Helvetica Neue Condensed Black", Oswald, "Roboto Condensed", "Arial Narrow", Impact, sans-serif';
-  const typewriter = '"Courier Prime", "American Typewriter", "Courier New", Courier, monospace';
+  const ink = "#1c1c1c";
+  const sans = '"Helvetica Neue", Helvetica, Arial, sans-serif';
+  // "15 OCT" over "2026"; with no date on record, the wording stands in
+  const words = settledAt ? formatDateDisplay(settledAt).toUpperCase().split(" ") : [];
+  const lines: [string, string] = words.length >= 3 ? [`${words[0]} ${words[1]}`, words.slice(2).join(" ")] : passed ? ["PASSED", "AT BANK"] : ["RETURNED", "UNPAID"];
+  const size = words.length >= 3 ? 19 : 14;
   return (
-    <svg viewBox="0 0 198 110" className={`pointer-events-none absolute aspect-[198/110] -rotate-[10deg] ${className}`} style={{ color: ink, mixBlendMode: "multiply" }} aria-hidden="true">
+    <svg viewBox="0 0 160 160" className={`pointer-events-none absolute aspect-square -rotate-[8deg] ${className}`} style={{ color: ink, mixBlendMode: "multiply" }} aria-hidden="true">
       <defs>
-        <radialGradient id={`press-${uid}`} cx="0.46" cy="0.42" r="0.75">
+        {/* from the lower left, up and over the top, to the lower right, so the letters stand up and read left to right */}
+        <path id={`arc-${uid}`} d="M43.23,116.77 A52,52 0 1,1 116.77,116.77" />
+        <linearGradient id={`press-${uid}`} x1="0" y1="0" x2="1" y2="1">
           <stop offset="0" stopColor="#fff" />
-          <stop offset="1" stopColor="#f0f0f0" />
-        </radialGradient>
-        <mask id={`wear-${uid}`} maskUnits="userSpaceOnUse" x="0" y="0" width="198" height="110">
-          <rect width="198" height="110" fill={`url(#press-${uid})`} />
+          <stop offset="1" stopColor="#c4c4c4" />
+        </linearGradient>
+        <mask id={`wear-${uid}`} maskUnits="userSpaceOnUse" x="0" y="0" width="160" height="160">
+          <rect width="160" height="160" fill={`url(#press-${uid})`} />
         </mask>
       </defs>
-      <g mask={`url(#wear-${uid})`} opacity="0.85" fill="currentColor" stroke="none" textRendering="geometricPrecision" shapeRendering="geometricPrecision">
-        <rect x="1.5" y="1.5" width="195" height="107" fill="none" stroke="currentColor" strokeWidth="1.5" />
-        <line x1="1.5" y1="71.5" x2="196.5" y2="71.5" stroke="currentColor" strokeWidth="0.7" />
-        {/* the verdict keeps a small margin either side and is held to the same width whatever face the device has, so the stamp always looks the same */}
-        <text x="14" y="56" fontFamily={condensed} fontSize="54" fontWeight="800" textLength="170" lengthAdjust="spacingAndGlyphs">
-          {passed ? "CLEARED" : "BOUNCED"}
+      <g mask={`url(#wear-${uid})`} opacity="0.9" fill="currentColor" stroke="none" textRendering="geometricPrecision" shapeRendering="geometricPrecision">
+        <circle cx="80" cy="80" r="76" fill="none" stroke="currentColor" strokeWidth="1.6" />
+        <text fontFamily={sans} fontSize="25" fontWeight="400" letterSpacing="7">
+          <textPath href={`#arc-${uid}`} startOffset="50%" textAnchor="middle">
+            {passed ? "CLEARED" : "BOUNCED"}
+          </textPath>
         </text>
-        <text x="24" y="95" fontFamily={typewriter} fontSize={settledAt ? 16 : 11} fontWeight="700" textLength="150" lengthAdjust="spacing">
-          {under}
+        <text x="80" y={82} textAnchor="middle" fontFamily={sans} fontSize={size} fontWeight="400" letterSpacing="0.5">
+          {lines[0]}
+        </text>
+        <text x="80" y={82 + size * 1.3} textAnchor="middle" fontFamily={sans} fontSize={size} fontWeight="400" letterSpacing="0.5">
+          {lines[1]}
         </text>
       </g>
     </svg>
@@ -213,7 +218,7 @@ export default function ChequePreviewModal({
                 />
 
                 {isCrossed && <CrossingMark />}
-                {stamped && <ChequeSeal status={cheque.status} settledAt={cheque.settled_at} chequeNumber={cheque.cheque_number} className="left-[57.5%] top-[65.5%] w-[26%] -translate-x-1/2 -translate-y-1/2" />}
+                {stamped && <ChequeSeal status={cheque.status} settledAt={cheque.settled_at} chequeNumber={cheque.cheque_number} className="left-[57%] top-[63%] w-[17%] -translate-x-1/2 -translate-y-1/2" />}
 
                 <div className="relative flex min-h-0 flex-1 flex-col">
                 <div
@@ -315,7 +320,7 @@ export default function ChequePreviewModal({
                   }}
                 />
 
-                {stamped && <ChequeSeal status={cheque.status} settledAt={cheque.settled_at} chequeNumber={cheque.cheque_number} className="right-[19.5%] top-[47%] w-[26%] -translate-y-1/2" />}
+                {stamped && <ChequeSeal status={cheque.status} settledAt={cheque.settled_at} chequeNumber={cheque.cheque_number} className="right-[19%] top-[51%] w-[17%] -translate-y-1/2" />}
                 <div className="relative flex min-h-0 flex-1 flex-col">
                 <p className="relative text-[10px] uppercase tracking-wider text-gray-400 mb-2">Endorsement history</p>
 
