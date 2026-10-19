@@ -71,47 +71,37 @@ function CrossingMark() {
   );
 }
 
-// The bank's verdict, stamped onto the cheque as four corner marks: no outline, just thin brackets framing the verdict like a viewfinder,
-// a small tick (passed) or cross (bounced) above the word, and the date in fine type underneath. Thin lines and a medium weight so it
-// stays quiet; drawn as clean solid vectors with sharp edges (no blur, no filter), in muted dusty blue when it passed and dusty red when it
-// bounced, so it sits in the plain black-and-white cheque, behind the printed text. The only wear is a slightly lighter side, and it sits
-// a few degrees off level the way a hand-pressed stamp does.
+// The bank's verdict, stamped onto the cheque in the owner's own style: a plain thin rectangle, the verdict set big across the top, one
+// rule under it, and the date underneath in small spaced capitals — nothing else. Tilted well off square like a hand-pressed stamp.
+// Drawn as clean solid vectors with sharp edges (no blur, no filter), in muted dusty blue when the cheque passed and dusty red when it
+// bounced, so it sits in the plain black-and-white cheque, behind the printed text. The only wear is a slightly lighter side.
 function ChequeSeal({ status, settledAt, className = "" }: { status: string; settledAt?: string | null; chequeNumber?: string; className?: string }) {
   const passed = status === "cleared";
   const uid = useId().replace(/:/g, "");
   const ink = passed ? "#4d7099" : "#a4524e";
-  const date = settledAt ? formatDateDisplay(settledAt).toUpperCase() : "";
-  const mono = 'ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace';
+  const under = settledAt ? formatDateDisplay(settledAt).toUpperCase() : passed ? "PASSED AT THE BANK" : "RETURNED UNPAID";
   const sans = '"Helvetica Neue", Helvetica, Arial, sans-serif';
   return (
-    <svg viewBox="0 0 190 92" className={`pointer-events-none absolute aspect-[190/92] -rotate-[6deg] ${className}`} style={{ color: ink, mixBlendMode: "multiply" }} aria-hidden="true">
+    <svg viewBox="0 0 200 90" className={`pointer-events-none absolute aspect-[200/90] -rotate-[10deg] ${className}`} style={{ color: ink, mixBlendMode: "multiply" }} aria-hidden="true">
       <defs>
         <linearGradient id={`press-${uid}`} x1="0" y1="0" x2="1" y2="1">
           <stop offset="0" stopColor="#fff" />
           <stop offset="1" stopColor="#c4c4c4" />
         </linearGradient>
-        <mask id={`wear-${uid}`} maskUnits="userSpaceOnUse" x="0" y="0" width="190" height="92">
-          <rect width="190" height="92" fill={`url(#press-${uid})`} />
+        <mask id={`wear-${uid}`} maskUnits="userSpaceOnUse" x="0" y="0" width="200" height="90">
+          <rect width="200" height="90" fill={`url(#press-${uid})`} />
         </mask>
       </defs>
       <g mask={`url(#wear-${uid})`} opacity="0.92" fill="currentColor" stroke="none" textRendering="geometricPrecision" shapeRendering="geometricPrecision">
-        {/* the four corners */}
-        <path d="M3,22 V3 H22 M168,3 H187 V22 M187,70 V89 H168 M22,89 H3 V70" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="square" strokeLinejoin="miter" />
-
-        {/* the mark above the word */}
-        <g fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.8">
-          {passed ? <path d="M86,29 L93,36 L105,21" /> : <path d="M87,22 L102,37 M102,22 L87,37" />}
-        </g>
-
-        {/* the verdict fills the same width whatever face the device has */}
-        <text x="25" y="62" fontFamily={sans} fontSize="22" fontWeight="600" textLength="140" lengthAdjust="spacing">
+        <rect x="1.5" y="1.5" width="197" height="87" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <line x1="1.5" y1="58" x2="198.5" y2="58" stroke="currentColor" strokeWidth="1.5" />
+        {/* the verdict fills the width whatever face the device has, so the stamp always looks the same */}
+        <text x="12" y="45" fontFamily={sans} fontSize="40" fontWeight="700" textLength="176" lengthAdjust="spacingAndGlyphs">
           {passed ? "CLEARED" : "BOUNCED"}
         </text>
-        {date && (
-          <text x="95" y="79" textAnchor="middle" fontFamily={mono} fontSize="9.4" fontWeight="600" textLength={Math.min(date.length * 6.8, 96)} lengthAdjust="spacing">
-            {date}
-          </text>
-        )}
+        <text x="100" y="79" textAnchor="middle" fontFamily={sans} fontSize="15" fontWeight="500" letterSpacing="1.8">
+          {under}
+        </text>
       </g>
     </svg>
   );
@@ -220,7 +210,7 @@ export default function ChequePreviewModal({
                 />
 
                 {isCrossed && <CrossingMark />}
-                {stamped && <ChequeSeal status={cheque.status} settledAt={cheque.settled_at} chequeNumber={cheque.cheque_number} className="left-[56.5%] top-[67%] w-[27%] -translate-x-1/2 -translate-y-1/2" />}
+                {stamped && <ChequeSeal status={cheque.status} settledAt={cheque.settled_at} chequeNumber={cheque.cheque_number} className="left-[57.5%] top-[67%] w-[28%] -translate-x-1/2 -translate-y-1/2" />}
 
                 <div className="relative flex min-h-0 flex-1 flex-col">
                 <div
@@ -322,7 +312,7 @@ export default function ChequePreviewModal({
                   }}
                 />
 
-                {stamped && <ChequeSeal status={cheque.status} settledAt={cheque.settled_at} chequeNumber={cheque.cheque_number} className="right-[17%] top-[47%] w-[26%] -translate-y-1/2" />}
+                {stamped && <ChequeSeal status={cheque.status} settledAt={cheque.settled_at} chequeNumber={cheque.cheque_number} className="right-[19.5%] top-[47%] w-[28%] -translate-y-1/2" />}
                 <div className="relative flex min-h-0 flex-1 flex-col">
                 <p className="relative text-[10px] uppercase tracking-wider text-gray-400 mb-2">Endorsement history</p>
 
