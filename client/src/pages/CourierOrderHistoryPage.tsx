@@ -208,9 +208,9 @@ export default function CourierOrderHistoryPage() {
                 <Th>Order</Th>
                 <Th>Courier</Th>
                 <Th>Status</Th>
-                <Th>COD</Th>
-                <Th>Charge</Th>
-                <Th>Net</Th>
+                <Th align="right">COD</Th>
+                <Th align="right">Charge</Th>
+                <Th align="right">Net</Th>
               </tr>
             </thead>
             <tbody>
@@ -229,14 +229,14 @@ export default function CourierOrderHistoryPage() {
                       {order.delivery_status}
                     </span>
                   </Td>
-                  <Td>
+                  <Td align="right">
                     {order.delivery_status === "delivered" ? (
                       money(order.cod_amount)
                     ) : (
                       <span className="line-through text-gray-400">{money(order.cod_amount)}</span>
                     )}
                   </Td>
-                  <Td>
+                  <Td align="right">
                     <button
                       onClick={() => setEditingOrder(order)}
                       className="text-gray-900 hover:text-black underline decoration-dotted tabular-nums"
@@ -249,7 +249,7 @@ export default function CourierOrderHistoryPage() {
                         +{money(order.return_charge)} return
                       </button>
                     )}
-                    <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-gray-400">
+                    <div className="mt-0.5 flex items-center justify-end gap-1.5 text-[11px] text-gray-400">
                       {order.charge_confirmed ? (
                         <span className="inline-flex items-center gap-0.5 text-gray-500">
                           <Check size={12} />
@@ -259,7 +259,7 @@ export default function CourierOrderHistoryPage() {
                       {(order.actual_weight_kg ?? order.package_weight_kg) ? <span>{order.actual_weight_kg ?? order.package_weight_kg} kg</span> : null}
                     </div>
                   </Td>
-                  <Td className="font-semibold">
+                  <Td align="right" className="font-semibold">
                     {money((order.delivery_status === "delivered" ? order.cod_amount : 0) - order.courier_charge - order.return_charge)}
                   </Td>
                 </tr>

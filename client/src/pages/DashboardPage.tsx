@@ -8,6 +8,7 @@ import { Sale, InventoryUnit, Delivery, ReturnRequest } from "../lib/types";
 import { PageHeader, Card, EmptyState, Dropdown } from "../components/ui";
 import { RevenueChart, RevenuePoint } from "../components/RevenueChart";
 import { todayInSriLanka } from "../lib/time";
+import { formatDate } from "../lib/dates";
 
 const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -34,7 +35,7 @@ function timeAgo(iso: string): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  return formatDate(iso);
 }
 
 // Merges sales, delivery-status changes, and returns into one

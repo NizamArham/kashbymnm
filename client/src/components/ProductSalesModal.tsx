@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, ApiRequestError } from "../lib/api";
 import { Badge, Button, ErrorText, Modal, RefLink, Table, Td, Th } from "./ui";
+import { formatDateTime } from "../lib/dates";
 
 interface SoldRow {
   sale_item_id: number;
@@ -123,7 +124,7 @@ export default function ProductSalesModal({ productId, productTitle, onClose }: 
               return (
                 <tr key={`${r.sale_id}-${r.sale_item_id}`} className={dead ? "opacity-60" : ""}>
                   <Td className="whitespace-nowrap">
-                    <RefLink to={`/sales/${r.sale_id}`}>{r.date.slice(0, 16).replace("T", " ")}</RefLink>
+                    <RefLink to={`/sales/${r.sale_id}`}>{formatDateTime(r.date)}</RefLink>
                   </Td>
                   <Td className="whitespace-nowrap font-medium">
                     <RefLink to={`/sales/${r.sale_id}`}>{r.invoice}</RefLink>

@@ -13,6 +13,7 @@ import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { Button, Card, EmptyState, ErrorText, Input, RefLink, TabToggle } from "./ui";
 import { PageLoader } from "./Loader";
 import { useConfirm } from "./Feedback";
+import { formatDate } from "../lib/dates";
 
 const money = (n: number) => `Rs. ${Math.round(n).toLocaleString()}`;
 
@@ -342,7 +343,7 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
                 <span className="text-gray-700">{r.type}</span>
                 <span className="truncate text-gray-700">{r.customer}</span>
                 <span className="truncate text-gray-600">{r.via}</span>
-                <span className="text-xs text-gray-400">{r.at.slice(0, 10)}</span>
+                <span className="text-xs text-gray-400">{formatDate(r.at)}</span>
                 {/* The status on its own line, the buttons together on the next. */}
                 <div className="col-span-2 lg:col-span-1">
                   <p className="flex items-center justify-between gap-2 text-xs text-gray-500">

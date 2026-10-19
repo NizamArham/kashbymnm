@@ -10,6 +10,7 @@ import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { useSortableData } from "../lib/useSortableData";
 import { findCustomers, CASHIER_SEARCH_MIN_CHARS } from "../lib/customerSearch";
 import { useAdminApproval } from "../components/AdminApproval";
+import { formatDate } from "../lib/dates";
 
 type CustomerSortKey = "priority" | "code" | "name" | "phone" | "loyalty" | "balance" | "last_order";
 // The groups an admin can narrow the list to.
@@ -358,7 +359,7 @@ export default function ViewCustomersPage() {
                         {netBalance === 0 ? "—" : netBalance > 0 ? `+Rs. ${netBalance.toLocaleString()}` : `-Rs. ${Math.abs(netBalance).toLocaleString()}`}
                       </Td>
                     )}
-                    <Td>{c.last_order_date ? c.last_order_date.slice(0, 10) : "—"}</Td>
+                    <Td>{c.last_order_date ? formatDate(c.last_order_date) : "—"}</Td>
                     <Td className="w-8 text-right">
                       <ChevronRight size={14} className="text-gray-300" />
                     </Td>
@@ -408,7 +409,7 @@ export default function ViewCustomersPage() {
                       </span>
                     }
                   />
-                  <RowCardStat label="Last order" value={c.last_order_date ? c.last_order_date.slice(0, 10) : "—"} />
+                  <RowCardStat label="Last order" value={c.last_order_date ? formatDate(c.last_order_date) : "—"} />
                 </RowCardStats>
               </RowCard>
             );

@@ -4,6 +4,7 @@ import { ClipboardCheck } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { DailyAttendanceRow, AttendanceStatus } from "../lib/types";
 import { PageHeader, Card, ErrorText } from "../components/ui";
+import { formatDate, formatTime } from "../lib/dates";
 
 const STATUS_OPTIONS: { value: AttendanceStatus; label: string; activeClass: string }[] = [
   { value: "present", label: "Present", activeClass: "bg-green-600 text-white" },
@@ -74,7 +75,7 @@ export default function AttendancePage() {
 
       {!loading && (
         <p className="text-xs text-gray-400 mb-3">
-          {markedCount} of {staff.length} marked for {date}
+          {markedCount} of {staff.length} marked for {formatDate(date)}
         </p>
       )}
 
@@ -94,7 +95,7 @@ export default function AttendancePage() {
                 <p className="text-xs text-gray-400">{s.job_title ?? "—"}</p>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
-                {s.status && <span className="text-xs text-gray-400 mr-1">Marked {s.marked_at?.slice(11, 16)}</span>}
+                {s.status && <span className="text-xs text-gray-400 mr-1">Marked {formatTime(s.marked_at) ?? ""}</span>}
                 {STATUS_OPTIONS.map((opt) => (
                   <button
                     key={opt.value}

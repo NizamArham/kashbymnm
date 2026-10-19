@@ -19,6 +19,7 @@ import DeliveryChargeSummary from "../components/DeliveryChargeSummary";
 import { useAuth } from "../context/AuthContext";
 import { useAdminApproval } from "../components/AdminApproval";
 import { useConfirm } from "../components/Feedback";
+import { formatDateTime } from "../lib/dates";
 
 // Two separate questions, each answered on its own: WHEN (the period, or a custom date range) and
 // WHAT KIND of sale. They used to share one row of tabs, so picking "Voided" forgot the period.
@@ -680,7 +681,7 @@ export default function SaleHistoryPage() {
         )}
         {sale.is_voided ? (
           <p className="text-xs text-red-500 mt-2">
-            Voided {sale.voided_at?.slice(0, 16).replace("T", " ")}
+            Voided {formatDateTime(sale.voided_at)}
             {sale.void_reason ? ` — ${sale.void_reason}` : ""}
             {sale.loyalty_points_earned > 0 ? ` · ${sale.loyalty_points_earned} loyalty points reversed` : null}
           </p>
@@ -975,8 +976,8 @@ export default function SaleHistoryPage() {
                   <SortHeader<SaleSortKey> label="Date" sortKey="date" activeKey={sortKey} dir={sortDir} onClick={toggleSort} className="w-[14%]" />
                   <SortHeader<SaleSortKey> label="Customer" sortKey="customer" activeKey={sortKey} dir={sortDir} onClick={toggleSort} className="w-[14%]" />
                   <Th className="w-[8%]">Type</Th>
-                  <SortHeader<SaleSortKey> label="Total" sortKey="total" activeKey={sortKey} dir={sortDir} onClick={toggleSort} className="w-[10%]" />
-                  <SortHeader<SaleSortKey> label="Paid" sortKey="paid" activeKey={sortKey} dir={sortDir} onClick={toggleSort} className="w-[10%]" />
+                  <SortHeader<SaleSortKey> label="Total" sortKey="total" activeKey={sortKey} dir={sortDir} onClick={toggleSort} className="w-[10%]" align="right" />
+                  <SortHeader<SaleSortKey> label="Paid" sortKey="paid" activeKey={sortKey} dir={sortDir} onClick={toggleSort} className="w-[10%]" align="right" />
                   <Th className="w-[12%]">Payment</Th>
                   <Th className="w-[14%]">Status</Th>
                   <Th className="w-[5%]"></Th>
@@ -997,13 +998,13 @@ export default function SaleHistoryPage() {
                         </div>
                         <ExchangeTag sale={sale} />
                       </Td>
-                      <Td className="whitespace-nowrap">{sale.date.slice(0, 16).replace("T", " ")}</Td>
+                      <Td className="whitespace-nowrap">{formatDateTime(sale.date)}</Td>
                       <Td className="truncate" title={sale.customer_name ?? sale.deleted_customer_snapshot ?? "Walk-in"}>
                         <CustomerName sale={sale} />
                       </Td>
                       <Td>{sale.sale_type === "online" ? "Online" : "In-Store"}</Td>
-                      <Td className="whitespace-nowrap tabular-nums">Rs. {sale.total.toLocaleString()}</Td>
-                      <Td className="whitespace-nowrap tabular-nums">Rs. {sale.amount_paid.toLocaleString()}</Td>
+                      <Td align="right">Rs. {sale.total.toLocaleString()}</Td>
+                      <Td align="right">Rs. {sale.amount_paid.toLocaleString()}</Td>
                       <Td>
                         <div className="capitalize">{salePaymentLabel(sale)}</div>
                         {sale.change_due > 0 && <div className="text-xs text-gray-400 whitespace-nowrap">Change: Rs. {sale.change_due.toLocaleString()}</div>}
@@ -1069,7 +1070,7 @@ export default function SaleHistoryPage() {
                         {sale.is_voided ? " (Voided)" : ""}
                       </p>
                       <ExchangeTag sale={sale} />
-                      <p className="text-xs text-gray-400 mt-0.5">{sale.date.slice(0, 16).replace("T", " ")}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">{formatDateTime(sale.date)}</p>
                       <p className="text-xs text-gray-500 mt-1">
                         <CustomerName sale={sale} /> · {sale.sale_type === "online" ? "Online" : "In-Store"}
                       </p>

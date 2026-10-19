@@ -8,6 +8,7 @@ import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDat
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { PageHeader, Card, Table, Th, Td, EmptyState, ErrorText, DateRangePicker, Button } from "../components/ui";
 import ChequePreviewModal from "../components/ChequePreviewModal";
+import { formatDate } from "../lib/dates";
 
 interface LedgerEntry {
   date: string;
@@ -245,8 +246,8 @@ export default function SupplierPaymentHistoryPage() {
               <tr>
                 <Th>Date</Th>
                 <Th>Description</Th>
-                <Th>Amount</Th>
-                <Th>Balance</Th>
+                <Th align="right">Amount</Th>
+                <Th align="right">Balance</Th>
               </tr>
             </thead>
             <tbody>
@@ -258,7 +259,7 @@ export default function SupplierPaymentHistoryPage() {
                     className={`${i % 2 === 1 ? "bg-gray-50/60" : ""} ${clickable ? "cursor-pointer hover:bg-gray-50" : ""}`}
                     onClick={clickable ? () => setChequePreview(entry) : undefined}
                   >
-                    <Td>{entry.date.slice(0, 10)}</Td>
+                    <Td>{formatDate(entry.date)}</Td>
                     <Td>
                       {entry.label}
                       {clickable && (
@@ -268,8 +269,8 @@ export default function SupplierPaymentHistoryPage() {
                         </span>
                       )}
                     </Td>
-                    <Td className={`font-medium ${typeTone(entry.type)}`}>{formatEntryAmount(entry)}</Td>
-                    <Td>Rs. {entry.running_balance.toLocaleString()}</Td>
+                    <Td align="right" className={`font-medium ${typeTone(entry.type)}`}>{formatEntryAmount(entry)}</Td>
+                    <Td align="right">Rs. {entry.running_balance.toLocaleString()}</Td>
                   </tr>
                 );
               })}

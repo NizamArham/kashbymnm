@@ -5,6 +5,7 @@ import { ArrowLeft, Star } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Customer } from "../lib/types";
 import { PageHeader, Card, Table, Th, Td, EmptyState, ErrorText, RefLink } from "../components/ui";
+import { formatDate } from "../lib/dates";
 
 interface LoyaltyEntry {
   points: number;
@@ -103,7 +104,7 @@ export default function CustomerLoyaltyHistoryPage({ customerId }: { customerId?
             <tbody>
               {displayEntries.map((entry, i) => (
                 <tr key={i} className={i % 2 === 1 ? "bg-gray-50/60" : ""}>
-                  <Td>{entry.created_at.slice(0, 10)}</Td>
+                  <Td>{formatDate(entry.created_at)}</Td>
                   <Td>
                     {entry.sale_id && entry.sale_invoice ? (
                       <>

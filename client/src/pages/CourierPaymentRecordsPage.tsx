@@ -7,6 +7,7 @@ import { partnerLabel, useDeliveryPartners } from "../lib/delivery";
 import { useSortableData } from "../lib/useSortableData";
 import { Badge, Card, DateRangePicker, Dropdown, ErrorText, HelpHint, PageHeader, SortHeader, TabToggle, Table, Td, Th } from "../components/ui";
 import { useConfirm } from "../components/Feedback";
+import { formatDate } from "../lib/dates";
 
 const money = (value: number) => `Rs. ${value.toLocaleString()}`;
 const signed = (value: number) => `${value > 0 ? "+" : "−"} ${money(Math.abs(value))}`;
@@ -20,10 +21,7 @@ function monthAgoIso(): string {
   d.setMonth(d.getMonth() - 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
-function shortDate(iso: string): string {
-  const d = new Date(iso.slice(0, 10) + "T00:00:00");
-  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-}
+const shortDate = (iso: string) => formatDate(iso);
 
 type Kind = "settlement" | "correction";
 type KindFilter = "all" | Kind;

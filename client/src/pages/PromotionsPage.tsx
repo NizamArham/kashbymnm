@@ -24,6 +24,7 @@ import {
 } from "../components/ui";
 import { useSortableData } from "../lib/useSortableData";
 import { useConfirm, useToast } from "../components/Feedback";
+import { formatDate } from "../lib/dates";
 
 type PromoTab = "coupons" | "vouchers";
 type CouponSortKey = "code" | "reward" | "status" | "expires";
@@ -50,7 +51,7 @@ function daysUntil(expiresAt: string): number {
 
 function ExpiryBadge({ expiresAt }: { expiresAt: string | null }) {
   if (!expiresAt) return <Badge label="No expiry" tone="neutral" />;
-  return <Badge label={isExpired(expiresAt) ? `Expired ${expiresAt.slice(0, 10)}` : expiresAt.slice(0, 10)} tone={isExpired(expiresAt) ? "danger" : "neutral"} />;
+  return <Badge label={isExpired(expiresAt) ? `Expired ${formatDate(expiresAt)}` : formatDate(expiresAt)} tone={isExpired(expiresAt) ? "danger" : "neutral"} />;
 }
 
 export default function PromotionsPage() {
@@ -654,8 +655,8 @@ function VoucherFormModal({ voucher, onClose, onSaved }: { voucher?: GiftVoucher
             <>
               <CheckCircle2 size={14} className="text-green-600 flex-shrink-0" />
               <span className="text-gray-700">
-                Sold {voucher.activated_at.slice(0, 10)} — expires{" "}
-                {voucher.expires_at ? `${voucher.expires_at.slice(0, 10)} (${daysUntil(voucher.expires_at)} days left)` : "—"}
+                Sold {formatDate(voucher.activated_at)} — expires{" "}
+                {voucher.expires_at ? `${formatDate(voucher.expires_at)} (${daysUntil(voucher.expires_at)} days left)` : "—"}
               </span>
             </>
           ) : (

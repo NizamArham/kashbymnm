@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
 import { StaffMember, AttendanceRecord, LoginActivityEntry } from "../lib/types";
 import { PageHeader, Card, Button, Table, Th, Td, TabToggle, Badge } from "../components/ui";
+import { formatDate, formatDateTime } from "../lib/dates";
 
 type ProfileTab = "profile" | "attendance" | "activity";
 
@@ -142,7 +143,7 @@ export default function ProfilePage() {
               <tbody>
                 {attendanceRecords.map((r) => (
                   <tr key={r.id}>
-                    <Td>{r.attendance_date}</Td>
+                    <Td>{formatDate(r.attendance_date)}</Td>
                     <Td>
                       <Badge label={r.status.replace("_", " ")} tone={attendanceStatusTone(r.status)} />
                     </Td>
@@ -171,8 +172,8 @@ export default function ProfilePage() {
               <tbody>
                 {activityLog.map((a) => (
                   <tr key={a.id}>
-                    <Td>{a.login_at.slice(0, 16).replace("T", " ")}</Td>
-                    <Td>{a.logout_at ? a.logout_at.slice(0, 16).replace("T", " ") : "—"}</Td>
+                    <Td>{formatDateTime(a.login_at)}</Td>
+                    <Td>{a.logout_at ? formatDateTime(a.logout_at) : "—"}</Td>
                     <Td>{sessionLength(a.login_at, a.logout_at)}</Td>
                   </tr>
                 ))}

@@ -25,6 +25,7 @@ import {
   HelpHint,
   Modal,
 } from "../components/ui";
+import { formatDate } from "../lib/dates";
 
 type StaffSortKey = "username" | "name" | "job_title" | "role" | "reports_to";
 
@@ -357,7 +358,7 @@ export default function StaffPage() {
                               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                                 <div>
                                   <p className="text-xs text-gray-400">Joined</p>
-                                  <p className="text-gray-900">{s.joined_date ?? "—"}</p>
+                                  <p className="text-gray-900">{formatDate(s.joined_date)}</p>
                                 </div>
                                 <div>
                                   <p className="text-xs text-gray-400">NIC</p>

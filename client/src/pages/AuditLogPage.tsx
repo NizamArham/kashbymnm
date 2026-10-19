@@ -6,6 +6,7 @@ import { AuditLogEntry } from "../lib/types";
 import { PageHeader, Card, Table, Th, Td, SortHeader, Badge, Dropdown, EmptyState, ErrorText } from "../components/ui";
 import { useSortableData } from "../lib/useSortableData";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
+import { formatDateTime } from "../lib/dates";
 
 type AuditSortKey = "date" | "staff" | "action";
 
@@ -254,7 +255,7 @@ export default function AuditLogPage() {
                 const Icon = meta.icon;
                 return (
                   <tr key={e.id} className="hover:bg-gray-50">
-                    <Td className="whitespace-nowrap text-gray-500 text-xs">{e.created_at.slice(0, 16).replace("T", " ")}</Td>
+                    <Td className="whitespace-nowrap text-gray-500 text-xs">{formatDateTime(e.created_at)}</Td>
                     <Td className="font-medium">{e.staff_name}</Td>
                     <Td>
                       <span className="inline-flex items-center gap-1.5">

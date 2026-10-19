@@ -42,6 +42,7 @@ import {
   HelpHint,
   RefLink,
 } from "../components/ui";
+import { formatDate } from "../lib/dates";
 
 type ReturnsTab = "request" | "approve" | "all" | "pickups";
 type ReturnSortKey = "id" | "date" | "customer" | "product" | "status";
@@ -59,13 +60,7 @@ function toISODate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-// "9/19" instead of "2026-09-19" — the year is dead weight in a list
-// that's already scoped to a date range, and this reads faster in a
-// narrow column or on a phone.
-function shortDate(dateStr: string): string {
-  const [, month, day] = dateStr.slice(0, 10).split("-");
-  return `${parseInt(month, 10)}/${parseInt(day, 10)}`;
-}
+const shortDate = (dateStr: string) => formatDate(dateStr);
 
 function statusTone(status: string): "success" | "warning" | "danger" | "neutral" {
   if (status === "approved") return "success";
@@ -506,7 +501,7 @@ function RequestReturnTab({ onRequested, waiting, onGoTo }: { onRequested: () =>
                     {customerBills.map((b) => (
                       <button key={b.id} type="button" onClick={() => openBill(b.invoice)} className="flex w-full items-center justify-between gap-3 px-3.5 py-2 text-left text-sm hover:bg-gray-50">
                         <span className="font-medium text-gray-900">{b.invoice}</span>
-                        <span className="text-xs text-gray-400">{b.date.slice(0, 10)}</span>
+                        <span className="text-xs text-gray-400">{formatDate(b.date)}</span>
                         <span className="tabular-nums text-gray-700">Rs. {b.total.toLocaleString()}</span>
                       </button>
                     ))}
@@ -525,7 +520,7 @@ function RequestReturnTab({ onRequested, waiting, onGoTo }: { onRequested: () =>
             {matches.map((m) => (
               <button key={m.id} type="button" onClick={() => openBill(m.invoice)} className="flex w-full items-center justify-between gap-3 px-3.5 py-2 text-left text-sm hover:bg-gray-50">
                 <span className="font-medium text-gray-900">{m.invoice}</span>
-                <span className="text-xs text-gray-400">{m.date.slice(0, 10)}</span>
+                <span className="text-xs text-gray-400">{formatDate(m.date)}</span>
                 <span className="min-w-0 flex-1 truncate text-right text-gray-600">{m.customer_name ?? "Walk-in"}</span>
                 <span className="tabular-nums text-gray-700">Rs. {m.total.toLocaleString()}</span>
               </button>

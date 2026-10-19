@@ -18,6 +18,7 @@ import CustomerOrderHistoryPage from "./CustomerOrderHistoryPage";
 import CustomerPaymentHistoryPage from "./CustomerPaymentHistoryPage";
 import CustomerLoyaltyHistoryPage from "./CustomerLoyaltyHistoryPage";
 import { useConfirm } from "../components/Feedback";
+import { formatDate } from "../lib/dates";
 
 function whatsappLink(phone: string): string {
   return `https://wa.me/${whatsappNumber(phone)}`;
@@ -849,7 +850,7 @@ export default function CustomerProfilePage() {
                 <div className="text-xs text-red-700">
                   <p className="font-medium">Suspended</p>
                   {customer.suspended_reason && <p className="mt-0.5">{customer.suspended_reason}</p>}
-                  {customer.suspended_at && <p className="mt-0.5 text-red-500">Since {customer.suspended_at.slice(0, 10)}</p>}
+                  {customer.suspended_at && <p className="mt-0.5 text-red-500">Since {formatDate(customer.suspended_at)}</p>}
                 </div>
               </div>
             )}
@@ -887,7 +888,7 @@ export default function CustomerProfilePage() {
                         <span className="text-xs text-gray-500">+ Rs. {g.amount.toLocaleString()}</span>
                         {g.expires_at && (
                           <Badge
-                            label={`${new Date(g.expires_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}${daysLeft !== null ? ` · ${daysLeft}d left` : ""}`}
+                            label={`${formatDate(g.expires_at)}${daysLeft !== null ? ` · ${daysLeft}d left` : ""}`}
                             tone={urgent ? "danger" : "neutral"}
                           />
                         )}
@@ -901,7 +902,7 @@ export default function CustomerProfilePage() {
             </div>
             <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
               <p className="text-xs text-gray-400">Last order</p>
-              <p className="mt-0.5 text-lg font-semibold tabular-nums text-gray-900">{customer.last_order_date ? customer.last_order_date.slice(0, 10) : "No orders yet"}</p>
+              <p className="mt-0.5 text-lg font-semibold tabular-nums text-gray-900">{customer.last_order_date ? formatDate(customer.last_order_date) : "No orders yet"}</p>
             </div>
           </div>
 
@@ -1530,7 +1531,7 @@ export default function CustomerProfilePage() {
                                     <span className="text-gray-300">·</span>
                                     <span className="truncate">{c.bank_name}</span>
                                     <span className="text-gray-300">·</span>
-                                    <span className="tabular-nums">{c.cheque_date.slice(0, 10)}</span>
+                                    <span className="tabular-nums">{formatDate(c.cheque_date)}</span>
                                   </div>
                                   <button
                                     onClick={() => removeCheque(i)}

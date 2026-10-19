@@ -7,6 +7,7 @@ import { cleanMoney } from "../lib/numberInput";
 import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
 import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, EmptyState, Dropdown, DateRangePicker, HelpHint, RefLink, Modal } from "../components/ui";
 import { useToast } from "../components/Feedback";
+import { formatDate, formatDateTime } from "../lib/dates";
 
 // Row geometry used to work out how many entries fit on screen: a one-line row
 // (date and transaction code side by side), and the header row above them.
@@ -475,10 +476,10 @@ export default function CashBookPage() {
                       {" · "}
                       <span className="text-gray-500">
                         {dateStart && dateEnd
-                          ? `${dateStart} to ${dateEnd}`
+                          ? `${formatDate(dateStart)} to ${formatDate(dateEnd)}`
                           : dateStart
-                          ? `from ${dateStart}`
-                          : `until ${dateEnd}`}
+                          ? `from ${formatDate(dateStart)}`
+                          : `until ${formatDate(dateEnd)}`}
                       </span>
                     </>
                   )}
@@ -563,7 +564,7 @@ export default function CashBookPage() {
                           >
                             <td className="px-2 py-2"></td>
                             <td className="px-3 py-2 text-gray-500 text-xs whitespace-nowrap">
-                              {entry.entry_date.slice(0, 16).replace("T", " ")}
+                              {formatDateTime(entry.entry_date)}
                               {entry.transaction_code && (
                                 <span className="ml-2 text-[10px] text-gray-300 font-mono">{entry.transaction_code}</span>
                               )}
@@ -661,7 +662,7 @@ export default function CashBookPage() {
                               ) : null}
                             </td>
                             <td className="px-3 py-2 text-gray-500 text-xs whitespace-nowrap">
-                              {entry.entry_date.slice(0, 16).replace("T", " ")}
+                              {formatDateTime(entry.entry_date)}
                               {entry.transaction_code && (
                                 <span className="ml-2 text-[10px] text-gray-300 font-mono">{entry.transaction_code}</span>
                               )}

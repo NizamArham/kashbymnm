@@ -31,6 +31,7 @@ import {
   HelpHint,
   Modal,
 } from "../components/ui";
+import { formatDate, formatDateTime } from "../lib/dates";
 
 type PurchasesTab = "record" | "pending" | "history" | "returns";
 type PurchaseSortKey = "code" | "date" | "supplier" | "total_cost" | "paid";
@@ -851,7 +852,7 @@ export default function PurchasesPage() {
                     <p className="text-sm font-semibold text-gray-900">
                       {p.purchase_code} — {p.supplier_name}
                     </p>
-                    <p className="text-xs text-gray-400">{p.purchase_date.slice(0, 10)}</p>
+                    <p className="text-xs text-gray-400">{formatDate(p.purchase_date)}</p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     {statusBadge(p.payment_status)}
@@ -881,9 +882,9 @@ export default function PurchasesPage() {
                   <thead>
                     <tr>
                       <Th>Line</Th>
-                      <Th>Qty</Th>
-                      <Th>Cost/pc</Th>
-                      <Th>Line total</Th>
+                      <Th align="right">Qty</Th>
+                      <Th align="right">Cost/pc</Th>
+                      <Th align="right">Line total</Th>
                       <Th>Status</Th>
                     </tr>
                   </thead>
@@ -891,9 +892,9 @@ export default function PurchasesPage() {
                     {p.lines?.map((line) => (
                       <tr key={line.id} className={line.is_fulfilled ? "opacity-50" : ""}>
                         <Td className={line.is_fulfilled ? "line-through" : ""}>{line.description}</Td>
-                        <Td>{line.quantity}</Td>
-                        <Td>Rs. {line.unit_cost.toLocaleString()}</Td>
-                        <Td>Rs. {(line.quantity * line.unit_cost).toLocaleString()}</Td>
+                        <Td align="right">{line.quantity}</Td>
+                        <Td align="right">Rs. {line.unit_cost.toLocaleString()}</Td>
+                        <Td align="right">Rs. {(line.quantity * line.unit_cost).toLocaleString()}</Td>
                         <Td>
                           {line.is_fulfilled ? (
                             <span className="text-xs font-medium border border-gray-300 rounded-full px-2.5 py-1">sorted</span>
@@ -990,8 +991,8 @@ export default function PurchasesPage() {
                       <SortHeader<PurchaseSortKey> label="Code" sortKey="code" activeKey={purchaseSortKey} dir={purchaseSortDir} onClick={togglePurchaseSort} />
                       <SortHeader<PurchaseSortKey> label="Date" sortKey="date" activeKey={purchaseSortKey} dir={purchaseSortDir} onClick={togglePurchaseSort} />
                       <SortHeader<PurchaseSortKey> label="Supplier" sortKey="supplier" activeKey={purchaseSortKey} dir={purchaseSortDir} onClick={togglePurchaseSort} />
-                      <SortHeader<PurchaseSortKey> label="Total cost" sortKey="total_cost" activeKey={purchaseSortKey} dir={purchaseSortDir} onClick={togglePurchaseSort} />
-                      <SortHeader<PurchaseSortKey> label="Paid" sortKey="paid" activeKey={purchaseSortKey} dir={purchaseSortDir} onClick={togglePurchaseSort} />
+                      <SortHeader<PurchaseSortKey> label="Total cost" sortKey="total_cost" activeKey={purchaseSortKey} dir={purchaseSortDir} onClick={togglePurchaseSort} align="right" />
+                      <SortHeader<PurchaseSortKey> label="Paid" sortKey="paid" activeKey={purchaseSortKey} dir={purchaseSortDir} onClick={togglePurchaseSort} align="right" />
                       <Th>Status</Th>
                       <Th></Th>
                     </tr>
@@ -1000,10 +1001,10 @@ export default function PurchasesPage() {
                     {sortedPurchases.map((p) => (
                       <tr key={p.id}>
                         <Td>{p.purchase_code}</Td>
-                        <Td>{p.purchase_date.slice(0, 10)}</Td>
+                        <Td>{formatDate(p.purchase_date)}</Td>
                         <Td>{p.supplier_name}</Td>
-                        <Td>Rs. {p.total_cost.toLocaleString()}</Td>
-                        <Td>Rs. {p.amount_paid.toLocaleString()}</Td>
+                        <Td align="right">Rs. {p.total_cost.toLocaleString()}</Td>
+                        <Td align="right">Rs. {p.amount_paid.toLocaleString()}</Td>
                         <Td>{statusBadge(p.payment_status)}</Td>
                         <Td>
                           {isWithinEditWindow(p.purchase_date) && (
@@ -1035,7 +1036,7 @@ export default function PurchasesPage() {
                       <div className="min-w-0">
                         <p className="font-medium text-gray-900">{p.purchase_code}</p>
                         <p className="text-xs text-gray-400 mt-0.5">
-                          {p.supplier_name} · {p.purchase_date.slice(0, 10)}
+                          {p.supplier_name} · {formatDate(p.purchase_date)}
                         </p>
                       </div>
                       <div className="flex-shrink-0">{statusBadge(p.payment_status)}</div>
@@ -1267,7 +1268,7 @@ export default function PurchasesPage() {
                       <Th>Date</Th>
                       <Th>Purchase</Th>
                       <Th>Supplier</Th>
-                      <Th>Amount</Th>
+                      <Th align="right">Amount</Th>
                       <Th>Reason</Th>
                       <Th>Resolution</Th>
                     </tr>
@@ -1275,10 +1276,10 @@ export default function PurchasesPage() {
                   <tbody>
                     {filteredReturns.map((r) => (
                       <tr key={r.id}>
-                        <Td>{r.created_at?.slice(0, 16).replace("T", " ")}</Td>
+                        <Td>{formatDateTime(r.created_at)}</Td>
                         <Td>{r.purchase_code}</Td>
                         <Td>{r.supplier_name}</Td>
-                        <Td>Rs. {r.total_amount?.toLocaleString()}</Td>
+                        <Td align="right">Rs. {r.total_amount?.toLocaleString()}</Td>
                         <Td>{r.reason}</Td>
                         <Td className="capitalize">{r.resolution?.replace(/_/g, " ")}</Td>
                       </tr>
@@ -1295,7 +1296,7 @@ export default function PurchasesPage() {
                       <div className="min-w-0">
                         <p className="font-medium text-gray-900">{r.purchase_code}</p>
                         <p className="text-xs text-gray-400 mt-0.5">
-                          {r.supplier_name} · {r.created_at?.slice(0, 16).replace("T", " ")}
+                          {r.supplier_name} · {formatDateTime(r.created_at)}
                         </p>
                       </div>
                       <p className="text-sm font-semibold text-gray-900 flex-shrink-0">Rs. {r.total_amount?.toLocaleString()}</p>

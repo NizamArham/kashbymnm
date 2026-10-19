@@ -9,6 +9,7 @@ import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDat
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { downloadBalanceSlip } from "../lib/balanceSlip";
 import { PageHeader, Card, Table, Th, Td, EmptyState, ErrorText, DateRangePicker, Button, RefLink, Badge, BadgeTone } from "../components/ui";
+import { formatDate, formatTime } from "../lib/dates";
 
 interface LedgerEntry {
   date: string;
@@ -82,19 +83,10 @@ function ninetyDaysAgoISO(): string {
   return toISODate(d);
 }
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-// "2026-10-02 15:06:11" → "2 Oct 2026"
-function formatDay(date: string): string {
-  const [y, m, d] = date.slice(0, 10).split("-").map(Number);
-  return y && m && d ? `${d} ${MONTHS[m - 1]} ${y}` : date.slice(0, 10);
-}
-
 // The time of day, when the record has one. A courier-settled payment is
 // stamped 23:59 only to sort it after its day's other rows — not a real time.
-function formatTime(date: string): string | null {
-  const t = /[ T](\d{2}:\d{2})/.exec(date)?.[1];
-  return t && t !== "23:59" ? t : null;
+function timeOf(date: string): string | null {
+  return /[ T]23:59/.test(date) ? null : formatTime(date);
 }
 
 // What the balance means in words: positive = they owe, negative = they
@@ -473,12 +465,12 @@ export default function CustomerPaymentHistoryPage({ customerId }: { customerId?
             <tbody>
               {displayEntries.map((entry, i) => {
                 const pill = PILL[entry.kind];
-                const time = formatTime(entry.date);
+                const time = timeOf(entry.date);
                 const bal = balanceText(entry.running_balance, false);
                 return (
                   <tr key={i} className="align-top">
                     <Td className="whitespace-nowrap">
-                      <div className="text-gray-900">{formatDay(entry.date)}</div>
+                      <div className="text-gray-900">{formatDate(entry.date)}</div>
                       {time && <div className="text-[11px] text-gray-400 tabular-nums">{time}</div>}
                     </Td>
                     <Td>

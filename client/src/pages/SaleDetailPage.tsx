@@ -25,6 +25,7 @@ import SaleProgress from "../components/SaleProgress";
 import ConfirmCodModal from "../components/ConfirmCodModal";
 import { useAdminApproval } from "../components/AdminApproval";
 import { useConfirm } from "../components/Feedback";
+import { formatDate, formatDateTime } from "../lib/dates";
 
 export default function SaleDetailPage() {
   const { confirm: confirmDialog } = useConfirm();
@@ -266,9 +267,9 @@ export default function SaleDetailPage() {
         <Td className={item.is_returned ? "line-through" : ""}>
           {item.size ?? "—"} / {item.color ?? "—"}
         </Td>
-        <Td className={item.is_returned ? "line-through" : ""}>{item.quantity}</Td>
-        <Td className={item.is_returned ? "line-through" : ""}>Rs. {item.unit_price.toLocaleString()}</Td>
-        <Td className={item.is_returned ? "line-through" : ""}>Rs. {item.line_total.toLocaleString()}</Td>
+        <Td align="right" className={item.is_returned ? "line-through" : ""}>{item.quantity}</Td>
+        <Td align="right" className={item.is_returned ? "line-through" : ""}>Rs. {item.unit_price.toLocaleString()}</Td>
+        <Td align="right" className={item.is_returned ? "line-through" : ""}>Rs. {item.line_total.toLocaleString()}</Td>
       </tr>
     );
   }
@@ -298,7 +299,7 @@ export default function SaleDetailPage() {
         <>
           <PageHeader
             title={sale.invoice}
-            subtitle={`${sale.date.slice(0, 16).replace("T", " ")} · ${sale.sale_type === "online" ? "Online" : "In-Store"}${
+            subtitle={`${formatDateTime(sale.date)} · ${sale.sale_type === "online" ? "Online" : "In-Store"}${
               sale.is_wholesale ? " · Wholesale" : ""
             }${isQuotation ? " · Payment request" : ""}${sale.is_voided ? " · Voided" : ""}`}
             action={
@@ -550,7 +551,7 @@ export default function SaleDetailPage() {
                   <p className="mt-1 flex items-center gap-2 text-xs text-gray-400">
                     <span>
                       Refund of Rs. {Math.round(p.refund_due).toLocaleString()} paid by {p.refund_method === "bank_transfer" ? `bank transfer${p.refund_account_label ? ` (${p.refund_account_label})` : ""}` : "cash"} on{" "}
-                      {p.refunded_at.slice(0, 10)}
+                      {formatDate(p.refunded_at)}
                     </span>
                     <RefundSlipButton slipKey={`pickup-${p.id}`} />
                   </p>
@@ -607,7 +608,7 @@ export default function SaleDetailPage() {
             </div>
             {sale.is_voided ? (
               <p className="text-xs text-red-500 mt-3">
-                Voided {sale.voided_at?.slice(0, 16).replace("T", " ")}
+                Voided {formatDateTime(sale.voided_at)}
                 {sale.void_reason ? ` — ${sale.void_reason}` : ""}
               </p>
             ) : null}
@@ -622,9 +623,9 @@ export default function SaleDetailPage() {
                   <Th>SKU</Th>
                   <Th className="min-w-[16rem]">Product</Th>
                   <Th>Size/Color</Th>
-                  <Th>Qty</Th>
-                  <Th>Price</Th>
-                  <Th>Total</Th>
+                  <Th align="right">Qty</Th>
+                  <Th align="right">Price</Th>
+                  <Th align="right">Total</Th>
                 </tr>
               </thead>
               <tbody>
@@ -649,9 +650,9 @@ export default function SaleDetailPage() {
                           {row.product_id ? <RefLink to={`/products/${row.product_id}`}>{row.title}</RefLink> : row.title}
                         </Td>
                         <Td className="text-gray-500">{row.items.length} sizes / colours</Td>
-                        <Td>{row.quantity}</Td>
-                        <Td>{prices.length === 1 ? `Rs. ${prices[0].toLocaleString()}` : "varies"}</Td>
-                        <Td className="font-medium">Rs. {row.total.toLocaleString()}</Td>
+                        <Td align="right">{row.quantity}</Td>
+                        <Td align="right">{prices.length === 1 ? `Rs. ${prices[0].toLocaleString()}` : "varies"}</Td>
+                        <Td align="right" className="font-medium">Rs. {row.total.toLocaleString()}</Td>
                       </tr>
                       {isOpen && row.items.map((item) => renderLine(item, true))}
                     </Fragment>

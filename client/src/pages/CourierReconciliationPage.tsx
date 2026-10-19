@@ -8,6 +8,7 @@ import CourierChargeModal from "../components/CourierChargeModal";
 import CourierBalanceModal from "../components/CourierBalanceModal";
 import { Button, Card, DatePicker, Dropdown, ErrorText, FormGroup, HelpHint, Input, Label, PageHeader, RefLink, Table, TabToggle, Td, Th } from "../components/ui";
 import { useConfirm } from "../components/Feedback";
+import { formatDate } from "../lib/dates";
 
 const money = (value: number) => `Rs. ${value.toLocaleString()}`;
 const signed = (value: number) => `${value > 0 ? "+" : "−"} ${money(Math.abs(value))}`;
@@ -261,10 +262,10 @@ export default function CourierReconciliationPage() {
                   <Th>Order</Th>
                   <Th>Courier</Th>
                   <Th>Status</Th>
-                  <Th>COD</Th>
+                  <Th align="right">COD</Th>
                   {/* Every row in "Needs checking" is still an estimate, so the column says so once, here, instead of a badge on each row. */}
-                  <Th>{view === "check" ? "Estimate charge" : "Charge"}</Th>
-                  <Th>Net</Th>
+                  <Th align="right">{view === "check" ? "Estimate charge" : "Charge"}</Th>
+                  <Th align="right">Net</Th>
                   <Th>{null}</Th>
                 </tr>
               </thead>
@@ -287,10 +288,10 @@ export default function CourierReconciliationPage() {
                           {order.delivery_status}
                         </span>
                       </Td>
-                      <Td className="whitespace-nowrap">
+                      <Td align="right">
                         {order.delivery_status === "delivered" ? money(order.cod_amount) : <span className="line-through text-gray-400">{money(order.cod_amount)}</span>}
                       </Td>
-                      <Td className="whitespace-nowrap">
+                      <Td align="right">
                         <button
                           onClick={() => setEditingOrder(order)}
                           className="text-gray-900 hover:text-black underline decoration-dotted tabular-nums"
@@ -298,7 +299,7 @@ export default function CourierReconciliationPage() {
                         >
                           {money(totalCharge)}
                         </button>
-                        <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-gray-400">
+                        <div className="mt-0.5 flex items-center justify-end gap-1.5 text-[11px] text-gray-400">
                           {order.charge_confirmed ? (
                             <span className="inline-flex items-center gap-0.5 text-gray-500">
                               <Check size={12} />
@@ -311,7 +312,7 @@ export default function CourierReconciliationPage() {
                           <div className="text-[11px] text-gray-400">estimate was {money(order.estimated_charge)}</div>
                         )}
                       </Td>
-                      <Td className="font-semibold tabular-nums whitespace-nowrap">{money((order.delivery_status === "delivered" ? order.cod_amount : 0) - totalCharge)}</Td>
+                      <Td align="right" className="font-semibold">{money((order.delivery_status === "delivered" ? order.cod_amount : 0) - totalCharge)}</Td>
                       <Td className="text-right">
                         {/* Plain icons, no border — the same look as the edit pencil in the Cash Book. */}
                         <div className="inline-flex items-center justify-end gap-3">
@@ -424,7 +425,7 @@ export default function CourierReconciliationPage() {
                 <span>
                   {partnerLabel(settlement.courier_partner)}
                   <span className="block text-gray-400">
-                    {settlement.week_start} to {settlement.week_end}
+                    {formatDate(settlement.week_start)} to {formatDate(settlement.week_end)}
                   </span>
                 </span>
                 <span className="font-medium">{money(settlement.amount_received)}</span>
@@ -449,7 +450,7 @@ export default function CourierReconciliationPage() {
                       {adjustment.reason}
                     </span>
                     <span className="block text-gray-400">
-                      {adjustment.created_at.slice(0, 10)}
+                      {formatDate(adjustment.created_at)}
                       {adjustment.staff_name ? ` · ${adjustment.staff_name}` : ""}
                     </span>
                   </span>

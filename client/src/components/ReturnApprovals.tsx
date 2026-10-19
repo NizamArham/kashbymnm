@@ -8,6 +8,7 @@ import DecisionBox from "./DecisionBox";
 import ReturnRequestPanel, { NoReturnsWarning } from "./ReturnRequestPanel";
 import { shareSummary } from "./ReturnsOnTheWay";
 import { Badge, Card, EmptyState, RefLink } from "./ui";
+import { formatDate, formatDateTime } from "../lib/dates";
 
 const money = (n: number) => `Rs. ${Math.round(n).toLocaleString()}`;
 const variant = (size: string | null, color: string | null) => [size, color].filter(Boolean).join(" / ");
@@ -82,7 +83,7 @@ export default function ReturnApprovalList({ approvals, onChanged }: { approvals
                 </div>
                 <span className="hidden truncate text-gray-700 lg:block">{view.customer}</span>
                 <span className="hidden truncate text-gray-500 lg:block">{view.askedBy ?? "—"}</span>
-                <span className="hidden text-xs text-gray-400 lg:block">{e.at.slice(0, 10)}</span>
+                <span className="hidden text-xs text-gray-400 lg:block">{formatDate(e.at)}</span>
                 <span className="flex items-center justify-end gap-2">
                   <span className="text-xs text-gray-500">{e.kind === "courier_report" ? courierStage(e.p) : "Pending"}</span>
                   {isOpen ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-400" />}
@@ -262,11 +263,11 @@ function CourierReportPanel({ p, onChanged }: { p: ReturnPickup; onChanged: () =
         </Fact>
         <Fact label="Report by">
           {p.report_by_name ?? "—"}
-          {p.report_at ? ` · ${p.report_at.slice(0, 10)}` : ""}
+          {p.report_at ? ` · ${formatDate(p.report_at)}` : ""}
         </Fact>
         <Fact label="Received by">
           {p.received_by_name ?? "—"}
-          {p.received_at ? ` · ${p.received_at.slice(0, 10)}` : ""}
+          {p.received_at ? ` · ${formatDate(p.received_at)}` : ""}
         </Fact>
       </div>
       {p.report_note && (
@@ -351,7 +352,7 @@ function ExchangeRequestPanel({ s, onChanged }: { s: Exchange; onChanged: () => 
             {money(q.amount_to_pay)} <span className="text-xs text-gray-400">(after {money(q.applied_amount)} for the old items)</span>
           </Fact>
           <Fact label="Asked by">{s.salesperson ?? "—"}</Fact>
-          <Fact label="Pieces held">{s.hold_until ? `until ${s.hold_until.slice(11, 16)}, ${s.hold_until.slice(0, 10)}` : "not held"}</Fact>
+          <Fact label="Pieces held">{s.hold_until ? `until ${formatDateTime(s.hold_until)}` : "not held"}</Fact>
         </div>
       )}
       {noReturns.length > 0 && <NoReturnsWarning>{`${noReturns.map((i) => i.title ?? "An item").join(", ")} — Final Sale. Approving needs an explicit override reason.`}</NoReturnsWarning>}

@@ -18,6 +18,7 @@ import { previewPdf } from "../lib/pdfPreview";
 import { countOpenPickups } from "../lib/returnsCounts";
 import { whatsappNumber } from "../lib/phone";
 import { useConfirm } from "../components/Feedback";
+import { formatDate, formatDateTime } from "../lib/dates";
 
 function formatLabelDate(d: Date): string {
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -126,7 +127,7 @@ function CourierStatusLine({ delivery }: { delivery: Delivery }) {
   return (
     <div className="text-[11px] text-gray-400 mt-0.5" title="Latest status reported by the courier">
       Courier: {delivery.courier_status}
-      {delivery.courier_status_at ? ` · ${delivery.courier_status_at.slice(0, 16)}` : ""}
+      {delivery.courier_status_at ? ` · ${formatDateTime(delivery.courier_status_at)}` : ""}
     </div>
   );
 }
@@ -162,7 +163,7 @@ function TimelineStep({ label, date, reached, isLast }: { label: string; date: s
       </div>
       <div className={isLast ? "" : "pb-5"}>
         <p className={`text-sm font-medium ${reached ? "text-gray-900" : "text-gray-400"}`}>{label}</p>
-        <p className="text-xs text-gray-500 mt-0.5">{date ? date.slice(0, 10) : "Not yet"}</p>
+        <p className="text-xs text-gray-500 mt-0.5">{date ? formatDate(date) : "Not yet"}</p>
       </div>
     </div>
   );
@@ -662,7 +663,7 @@ export default function DeliveriesPage() {
         </div>
       );
     } else if (d.delivery_status === "delivered") {
-      content = <span className="text-xs text-gray-400">{d.delivery_date?.slice(0, 10)}</span>;
+      content = <span className="text-xs text-gray-400">{formatDate(d.delivery_date)}</span>;
     } else {
       content = null;
     }
@@ -793,7 +794,7 @@ export default function DeliveriesPage() {
               <thead>
                 <tr>
                   <Th>{showWaybill ? "Waybill" : "Order"}</Th>
-                  <Th>COD</Th>
+                  <Th align="right">COD</Th>
                   <Th>Location</Th>
                   <Th>Customer</Th>
                   <Th>Courier</Th>
@@ -828,7 +829,7 @@ export default function DeliveriesPage() {
                             </div>
                           )}
                         </Td>
-                        <Td>
+                        <Td align="right">
                           <CodCell delivery={d} awaitingFare={isAwaitingFare(d, partners)} />
                         </Td>
                         <Td className="max-w-[220px]">

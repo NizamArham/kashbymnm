@@ -18,6 +18,7 @@ import { api, ApiRequestError } from "../lib/api";
 import { SupplierPayment, SupplierBalance, Supplier, Purchase, BankAccount } from "../lib/types";
 import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
 import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Table, Th, Td, Dropdown, EmptyState, DateRangePicker, DatePicker, HelpHint, TabToggle, Modal } from "../components/ui";
+import { formatDate, formatDateTime } from "../lib/dates";
 
 type ExpandedTab = "activity";
 
@@ -815,7 +816,7 @@ export default function SupplierPaymentsPage() {
                   <Th className="w-8"></Th>
                   <Th>Code</Th>
                   <Th>Supplier</Th>
-                  <Th>Balance owed</Th>
+                  <Th align="right">Balance owed</Th>
                 </tr>
               </thead>
               <tbody>
@@ -829,7 +830,7 @@ export default function SupplierPaymentsPage() {
                         </Td>
                         <Td>{b.supplier_code}</Td>
                         <Td className="font-medium">{b.name}</Td>
-                        <Td className={b.balance_owed > 0 ? "font-medium" : ""}>Rs. {b.balance_owed.toLocaleString()}</Td>
+                        <Td align="right" className={b.balance_owed > 0 ? "font-medium" : ""}>Rs. {b.balance_owed.toLocaleString()}</Td>
                       </tr>
                       {isExpanded && (
                         <tr>
@@ -889,8 +890,8 @@ export default function SupplierPaymentsPage() {
                                           <tr className="bg-gray-50">
                                             <th className="text-left px-3 py-2 text-xs font-medium text-gray-400">Date</th>
                                             <th className="text-left px-3 py-2 text-xs font-medium text-gray-400">Event</th>
-                                            <th className="text-left px-3 py-2 text-xs font-medium text-gray-400">Amount</th>
-                                            <th className="text-left px-3 py-2 text-xs font-medium text-gray-400">Running balance</th>
+                                            <th className="text-right px-3 py-2 text-xs font-medium text-gray-400">Amount</th>
+                                            <th className="text-right px-3 py-2 text-xs font-medium text-gray-400">Running balance</th>
                                           </tr>
                                         </thead>
                                         <tbody>
@@ -899,16 +900,16 @@ export default function SupplierPaymentsPage() {
                                             .slice(0, 3)
                                             .map((entry, i) => (
                                               <tr key={i} className={i % 2 === 1 ? "bg-gray-50/50" : ""}>
-                                                <td className="px-3 py-2 border-t border-gray-50 text-gray-500">{entry.date?.slice(0, 10)}</td>
+                                                <td className="px-3 py-2 border-t border-gray-50 text-gray-500">{formatDate(entry.date)}</td>
                                                 <td className="px-3 py-2 border-t border-gray-50 text-gray-900">{entry.label}</td>
                                                 <td
-                                                  className={`px-3 py-2 border-t border-gray-50 font-medium ${
+                                                  className={`px-3 py-2 border-t border-gray-50 text-right whitespace-nowrap font-medium ${
                                                     entry.type === "purchase" ? "text-gray-900" : "text-green-600"
                                                   }`}
                                                 >
                                                   {entry.type === "purchase" ? "+" : "-"} Rs. {entry.amount.toLocaleString()}
                                                 </td>
-                                                <td className="px-3 py-2 border-t border-gray-50 text-gray-500">
+                                                <td className="px-3 py-2 border-t border-gray-50 text-right whitespace-nowrap text-gray-500">
                                                   Rs. {entry.running_balance.toLocaleString()}
                                                 </td>
                                               </tr>
@@ -962,7 +963,7 @@ export default function SupplierPaymentsPage() {
                     <tr>
                       <Th>Date</Th>
                       <Th>Supplier</Th>
-                      <Th>Amount</Th>
+                      <Th align="right">Amount</Th>
                       <Th>Method</Th>
                       <Th>Notes</Th>
                     </tr>
@@ -970,9 +971,9 @@ export default function SupplierPaymentsPage() {
                   <tbody>
                     {payments.map((p) => (
                       <tr key={p.id}>
-                        <Td>{p.payment_date.slice(0, 16).replace("T", " ")}</Td>
+                        <Td>{formatDateTime(p.payment_date)}</Td>
                         <Td>{p.supplier_name}</Td>
-                        <Td>Rs. {p.amount.toLocaleString()}</Td>
+                        <Td align="right">Rs. {p.amount.toLocaleString()}</Td>
                         <Td className="capitalize">{p.method?.replace("_", " ") ?? "—"}</Td>
                         <Td>{p.notes ?? "—"}</Td>
                       </tr>

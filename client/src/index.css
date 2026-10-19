@@ -5,3 +5,8 @@
 body {
   margin: 0;
 }
+
+/* Figures in a table line up digit under digit, whatever the page. */
+table {
+  font-variant-numeric: tabular-nums;
+}

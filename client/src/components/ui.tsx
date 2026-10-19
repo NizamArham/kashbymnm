@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { ChevronDown, ChevronUp, Check, Plus, CalendarDays, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, Minus, X, MoreVertical } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
+import { formatDate } from "../lib/dates";
 
 // ---------------------------------------------------------------------
 // UI standards for the whole app — use these instead of one-off values.
@@ -651,8 +652,10 @@ export function Table({ children, className = "" }: { children: ReactNode; class
 }
 
 // children is optional: an empty header cell (an actions column) is normal.
-export function Th({ children, className = "" }: { children?: ReactNode; className?: string }) {
-  return <th className={`text-left px-3 py-2.5 text-xs font-medium text-gray-400 border-b border-gray-100 ${className}`}>{children}</th>;
+// align="right" is for money and other figures: the column's header and every cell in it line up on the right edge, so the
+// digits stack by place value. (Table cells already use tabular figures — see index.css.)
+export function Th({ children, className = "", align }: { children?: ReactNode; className?: string; align?: "right" }) {
+  return <th className={`${align === "right" ? "text-right" : "text-left"} px-3 py-2.5 text-xs font-medium text-gray-400 border-b border-gray-100 ${className}`}>{children}</th>;
 }
 
 // A clickable <Th> that shows the active sort column/direction — pairs
@@ -697,14 +700,16 @@ export function Td({
   colSpan,
   className = "",
   title,
+  align,
 }: {
   children: ReactNode;
   colSpan?: number;
   className?: string;
   title?: string;
+  align?: "right";
 }) {
   return (
-    <td colSpan={colSpan} title={title} className={`px-3 py-2.5 border-b border-gray-50 text-gray-700 ${className}`}>
+    <td colSpan={colSpan} title={title} className={`px-3 py-2.5 border-b border-gray-50 text-gray-700 ${align === "right" ? "text-right whitespace-nowrap" : ""} ${className}`}>
       {children}
     </td>
   );
@@ -1202,8 +1207,7 @@ export function DateRangePicker({
   }
 
   function formatDisplay(iso: string): string {
-    const d = new Date(iso + "T00:00:00");
-    return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+    return formatDate(iso);
   }
 
   function applyPreset(days: number | "month" | "today") {
@@ -1427,8 +1431,7 @@ export function DatePicker({
   }
 
   function formatDisplay(iso: string): string {
-    const d = new Date(iso + "T00:00:00");
-    return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+    return formatDate(iso);
   }
 
   function handleDayClick(d: Date) {

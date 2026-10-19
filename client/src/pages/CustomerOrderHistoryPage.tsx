@@ -9,6 +9,7 @@ import { PageHeader, Card, Table, Th, Td, Badge, SortHeader, paymentStatusTone, 
 import ReceiptOptionsModal, { ModalOption } from "../components/ReceiptOptionsModal";
 import { useCopyToClipboard } from "../lib/useCopyToClipboard";
 import { useSortableData } from "../lib/useSortableData";
+import { formatDate } from "../lib/dates";
 
 type OrderSortKey = "invoice" | "date" | "total";
 
@@ -198,7 +199,7 @@ export default function CustomerOrderHistoryPage({ customerId }: { customerId?: 
                 <SortHeader<OrderSortKey> label="Invoice" sortKey="invoice" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
                 <SortHeader<OrderSortKey> label="Date" sortKey="date" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
                 <Th>Type</Th>
-                <SortHeader<OrderSortKey> label="Total" sortKey="total" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+                <SortHeader<OrderSortKey> label="Total" sortKey="total" activeKey={sortKey} dir={sortDir} onClick={toggleSort} align="right" />
                 <Th>Status</Th>
                 <Th></Th>
               </tr>
@@ -217,9 +218,9 @@ export default function CustomerOrderHistoryPage({ customerId }: { customerId?: 
                         {isExpanded ? <ChevronDown size={14} className="text-gray-400" /> : <ChevronRight size={14} className="text-gray-400" />}
                       </Td>
                       <Td className="font-medium">{sale.invoice}</Td>
-                      <Td>{sale.date.slice(0, 10)}</Td>
+                      <Td>{formatDate(sale.date)}</Td>
                       <Td className="capitalize">{sale.sale_type === "online" ? "Online" : "In-store"}</Td>
-                      <Td>Rs. {sale.total.toLocaleString()}</Td>
+                      <Td align="right">Rs. {sale.total.toLocaleString()}</Td>
                       <Td>
                         {sale.is_voided ? (
                           <Badge label="voided" tone="danger" />

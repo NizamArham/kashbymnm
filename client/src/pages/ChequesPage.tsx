@@ -7,6 +7,7 @@ import { downloadTabularReport, buildReportFilename, todayLongDate, rangeLabelFo
 import { PageHeader, Card, Table, Th, Td, SortHeader, Button, EmptyState, ErrorText, Badge, RowActions, TabToggle, Input, Label, FormGroup, Dropdown, DatePicker, DateRangePicker, Modal } from "../components/ui";
 import { useSortableData } from "../lib/useSortableData";
 import { useConfirm } from "../components/Feedback";
+import { formatDate } from "../lib/dates";
 
 interface ChequeRow {
   id: number;
@@ -57,13 +58,8 @@ function statusTone(status: string): "success" | "warning" | "danger" | "neutral
   return "warning";
 }
 
-// Short date for the cheque's own date — e.g. "15 Sep 26" — the date
-// that actually matters for whether it's bankable, distinct from when
-// it was received or issued.
-function shortDate(iso: string): string {
-  const d = new Date(iso.slice(0, 10) + "T00:00:00");
-  return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "2-digit" });
-}
+// The cheque's own date is the one that matters for whether it's bankable, distinct from when it was received or issued.
+const shortDate = (iso: string) => formatDate(iso);
 
 type Tab = "in_hand" | "all" | "issued";
 
@@ -538,7 +534,7 @@ export default function ChequesPage() {
                   <SortHeader<IssuedChequeSortKey> label="Cheque #" sortKey="number" activeKey={issuedSortKey} dir={issuedSortDir} onClick={toggleIssuedSort} />
                   <SortHeader<IssuedChequeSortKey> label="Bank" sortKey="bank" activeKey={issuedSortKey} dir={issuedSortDir} onClick={toggleIssuedSort} />
                   <SortHeader<IssuedChequeSortKey> label="Issued" sortKey="issued" activeKey={issuedSortKey} dir={issuedSortDir} onClick={toggleIssuedSort} />
-                  <SortHeader<IssuedChequeSortKey> label="Amount" sortKey="amount" activeKey={issuedSortKey} dir={issuedSortDir} onClick={toggleIssuedSort} />
+                  <SortHeader<IssuedChequeSortKey> label="Amount" sortKey="amount" activeKey={issuedSortKey} dir={issuedSortDir} onClick={toggleIssuedSort} align="right" />
                   <SortHeader<IssuedChequeSortKey> label="To supplier" sortKey="to" activeKey={issuedSortKey} dir={issuedSortDir} onClick={toggleIssuedSort} />
                   <SortHeader<IssuedChequeSortKey> label="Status" sortKey="status" activeKey={issuedSortKey} dir={issuedSortDir} onClick={toggleIssuedSort} />
                   <Th></Th>
@@ -550,8 +546,8 @@ export default function ChequesPage() {
                     <Td className="font-medium">{shortDate(c.cheque_date)}</Td>
                     <Td>{c.cheque_number}</Td>
                     <Td>{c.bank_name}</Td>
-                    <Td>{c.date_issued.slice(0, 10)}</Td>
-                    <Td>Rs. {c.amount.toLocaleString()}</Td>
+                    <Td>{formatDate(c.date_issued)}</Td>
+                    <Td align="right">Rs. {c.amount.toLocaleString()}</Td>
                     <Td>{c.supplier_name}</Td>
                     <Td>
                       <Badge label={c.status} tone={statusTone(c.status)} />
@@ -614,7 +610,7 @@ export default function ChequesPage() {
                 <SortHeader<ReceivedChequeSortKey> label="Cheque #" sortKey="number" activeKey={receivedSortKey} dir={receivedSortDir} onClick={toggleReceivedSort} />
                 <SortHeader<ReceivedChequeSortKey> label="Bank" sortKey="bank" activeKey={receivedSortKey} dir={receivedSortDir} onClick={toggleReceivedSort} />
                 <SortHeader<ReceivedChequeSortKey> label="Received" sortKey="received" activeKey={receivedSortKey} dir={receivedSortDir} onClick={toggleReceivedSort} />
-                <SortHeader<ReceivedChequeSortKey> label="Amount" sortKey="amount" activeKey={receivedSortKey} dir={receivedSortDir} onClick={toggleReceivedSort} />
+                <SortHeader<ReceivedChequeSortKey> label="Amount" sortKey="amount" activeKey={receivedSortKey} dir={receivedSortDir} onClick={toggleReceivedSort} align="right" />
                 <SortHeader<ReceivedChequeSortKey> label="From" sortKey="from" activeKey={receivedSortKey} dir={receivedSortDir} onClick={toggleReceivedSort} />
                 <SortHeader<ReceivedChequeSortKey> label="Status" sortKey="status" activeKey={receivedSortKey} dir={receivedSortDir} onClick={toggleReceivedSort} />
                 <Th></Th>
@@ -626,8 +622,8 @@ export default function ChequesPage() {
                   <Td className="font-medium">{shortDate(c.cheque_date)}</Td>
                   <Td>{c.cheque_number}</Td>
                   <Td>{c.bank_name}</Td>
-                  <Td>{c.date_received.slice(0, 10)}</Td>
-                  <Td>Rs. {c.amount.toLocaleString()}</Td>
+                  <Td>{formatDate(c.date_received)}</Td>
+                  <Td align="right">Rs. {c.amount.toLocaleString()}</Td>
                   <Td>
                     {c.customer_name} ({c.customer_code})
                     {c.transferred_to_supplier_name && (

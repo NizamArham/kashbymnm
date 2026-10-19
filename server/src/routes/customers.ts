@@ -744,7 +744,7 @@ customersRouter.get(
     );
     const shortDate = (iso: string) => {
       const d = new Date(iso.replace(" ", "T"));
-      return Number.isNaN(d.getTime()) ? iso.slice(0, 10) : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+      return Number.isNaN(d.getTime()) ? iso.slice(0, 10) : d.toLocaleDateString("en-GB", d.getFullYear() === new Date().getFullYear() ? { day: "numeric", month: "short" } : { day: "numeric", month: "short", year: "numeric" });
     };
     const returnCredit = (c: { amount: number; reason: string; reference_id: number | null; expires_at: string | null }) => {
       if (c.amount <= 0 || c.reason !== "return_exchange" || c.reference_id == null) return null;

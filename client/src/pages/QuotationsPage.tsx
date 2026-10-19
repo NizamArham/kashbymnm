@@ -9,6 +9,7 @@ import { PageHeader, Card, Table, Th, Td, Badge, EmptyState, ErrorText, Button, 
 import ReceiptOptionsModal, { ModalOption } from "../components/ReceiptOptionsModal";
 import { hasDraftInProgress } from "../lib/posDraft";
 import { useConfirm } from "../components/Feedback";
+import { formatDate, formatDateTime } from "../lib/dates";
 
 function isExpired(sale: Sale): boolean {
   return !!sale.quotation_valid_until && new Date(sale.quotation_valid_until) < new Date();
@@ -171,7 +172,7 @@ export default function QuotationsPage() {
                   <Th>Date</Th>
                   <Th>Customer</Th>
                   <Th>Type</Th>
-                  <Th>Total</Th>
+                  <Th align="right">Total</Th>
                   <Th>Pay by</Th>
                   {anyStatus && <Th>Status</Th>}
                   <Th></Th>
@@ -181,12 +182,12 @@ export default function QuotationsPage() {
                 {quotations.map((q) => (
                   <tr key={q.id} onClick={() => navigate(`/sales/${q.id}`)} className="cursor-pointer hover:bg-gray-50">
                     <Td>{q.invoice}</Td>
-                    <Td>{q.date.slice(0, 16).replace("T", " ")}</Td>
+                    <Td>{formatDateTime(q.date)}</Td>
                     <Td>{q.customer_name ?? "Walk-in"}</Td>
                     <Td>{typeLabel(q)}</Td>
-                    <Td>Rs. {q.total.toLocaleString()}</Td>
+                    <Td align="right">Rs. {q.total.toLocaleString()}</Td>
                     <Td>
-                      {q.quotation_valid_until ? q.quotation_valid_until.slice(0, 16).replace("T", " ") : "—"}
+                      {q.quotation_valid_until ? formatDateTime(q.quotation_valid_until) : "—"}
                       {q.hold_until && <span className="block text-xs text-gray-400">pieces held</span>}
                     </Td>
                     {anyStatus && <Td>{statusBadge(q)}</Td>}
@@ -204,7 +205,7 @@ export default function QuotationsPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="font-medium text-gray-900 leading-snug">{q.invoice}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">{q.date.slice(0, 16).replace("T", " ")}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">{formatDateTime(q.date)}</p>
                     <p className="text-xs text-gray-500 mt-1">
                       {q.customer_name ?? "Walk-in"} · {typeLabel(q)}
                     </p>
@@ -213,7 +214,7 @@ export default function QuotationsPage() {
                 </div>
                 <RowCardStats>
                   <RowCardStat label="Total" value={`Rs. ${q.total.toLocaleString()}`} />
-                  <RowCardStat label="Pay by" value={`${q.quotation_valid_until ? q.quotation_valid_until.slice(0, 10) : "—"}${q.hold_until ? " · pieces held" : ""}`} />
+                  <RowCardStat label="Pay by" value={`${q.quotation_valid_until ? formatDate(q.quotation_valid_until) : "—"}${q.hold_until ? " · pieces held" : ""}`} />
                 </RowCardStats>
                 <div className="mt-3 flex justify-end border-t border-gray-100 pt-3">{rowActions(q)}</div>
               </RowCard>

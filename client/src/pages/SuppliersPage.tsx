@@ -8,6 +8,7 @@ import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Butt
 import { CityPicker } from "../components/CityPicker";
 import { useSortableData } from "../lib/useSortableData";
 import { useConfirm } from "../components/Feedback";
+import { formatDate } from "../lib/dates";
 
 type ExpandedTab = "details" | "bank" | "payment_history";
 type SupplierSortKey = "priority" | "code" | "name" | "phone" | "city" | "balance";
@@ -563,8 +564,8 @@ export default function SuppliersPage() {
                                           <tr className="bg-gray-50">
                                             <th className="text-left px-3 py-2 text-xs font-medium text-gray-400">Date</th>
                                             <th className="text-left px-3 py-2 text-xs font-medium text-gray-400">Description</th>
-                                            <th className="text-left px-3 py-2 text-xs font-medium text-gray-400">Amount</th>
-                                            <th className="text-left px-3 py-2 text-xs font-medium text-gray-400">Balance</th>
+                                            <th className="text-right px-3 py-2 text-xs font-medium text-gray-400">Amount</th>
+                                            <th className="text-right px-3 py-2 text-xs font-medium text-gray-400">Balance</th>
                                           </tr>
                                         </thead>
                                         <tbody>
@@ -573,16 +574,16 @@ export default function SuppliersPage() {
                                             .slice(0, 3)
                                             .map((entry, i) => (
                                               <tr key={i} className={i % 2 === 1 ? "bg-gray-50/50" : ""}>
-                                                <td className="px-3 py-2 border-t border-gray-50 text-gray-500">{entry.date.slice(0, 10)}</td>
+                                                <td className="px-3 py-2 border-t border-gray-50 text-gray-500">{formatDate(entry.date)}</td>
                                                 <td className="px-3 py-2 border-t border-gray-50 text-gray-900">{entry.label}</td>
                                                 <td
-                                                  className={`px-3 py-2 border-t border-gray-50 font-medium ${
+                                                  className={`px-3 py-2 border-t border-gray-50 text-right whitespace-nowrap font-medium ${
                                                     entry.effect === 0 ? "text-gray-400" : entry.type === "purchase" ? "text-gray-900" : "text-green-600"
                                                   }`}
                                                 >
                                                   {entry.effect === 0 ? "—" : `${entry.type === "purchase" ? "+" : "-"}Rs. ${entry.amount.toLocaleString()}`}
                                                 </td>
-                                                <td className="px-3 py-2 border-t border-gray-50 text-gray-500">
+                                                <td className="px-3 py-2 border-t border-gray-50 text-right whitespace-nowrap text-gray-500">
                                                   Rs. {entry.running_balance.toLocaleString()}
                                                 </td>
                                               </tr>

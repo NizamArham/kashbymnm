@@ -9,6 +9,7 @@
 // decision is shown.
 
 import type { ApprovalState, ReturnPickup, ReturnRequest, SaleExchange } from "./types";
+import { formatDate } from "./dates";
 
 export const AUTO_APPROVED = "Auto-approved (recorded by admin)";
 
@@ -98,7 +99,7 @@ export function exchangeStage(x: Pick<SaleExchange, "status"> & { delivery_statu
 
 // "Approved by Name · 12/10" — or, for a request an admin recorded themselves, the auto-approved wording.
 export function decidedLine(auto: boolean, status: "approved" | "declined", by: string | null, at: string | null): string {
-  const when = at ? ` · ${at.slice(0, 10)}` : "";
+  const when = at ? ` · ${formatDate(at)}` : "";
   if (auto) return `${AUTO_APPROVED}${by ? ` — ${by}` : ""}${when}`;
   return `${status === "approved" ? "Approved" : "Declined"} by ${by ?? "an admin"}${when}`;
 }

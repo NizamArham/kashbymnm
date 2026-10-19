@@ -7,6 +7,7 @@ import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import ExchangeTag from "../components/ExchangeTag";
 import { useAuth } from "../context/AuthContext";
 import { useAdminApproval } from "../components/AdminApproval";
+import { formatDate, formatDateTime } from "../lib/dates";
 
 type FindResult =
   | { type: "inventory"; data: InventoryResult }
@@ -163,7 +164,7 @@ const TYPE_META: Record<FindResult["type"], { label: string; icon: typeof Packag
 
 const money = (n: number) => `Rs. ${Math.round(n * 100) / 100 === Math.round(n) ? Math.round(n).toLocaleString() : n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const cap = (t: string | null | undefined) => (t ? t.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()) : "—");
-const when = (t: string) => t.slice(0, 16).replace("T", " ");
+const when = (t: string) => formatDateTime(t);
 
 // One small copy-to-clipboard button — codes, phone numbers and barcodes are what people
 // actually want to lift out of a lookup.
@@ -331,7 +332,7 @@ function buildViewFor(result: FindResult): ResultView {
           ["Phone", d.phone ? <>{d.phone}<CopyButton text={d.phone} /></> : "—"],
           ...(d.phone2 ? ([["Phone 2", <>{d.phone2}<CopyButton text={d.phone2} /></>]] as [string, ReactNode][]) : []),
           ["Orders", d.order_count.toLocaleString()],
-          ["Last order", d.last_order_date ? d.last_order_date.slice(0, 10) : "No orders yet"],
+          ["Last order", d.last_order_date ? formatDate(d.last_order_date) : "No orders yet"],
           ["Gender", cap(d.gender)],
         ],
         actions: [
@@ -422,7 +423,7 @@ function buildViewFor(result: FindResult): ResultView {
         chips: <Badge label={!d.is_active ? "Inactive" : expired ? "Expired" : "Active"} />,
         stats: [
           { label: "Reward", value: d.discount_type === "percent" ? `${d.discount_value}% off` : `${money(d.discount_value)} off` },
-          { label: "Expires", value: d.expires_at ? d.expires_at.slice(0, 10) : "Never", tone: expired ? "bad" : "default" },
+          { label: "Expires", value: d.expires_at ? formatDate(d.expires_at) : "Never", tone: expired ? "bad" : "default" },
         ],
         details: [],
         actions: [{ label: "Go to Promotions", to: "/promotions", primary: true }],
@@ -444,8 +445,8 @@ function buildViewFor(result: FindResult): ResultView {
         bar: d.initial_value > 0 ? { used: Math.min(1, used / d.initial_value), label: `${Math.round((used / d.initial_value) * 100)}% used` } : undefined,
         details: [
           ["Validity", d.activated_at ? `${d.validity_days} days from sale` : `${d.validity_days} days, once sold`],
-          ...(d.activated_at ? ([["Sold", d.activated_at.slice(0, 10)]] as [string, ReactNode][]) : []),
-          ...(d.expires_at ? ([["Expires", d.expires_at.slice(0, 10)]] as [string, ReactNode][]) : []),
+          ...(d.activated_at ? ([["Sold", formatDate(d.activated_at)]] as [string, ReactNode][]) : []),
+          ...(d.expires_at ? ([["Expires", formatDate(d.expires_at)]] as [string, ReactNode][]) : []),
           ...(d.notes ? ([["Notes", d.notes]] as [string, ReactNode][]) : []),
         ],
         actions: [{ label: "Go to Promotions", to: "/promotions", primary: true }],
