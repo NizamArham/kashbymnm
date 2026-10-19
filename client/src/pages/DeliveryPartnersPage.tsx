@@ -21,6 +21,7 @@ import {
   RowCard,
   RowCardStats,
   RowCardStat,
+  MoneyInput,
 } from "../components/ui";
 
 type Kind = DeliveryPartnerInfo["kind"];
@@ -170,11 +171,11 @@ function PartnerFormModal({
           <div className="grid grid-cols-2 gap-4">
             <FormGroup>
               <Label>First kg (Rs.)</Label>
-              <Input type="number" min="0" value={baseFee} onChange={(e) => setBaseFee(e.target.value)} />
+              <MoneyInput value={baseFee} onChange={setBaseFee} />
             </FormGroup>
             <FormGroup>
               <Label>Each extra kg (Rs.)</Label>
-              <Input type="number" min="0" value={extraKgFee} onChange={(e) => setExtraKgFee(e.target.value)} />
+              <MoneyInput value={extraKgFee} onChange={setExtraKgFee} />
             </FormGroup>
           </div>
         </>

@@ -5,7 +5,7 @@ import { Banknote, Check, Plus, Pencil, Trash2, X, Download } from "lucide-react
 import { api, ApiRequestError } from "../lib/api";
 import { Supplier } from "../lib/types";
 import { downloadTabularReport, buildReportFilename, todayLongDate, rangeLabelFor } from "../lib/reportPdf";
-import { PageHeader, Card, Table, Th, Td, SortHeader, Button, EmptyState, ErrorText, Badge, RowActions, TabToggle, Input, Label, FormGroup, Dropdown, DatePicker, DateRangePicker, Modal } from "../components/ui";
+import { PageHeader, Card, Table, Th, Td, SortHeader, Button, EmptyState, ErrorText, Badge, RowActions, TabToggle, Input, Label, FormGroup, Dropdown, DatePicker, DateRangePicker, Modal, MoneyInput } from "../components/ui";
 import { useSortableData } from "../lib/useSortableData";
 import { useConfirm } from "../components/Feedback";
 import { formatDate } from "../lib/dates";
@@ -801,7 +801,7 @@ export default function ChequesPage() {
               <div className="grid grid-cols-2 gap-x-3">
                 <FormGroup>
                   <Label>Amount (Rs.)</Label>
-                  <Input type="number" min="0" value={issueAmount} onChange={(e) => setIssueAmount(e.target.value)} />
+                  <MoneyInput value={issueAmount} onChange={setIssueAmount} />
                 </FormGroup>
                 <FormGroup>
                   <Label>Payable to</Label>
@@ -866,7 +866,7 @@ export default function ChequesPage() {
               </FormGroup>
               <FormGroup>
                 <Label>Amount (Rs.)</Label>
-                <Input type="number" min="0" value={editAmount} onChange={(e) => setEditAmount(e.target.value)} />
+                <MoneyInput value={editAmount} onChange={setEditAmount} />
               </FormGroup>
               <FormGroup>
                 <Label>Cheque date</Label>

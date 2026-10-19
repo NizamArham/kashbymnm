@@ -3,12 +3,12 @@ import { X } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { InventoryUnit, Sale } from "../lib/types";
 import { calculateDeliveryFee, useDeliveryPartners } from "../lib/delivery";
-import { cleanDecimal, cleanMoney } from "../lib/numberInput";
+import { cleanDecimal } from "../lib/numberInput";
 import { useAuth } from "../context/AuthContext";
 import { useAdminApproval } from "./AdminApproval";
 import { SHARE_OPTIONS } from "../lib/pickupShare";
 import { clearExchangeDraft, exchangeDraftFor, saveExchangeDraft, setExchangePopupVisible } from "../lib/exchangeDraft";
-import { Button, Dropdown, DropdownOption, ErrorText, FormGroup, HelpHint, Input, Label, Modal } from "./ui";
+import { Button, Dropdown, DropdownOption, ErrorText, FormGroup, HelpHint, Input, Label, Modal, MoneyInput } from "./ui";
 
 interface EligibleItem {
   sale_item_id: number;
@@ -524,11 +524,10 @@ export default function OnlineExchangeModal({
                         />
                       </div>
                       <div className="w-28 flex-shrink-0">
-                        <Input
-                          inputMode="decimal"
+                        <MoneyInput
                           value={l.price}
                           placeholder={list ? String(tag) : "Price"}
-                          onChange={(e) => updateLine(i, { price: cleanMoney(e.target.value) })}
+                          onChange={(v) => updateLine(i, { price: v })}
                           aria-label="Price of each piece, in rupees"
                           title="Price of each piece — leave empty for the tag price"
                         />
@@ -632,12 +631,11 @@ export default function OnlineExchangeModal({
                 }
               />
             </Label>
-            <Input
-              inputMode="decimal"
+            <MoneyInput
               value={pickup}
-              onChange={(e) => {
+              onChange={(v) => {
                 setPickupEdited(true);
-                setPickup(cleanMoney(e.target.value));
+                setPickup(v);
               }}
               className="mb-2"
             />

@@ -2,7 +2,6 @@ import { ReactNode, useEffect, useMemo, useState } from "react";
 import { api, ApiRequestError } from "../lib/api";
 import { ReturnPickup, ReturnPickupItem } from "../lib/types";
 import { useDeliveryPartners } from "../lib/delivery";
-import { cleanMoney } from "../lib/numberInput";
 import { SHARE_OPTIONS } from "../lib/pickupShare";
 import { useAuth } from "../context/AuthContext";
 import { useAdminApproval } from "./AdminApproval";
@@ -10,7 +9,7 @@ import ArrivalChoice, { PasswordNote, allGood, startGood } from "./ArrivalChoice
 import RefundMethodPicker, { useCustomerBankAccounts } from "./RefundMethodPicker";
 import StepModal from "./StepModal";
 import CancelReasonModal from "./CancelReasonModal";
-import { Button, Dropdown, ErrorText, FormGroup, Input, Label, Modal } from "./ui";
+import { Button, Dropdown, ErrorText, FormGroup, Input, Label, Modal, MoneyInput } from "./ui";
 
 const money = (n: number) => `Rs. ${Math.round(n).toLocaleString()}`;
 const variant = (size: string | null, color: string | null) => [size, color].filter(Boolean).join(" / ");
@@ -162,7 +161,7 @@ export function CourierReceivedModal({ pickup, onClose, onDone }: { pickup: Retu
           <TrackingFields tracking={tracking} onTracking={setTracking} noTracking={noTracking} onNoTracking={setNoTracking} noTrackingLabel="It came without a tracking number" />
           <FormGroup>
             <Label>What we paid for the parcel (Rs.)</Label>
-            <Input inputMode="decimal" placeholder="0 if the customer paid" value={paid} onChange={(e) => setPaid(cleanMoney(e.target.value))} />
+            <MoneyInput placeholder="0 if the customer paid" value={paid} onChange={setPaid} />
             <p className="mt-1 text-xs text-gray-400">Who finally bears it is decided in the inspection report.</p>
           </FormGroup>
         </>
@@ -329,13 +328,7 @@ export function InspectionReportModal({ pickup, onClose, onDone }: { pickup: Ret
 
           <FormGroup>
             <Label>Proposed {creditNoun} (Rs.)</Label>
-            <Input
-              inputMode="decimal"
-              value={proposed ?? String(estimate)}
-              onChange={(e) => setProposed(cleanMoney(e.target.value))}
-              disabled={takenBack.length === 0}
-              aria-label="Proposed amount"
-            />
+            <MoneyInput value={proposed ?? String(estimate)} onChange={setProposed} disabled={takenBack.length === 0} aria-label="Proposed amount" />
             <p className="mt-1 text-xs text-gray-400">
               Items {money(itemsTotal)}
               {heldBack > 0 ? ` less ${money(heldBack)} delivery share` : ""} = {money(estimate)}. Shown for an order paid in full — a refund is never more than was actually paid.

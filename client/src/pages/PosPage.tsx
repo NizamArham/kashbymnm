@@ -29,7 +29,7 @@ import {
 import { api, ApiRequestError } from "../lib/api";
 import { InventoryUnit, Customer, SaleType, CustomerAddress, Coupon, CustomerGender, Sale } from "../lib/types";
 import { createProductSearchIndex, searchProductUnits } from "../lib/productSearch";
-import { Input, Label, FormGroup, ErrorText, SuccessText, Button, Dropdown, HelpHint, RefLink, Modal } from "../components/ui";
+import { Input, Label, FormGroup, ErrorText, SuccessText, Button, Dropdown, HelpHint, RefLink, Modal, MoneyInput } from "../components/ui";
 import { CityPicker } from "../components/CityPicker";
 import { OnDemandFareInput, OnDemandPaidByPicker } from "../components/OnDemandFareFields";
 import { useAuth } from "../context/AuthContext";
@@ -1331,14 +1331,7 @@ export default function PosPage() {
                         ]}
                       />
                     </div>
-                    <Input
-                      type="number"
-                      min="0"
-                      max={discountType === "percent" ? 100 : undefined}
-                      value={discountValue}
-                      onChange={(e) => setDiscountValue(e.target.value)}
-                      placeholder="0"
-                    />
+                    <MoneyInput value={discountValue} onChange={setDiscountValue} placeholder="0" />
                   </div>
                   {manualDiscountAmount > 0 && (
                     <p className="text-xs text-gray-400 mt-1">
@@ -1760,11 +1753,10 @@ export default function PosPage() {
                       <div className={`${isEditing ? "col-span-12" : "col-span-5"} lg:col-span-3 order-4 lg:order-none`}>
                         {isEditing ? (
                           <div className="flex items-center gap-1.5">
-                            <input
-                              type="number"
-                              min="0"
+                            <MoneyInput
+                              bare
                               value={editPriceValue}
-                              onChange={(e) => setEditPriceValue(e.target.value)}
+                              onChange={setEditPriceValue}
                               className="w-full border border-gray-300 rounded-lg px-2.5 py-1 text-sm focus:outline-none focus:border-black"
                               autoFocus
                             />
@@ -1887,7 +1879,7 @@ export default function PosPage() {
                           Amount paid now, if any (Rs.)
                           <HelpHint text="This applies against the full amount owed (product + delivery fee). Pay it all now and COD becomes Rs. 0; pay less and the difference — including the delivery fee — becomes COD." />
                         </Label>
-                        <Input type="number" min="0" value={advancePaid} onChange={(e) => setAdvancePaid(e.target.value)} placeholder="0" />
+                        <MoneyInput value={advancePaid} onChange={setAdvancePaid} placeholder="0" />
                       </FormGroup>
                     )}
 
@@ -1993,7 +1985,7 @@ export default function PosPage() {
                       <>
                         <FormGroup>
                           <Label>Amount paid now (Rs.) — 0 if fully on credit</Label>
-                          <Input type="number" min="0" max={total} value={creditAmountPaid} onChange={(e) => setCreditAmountPaid(e.target.value)} />
+                          <MoneyInput value={creditAmountPaid} onChange={setCreditAmountPaid} />
                           <p className="text-xs text-gray-400 mt-1">
                             Remaining balance of Rs. {Math.max(0, total - (parseFloat(creditAmountPaid) || 0)).toLocaleString()} will show as owed
                             on {selectedCustomer ? selectedCustomer.name : "this customer's"} record.
@@ -2090,15 +2082,13 @@ export default function PosPage() {
                             </div>
                             <div className="relative">
                               <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">Rs.</span>
-                              <input
+                              <MoneyInput
+                                bare
                                 id="pos-cash-received"
-                                type="number"
-                                min="0"
-                                step="1"
                                 value={amountPaid}
-                                onChange={(e) => setAmountPaid(e.target.value)}
+                                onChange={setAmountPaid}
                                 placeholder="0"
-                                className="w-full rounded-lg border border-gray-300 py-2 pl-10 pr-3 text-right text-lg font-semibold tabular-nums focus:border-black focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                className="w-full rounded-lg border border-gray-300 py-2 pl-10 pr-3 text-right text-lg font-semibold focus:border-black focus:outline-none"
                               />
                             </div>
                             {/* Notes people hand over, then "Exactly what's due". Two even rows. */}

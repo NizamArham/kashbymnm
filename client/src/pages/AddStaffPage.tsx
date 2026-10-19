@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { BriefcaseBusiness, CalendarDays, DollarSign, Landmark, Phone, ShieldCheck, UserRound } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { StaffMember } from "../lib/types";
-import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Dropdown, DatePicker } from "../components/ui";
+import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Dropdown, DatePicker, MoneyInput } from "../components/ui";
 
 const JOB_TITLES = ["Cashier", "Sales Assistant", "Store Manager", "Inventory Assistant", "Delivery Coordinator"];
 
@@ -91,7 +91,7 @@ export default function AddStaffPage() {
               <FormGroup><Label>NIC</Label><Input value={newNic} onChange={(e) => setNewNic(e.target.value)} /></FormGroup>
               <FormGroup><Label>Phone</Label><Input value={newPhone} onChange={(e) => setNewPhone(e.target.value)} /></FormGroup>
               <FormGroup><Label>Reports to</Label><Dropdown value={newReportsTo} onChange={setNewReportsTo} placeholder="— None —" options={staffList.map((s) => ({ value: String(s.id), label: s.name ?? s.username }))} /></FormGroup>
-              <FormGroup><Label>Salary (Rs.)</Label><Input type="number" min="0" value={newSalary} onChange={(e) => setNewSalary(e.target.value)} /></FormGroup>
+              <FormGroup><Label>Salary (Rs.)</Label><MoneyInput value={newSalary} onChange={setNewSalary} /></FormGroup>
             </div>
             <FormGroup><Label>Address</Label><Input value={newAddress} onChange={(e) => setNewAddress(e.target.value)} /></FormGroup>
             <div className="grid grid-cols-3 gap-3">

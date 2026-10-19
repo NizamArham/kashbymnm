@@ -4,7 +4,7 @@ import JsBarcode from "jsbarcode";
 import { WaybillLabel, WaybillLabelData } from "../components/WaybillLabel";
 import { generateWaybillLabelPdf } from "../lib/waybillLabelPdf";
 import { useDeliveryPartners, waybillShopCode } from "../lib/delivery";
-import { PageHeader, Card, Input, Label, FormGroup, ErrorText, Dropdown, TabToggle } from "../components/ui";
+import { PageHeader, Card, Input, Label, FormGroup, ErrorText, Dropdown, TabToggle, MoneyInput } from "../components/ui";
 import { CityPicker } from "../components/CityPicker";
 import { api } from "../lib/api";
 import { Customer, BusinessInfo } from "../lib/types";
@@ -535,13 +535,7 @@ export default function WaybillGeneratorPage() {
                 </FormGroup>
                 <FormGroup>
                   <Label>COD Amount (LKR)</Label>
-                  <Input
-                    type="number"
-                    min="0"
-                    value={codAmount}
-                    onChange={(e) => setCodAmount(e.target.value)}
-                    disabled={paymentType !== "COD"}
-                  />
+                  <MoneyInput value={codAmount} onChange={setCodAmount} disabled={paymentType !== "COD"} />
                 </FormGroup>
               </div>
               <FormGroup>

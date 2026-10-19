@@ -21,6 +21,7 @@ import {
   EmptyState,
   ErrorText,
   TabToggle,
+  MoneyInput,
 } from "../components/ui";
 import { useSortableData } from "../lib/useSortableData";
 import { useConfirm, useToast } from "../components/Feedback";
@@ -295,7 +296,7 @@ function CouponFormModal({ coupon, onClose, onSaved }: { coupon?: Coupon; onClos
         </FormGroup>
         <FormGroup>
           <Label>{discountType === "percent" ? "Percent" : "Amount (Rs.)"}</Label>
-          <Input type="number" min="0" value={discountValue} onChange={(e) => setDiscountValue(e.target.value)} />
+          <MoneyInput value={discountValue} onChange={setDiscountValue} />
         </FormGroup>
       </div>
 
@@ -639,13 +640,13 @@ function VoucherFormModal({ voucher, onClose, onSaved }: { voucher?: GiftVoucher
           </FormGroup>
           <FormGroup>
             <Label>Remaining (Rs.)</Label>
-            <Input type="number" min="0" value={remainingValue} onChange={(e) => setRemainingValue(e.target.value)} />
+            <MoneyInput value={remainingValue} onChange={setRemainingValue} />
           </FormGroup>
         </div>
       ) : (
         <FormGroup>
           <Label>Value (Rs.)</Label>
-          <Input type="number" min="0" value={initialValue} onChange={(e) => setInitialValue(e.target.value)} />
+          <MoneyInput value={initialValue} onChange={setInitialValue} />
         </FormGroup>
       )}
 

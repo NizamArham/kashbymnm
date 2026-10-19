@@ -30,6 +30,7 @@ import {
   RowCardStat,
   HelpHint,
   Modal,
+  MoneyInput,
 } from "../components/ui";
 import { formatDate, formatDateTime } from "../lib/dates";
 
@@ -617,13 +618,7 @@ export default function PurchasesPage() {
                   />
                 </div>
                 <div className="lg:w-32">
-                  <Input
-                    type="number"
-                    min="0"
-                    value={line.unit_cost}
-                    onChange={(e) => updateLine(i, "unit_cost", e.target.value)}
-                    placeholder="Cost/pc"
-                  />
+                  <MoneyInput value={line.unit_cost} onChange={(v) => updateLine(i, "unit_cost", v)} placeholder="Cost/pc" />
                 </div>
                 <div className="col-span-2 lg:w-40">
                   <Dropdown
@@ -668,7 +663,7 @@ export default function PurchasesPage() {
 
           <FormGroup>
             <Label>Amount paid to supplier now (Rs.)</Label>
-            <Input type="number" min="0" value={amountPaid} onChange={(e) => setAmountPaid(e.target.value)} placeholder="0" />
+            <MoneyInput value={amountPaid} onChange={setAmountPaid} placeholder="0" />
           </FormGroup>
 
           {parseFloat(amountPaid) > 0 && (
@@ -803,13 +798,7 @@ export default function PurchasesPage() {
                     <Input value={exp.label} onChange={(e) => updateExpense(i, "label", e.target.value)} placeholder="Expense" />
                   </div>
                   <div className="w-32">
-                    <Input
-                      type="number"
-                      min="0"
-                      value={exp.amount}
-                      onChange={(e) => updateExpense(i, "amount", e.target.value)}
-                      placeholder="Amount"
-                    />
+                    <MoneyInput value={exp.amount} onChange={(v) => updateExpense(i, "amount", v)} placeholder="Amount" />
                   </div>
                   <button onClick={() => removeExpense(i)} className="text-gray-400 hover:text-black mt-2.5">
                     <Trash2 size={16} />
@@ -1388,7 +1377,7 @@ export default function PurchasesPage() {
                           <Input type="number" min="1" value={line.quantity} onChange={(e) => updateEditLine(i, "quantity", e.target.value)} />
                         </div>
                         <div className="w-28">
-                          <Input type="number" min="0" value={line.unit_cost} onChange={(e) => updateEditLine(i, "unit_cost", e.target.value)} />
+                          <MoneyInput value={line.unit_cost} onChange={(v) => updateEditLine(i, "unit_cost", v)} />
                         </div>
                       </div>
                     ))}

@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { api, ApiRequestError } from "../lib/api";
-import { cleanMoney } from "../lib/numberInput";
-import { Button, ErrorText, FormGroup, Input, Label, Modal } from "./ui";
+import { Button, ErrorText, FormGroup, Input, Label, Modal, MoneyInput } from "./ui";
 
 const money = (n: number) => `Rs. ${Math.round(n).toLocaleString()}`;
 
@@ -60,7 +59,7 @@ export default function StoreCreditRefundModal({
       {error && <ErrorText>{error}</ErrorText>}
       <FormGroup>
         <Label>Amount to refund (Rs.)</Label>
-        <Input inputMode="decimal" value={amount} onChange={(e) => setAmount(cleanMoney(e.target.value))} />
+        <MoneyInput value={amount} onChange={setAmount} />
         {value > customer.store_credit_balance + 0.009 && <p className="mt-1 text-xs text-red-500">That's more than their store credit.</p>}
       </FormGroup>
       <FormGroup>

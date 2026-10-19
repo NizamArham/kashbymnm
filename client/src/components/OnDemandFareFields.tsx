@@ -1,5 +1,5 @@
 import { DELIVERY_PAID_BY_OPTIONS, OnDemandFare } from "../lib/delivery";
-import { FormGroup, Label, Input, HelpHint } from "./ui";
+import { FormGroup, Label, Input, HelpHint, MoneyInput } from "./ui";
 
 // The fare half of an on-demand order (Uber, PickMe Flash…): a fare box
 // that can be left for later, and who pays. Two separate pieces so POS can
@@ -28,11 +28,9 @@ export function OnDemandFareInput({
         Delivery fare (Rs.)
         <HelpHint text={`${partnerName} has no tariff — enter what the ride actually costs, or leave it until the rider is booked.`} />
       </Label>
-      <Input
-        type="number"
-        min="0"
+      <MoneyInput
         value={riderDirect || waiting ? "" : value.fare}
-        onChange={(e) => onChange({ fare: e.target.value })}
+        onChange={(v) => onChange({ fare: v })}
         disabled={riderDirect || waiting}
         placeholder={riderDirect ? "Not needed" : waiting ? "Add later" : "0"}
       />

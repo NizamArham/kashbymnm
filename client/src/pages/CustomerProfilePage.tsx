@@ -5,7 +5,7 @@ import { MessageCircle, Pencil, Plus, Star, Wallet, UserX, UserCheck, Trash2, Al
 import { api, ApiRequestError } from "../lib/api";
 import { Customer, CustomerAddress, BankAccount, CustomerGender } from "../lib/types";
 import { useAuth } from "../context/AuthContext";
-import { Card, Input, Button, ErrorText, SuccessText, Label, FormGroup, Dropdown, DatePicker, HelpHint, Badge, Modal, ActionMenu, TabToggle } from "../components/ui";
+import { Card, Input, Button, ErrorText, SuccessText, Label, FormGroup, Dropdown, DatePicker, HelpHint, Badge, Modal, ActionMenu, TabToggle, MoneyInput } from "../components/ui";
 import { CityPicker } from "../components/CityPicker";
 import LoyaltyAdjustModal from "../components/LoyaltyAdjustModal";
 import StoreCreditRefundModal from "../components/StoreCreditRefundModal";
@@ -1369,14 +1369,13 @@ export default function CustomerProfilePage() {
 
                         <div>
                           <Label>{paymentMethod === "other" && deductFromCredit ? "Amount to deduct from store credit (Rs.)" : "Amount received (Rs.)"}</Label>
-                          <input
-                            type="number"
-                            min="0"
+                          <MoneyInput
+                            bare
                             value={paymentAmount}
-                            onChange={(e) => setPaymentAmount(e.target.value)}
+                            onChange={setPaymentAmount}
                             placeholder="0"
                             autoFocus
-                            className="w-full mt-1 px-3 py-3 border border-gray-200 rounded-lg text-2xl font-medium tabular-nums focus:outline-none focus:border-gray-400"
+                            className="w-full mt-1 px-3 py-3 border border-gray-200 rounded-lg text-2xl font-medium focus:outline-none focus:border-gray-400"
                           />
                         </div>
 
@@ -1419,13 +1418,7 @@ export default function CustomerProfilePage() {
                             onChange={setChequeDate}
                             placeholder="Cheque date"
                           />
-                          <Input
-                            type="number"
-                            min="0"
-                            placeholder="Amount"
-                            value={chequeAmount}
-                            onChange={(e) => setChequeAmount(e.target.value)}
-                          />
+                          <MoneyInput placeholder="Amount" value={chequeAmount} onChange={setChequeAmount} />
                           <label className="flex items-center gap-1.5 text-xs text-gray-600 self-center pl-1">
                             <input
                               type="checkbox"

@@ -17,7 +17,7 @@ import {
 import { api, ApiRequestError } from "../lib/api";
 import { SupplierPayment, SupplierBalance, Supplier, Purchase, BankAccount } from "../lib/types";
 import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
-import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Table, Th, Td, Dropdown, EmptyState, DateRangePicker, DatePicker, HelpHint, TabToggle, Modal } from "../components/ui";
+import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Table, Th, Td, Dropdown, EmptyState, DateRangePicker, DatePicker, HelpHint, TabToggle, Modal, MoneyInput } from "../components/ui";
 import { formatDate, formatDateTime } from "../lib/dates";
 
 type ExpandedTab = "activity";
@@ -570,14 +570,13 @@ export default function SupplierPaymentsPage() {
                     {method !== "cheque" ? (
                       <div>
                         <Label>Amount (Rs.)</Label>
-                        <input
-                          type="number"
-                          min="0"
+                        <MoneyInput
+                          bare
                           value={amount}
-                          onChange={(e) => setAmount(e.target.value)}
+                          onChange={setAmount}
                           placeholder="0"
                           autoFocus
-                          className="w-full mt-1 px-3 py-3 border border-gray-200 rounded-lg text-2xl font-medium tabular-nums focus:outline-none focus:border-gray-400"
+                          className="w-full mt-1 px-3 py-3 border border-gray-200 rounded-lg text-2xl font-medium focus:outline-none focus:border-gray-400"
                         />
                       </div>
                     ) : (
@@ -637,13 +636,7 @@ export default function SupplierPaymentsPage() {
                               <Input placeholder="Bank name" value={ownChequeBankName} onChange={(e) => setOwnChequeBankName(e.target.value)} />
                               <Input placeholder="Branch (optional)" value={ownChequeBranch} onChange={(e) => setOwnChequeBranch(e.target.value)} />
                               <DatePicker value={ownChequeDate || null} onChange={setOwnChequeDate} placeholder="Cheque date" />
-                              <Input
-                                type="number"
-                                min="0"
-                                placeholder="Amount"
-                                value={ownChequeAmount}
-                                onChange={(e) => setOwnChequeAmount(e.target.value)}
-                              />
+                              <MoneyInput placeholder="Amount" value={ownChequeAmount} onChange={setOwnChequeAmount} />
                               <label className="flex items-center gap-1.5 text-xs text-gray-600 self-center pl-1">
                                 <input
                                   type="checkbox"

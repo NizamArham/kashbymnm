@@ -35,6 +35,7 @@ import {
   RowCard,
   RowCardStats,
   RowCardStat,
+  MoneyInput,
 } from "../components/ui";
 import ProductSalesModal from "../components/ProductSalesModal";
 import ProductsViewToggle from "../components/ProductsViewToggle";
@@ -1270,14 +1271,14 @@ export default function ManageProductsPage() {
                                           Cost for this batch (Rs.)
                                           <HelpHint text="Older stock keeps its own cost — this only applies to the new units you're adding now." />
                                         </Label>
-                                        <Input type="number" min="0" value={restockCost} onChange={(e) => setRestockCost(e.target.value)} />
+                                        <MoneyInput value={restockCost} onChange={setRestockCost} />
                                       </FormGroup>
                                       <FormGroup>
                                         <Label>
                                           Selling price for this batch (Rs.)
                                           <HelpHint text="Older stock keeps its own price — this same price applies to every variant row above." />
                                         </Label>
-                                        <Input type="number" min="0" value={restockSellingPrice} onChange={(e) => setRestockSellingPrice(e.target.value)} />
+                                        <MoneyInput value={restockSellingPrice} onChange={setRestockSellingPrice} />
                                       </FormGroup>
                                     </div>
                                     {restockError && <ErrorText>{restockError}</ErrorText>}
@@ -1361,19 +1362,11 @@ export default function ManageProductsPage() {
                                           </FormGroup>
                                           <FormGroup>
                                             <Label>Cost price (Rs.)</Label>
-                                            <Input
-                                              type="number"
-                                              value={editForm.cost_price}
-                                              onChange={(e) => setEditForm((f) => ({ ...f, cost_price: e.target.value }))}
-                                            />
+                                            <MoneyInput value={editForm.cost_price} onChange={(v) => setEditForm((f) => ({ ...f, cost_price: v }))} />
                                           </FormGroup>
                                           <FormGroup>
                                             <Label>Selling price (Rs.)</Label>
-                                            <Input
-                                              type="number"
-                                              value={editForm.selling_price}
-                                              onChange={(e) => setEditForm((f) => ({ ...f, selling_price: e.target.value }))}
-                                            />
+                                            <MoneyInput value={editForm.selling_price} onChange={(v) => setEditForm((f) => ({ ...f, selling_price: v }))} />
                                           </FormGroup>
                                         </div>
                                         {(() => {

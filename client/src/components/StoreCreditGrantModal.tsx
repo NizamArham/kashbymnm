@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { api, ApiRequestError } from "../lib/api";
-import { cleanMoney } from "../lib/numberInput";
-import { Button, ErrorText, FormGroup, Input, Label, Modal } from "./ui";
+import { Button, ErrorText, FormGroup, Input, Label, Modal, MoneyInput } from "./ui";
 
 const money = (n: number) => `Rs. ${Math.round(n).toLocaleString()}`;
 
@@ -67,7 +66,7 @@ export default function StoreCreditGrantModal({
       {error && <ErrorText>{error}</ErrorText>}
       <FormGroup>
         <Label>Amount (Rs.)</Label>
-        <Input inputMode="decimal" value={amount} onChange={(e) => setAmount(cleanMoney(e.target.value))} placeholder="e.g. 50" autoFocus />
+        <MoneyInput value={amount} onChange={setAmount} placeholder="e.g. 50" autoFocus />
       </FormGroup>
       <FormGroup>
         <Label>Why? (required)</Label>

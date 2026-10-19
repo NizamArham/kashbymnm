@@ -3,9 +3,8 @@ import { PageLoader } from "../components/Loader";
 import { Landmark, Pencil, X, Check, Loader2, ArrowLeftRight, Plus, Minus, Wallet, Building2, ArrowUpRight, ArrowDownLeft, ChevronDown, ChevronRight, Download } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { CashBookEntry } from "../lib/types";
-import { cleanMoney } from "../lib/numberInput";
 import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
-import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, EmptyState, Dropdown, DateRangePicker, HelpHint, RefLink, Modal } from "../components/ui";
+import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, EmptyState, Dropdown, DateRangePicker, HelpHint, RefLink, Modal, MoneyInput } from "../components/ui";
 import { useToast } from "../components/Feedback";
 import { formatDate, formatDateTime } from "../lib/dates";
 
@@ -71,15 +70,6 @@ function typeLabel(t: string): string {
   if (t === "income") return "Credit";
   if (t === "expense") return "Debit";
   return t;
-}
-
-// Thousands commas while typing, keeping a typed decimal point and cents
-// exactly as entered ("1,250." stays "1,250." until the cents arrive).
-function formatAmountInput(raw: string): string {
-  if (!raw) return "";
-  const [whole, cents] = raw.split(".");
-  const wholeText = whole ? parseInt(whole, 10).toLocaleString("en-US") : "0";
-  return cents === undefined ? wholeText : `${wholeText}.${cents}`;
 }
 
 // An inline-edit control that sits exactly where the text it replaces was.
@@ -817,13 +807,12 @@ export default function CashBookPage() {
 
           <FormGroup>
             <Label>Amount (Rs.)</Label>
-            <input
-              type="text"
-              inputMode="decimal"
-              value={formatAmountInput(amount)}
-              onChange={(e) => setAmount(cleanMoney(e.target.value))}
+            <MoneyInput
+              bare
+              value={amount}
+              onChange={setAmount}
               placeholder="0"
-              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-lg font-medium tabular-nums text-right placeholder:text-right text-black focus:outline-none focus:border-gray-400"
+              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-lg font-medium text-right placeholder:text-right text-black focus:outline-none focus:border-gray-400"
             />
           </FormGroup>
 
@@ -889,7 +878,7 @@ export default function CashBookPage() {
         </FormGroup>
         <FormGroup>
           <Label>Amount (Rs.)</Label>
-          <Input type="number" min="0" value={transferAmount} onChange={(e) => setTransferAmount(e.target.value)} />
+          <MoneyInput value={transferAmount} onChange={setTransferAmount} />
         </FormGroup>
         <FormGroup>
           <Label>Notes (optional)</Label>

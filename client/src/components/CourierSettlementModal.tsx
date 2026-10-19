@@ -3,7 +3,7 @@ import { api, ApiRequestError } from "../lib/api";
 import { CourierReconciliationData } from "../lib/types";
 import { useDeliveryPartners, partnerLabel } from "../lib/delivery";
 import { addDaysIso, todayIso } from "../lib/dates";
-import { Button, DatePicker, Dropdown, ErrorText, FormGroup, HelpHint, Input, Label, Modal, TabToggle } from "./ui";
+import { Button, DatePicker, Dropdown, ErrorText, FormGroup, HelpHint, Input, Label, Modal, TabToggle, MoneyInput } from "./ui";
 import { useToast } from "./Feedback";
 
 const money = (n: number) => `Rs. ${n.toLocaleString()}`;
@@ -136,16 +136,7 @@ export default function CourierSettlementModal({
           </div>
           <FormGroup>
             <Label>Amount received (Rs.)</Label>
-            <Input
-              type="number"
-              min="0"
-              step="0.01"
-              autoFocus
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="0"
-              className="text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-            />
+            <MoneyInput autoFocus value={amount} onChange={setAmount} placeholder="0" className="text-right" />
           </FormGroup>
           <FormGroup>
             <Label>

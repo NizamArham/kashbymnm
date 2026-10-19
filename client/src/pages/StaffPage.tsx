@@ -25,6 +25,7 @@ import {
   EmptyState,
   HelpHint,
   Modal,
+  MoneyInput,
 } from "../components/ui";
 import { formatDate } from "../lib/dates";
 
@@ -308,7 +309,7 @@ export default function StaffPage() {
                                   </FormGroup>
                                   <FormGroup>
                                     <Label>Salary (Rs.)</Label>
-                                    <Input type="number" min="0" value={editForm.salary} onChange={(e) => setEditForm((f) => ({ ...f, salary: e.target.value }))} />
+                                    <MoneyInput value={editForm.salary} onChange={(v) => setEditForm((f) => ({ ...f, salary: v }))} />
                                   </FormGroup>
                                 </div>
                                 <FormGroup>

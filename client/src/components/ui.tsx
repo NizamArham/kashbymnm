@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { ChevronDown, ChevronUp, Check, Plus, CalendarDays, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowRight, Minus, X, MoreVertical } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
+import { useMoneyField } from "../lib/useMoneyField";
 import { formatDate } from "../lib/dates";
 
 // ---------------------------------------------------------------------
@@ -150,6 +151,24 @@ export const Input = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTML
       className={`w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl focus:outline-none focus:border-gray-400 focus:ring-2 focus:ring-gray-100 text-sm transition-all duration-200 ${className}`}
     />
   );
+});
+
+// A money amount typed with thousands commas ("120,000"). The value and onChange speak plain digits ("120000"), so it drops in
+// where a type="number" box was: <MoneyInput value={amount} onChange={setAmount} />
+// bare: no standard box styling — for a field that brings all of its own (a big figure in a dialog).
+export const MoneyInput = forwardRef<
+  HTMLInputElement,
+  Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "type" | "inputMode"> & { value: string; onChange: (raw: string) => void; bare?: boolean }
+>(function MoneyInput({ value, onChange, className = "", bare = false, ...rest }, forwarded) {
+  const field = useMoneyField(value, onChange);
+  const { ref: own, ...props } = field;
+  const setRef = (el: HTMLInputElement | null) => {
+    own.current = el;
+    if (typeof forwarded === "function") forwarded(el);
+    else if (forwarded) forwarded.current = el;
+  };
+  if (bare) return <input {...rest} {...props} ref={setRef} className={`tabular-nums ${className}`} />;
+  return <Input {...rest} {...props} ref={setRef} className={`tabular-nums ${className}`} />;
 });
 
 export function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {

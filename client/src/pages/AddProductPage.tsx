@@ -18,6 +18,7 @@ import {
   NewCategoryModal,
   NewSubCategoryModal,
   HelpHint,
+  MoneyInput,
 } from "../components/ui";
 
 interface VariantRow {
@@ -510,14 +511,14 @@ export default function AddProductPage() {
                     Cost price for this batch (Rs.)
                     {mode === "existing" && <HelpHint text="Can differ from this product's previous cost." />}
                   </Label>
-                  <Input type="number" min="0" step="0.01" value={form.cost_price} onChange={(e) => update("cost_price", e.target.value)} />
+                  <MoneyInput value={form.cost_price} onChange={(v) => update("cost_price", v)} />
                 </FormGroup>
                 <FormGroup>
                   <Label>
                     Selling price for this batch (Rs.)
                     {mode === "existing" && <HelpHint text="Older stock keeps its own price; only new units use this one." />}
                   </Label>
-                  <Input type="number" min="0" step="0.01" value={form.selling_price} onChange={(e) => update("selling_price", e.target.value)} />
+                  <MoneyInput value={form.selling_price} onChange={(v) => update("selling_price", v)} />
                 </FormGroup>
               </div>
 
