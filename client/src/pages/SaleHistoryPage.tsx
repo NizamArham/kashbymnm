@@ -466,6 +466,9 @@ export default function SaleHistoryPage() {
   }
 
   useKeyboardShortcut("d", downloadSalesPdf, { ctrlOrCmd: true, shift: true, enabled: isAdmin && filteredSales.length > 0 });
+  // "/" jumps to the search box, the same as on Find, Customers and Products.
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  useKeyboardShortcut("/", () => searchInputRef.current?.focus());
 
   async function toggleExpand(sale: Sale) {
     if (expanded?.id === sale.id) {
@@ -884,6 +887,7 @@ export default function SaleHistoryPage() {
         <div className="relative w-full sm:w-72">
           <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <Input
+            ref={searchInputRef}
             className="py-2 pl-8 pr-8 text-sm"
             placeholder="Invoice, customer or phone…"
             value={search}

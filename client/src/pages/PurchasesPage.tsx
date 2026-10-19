@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PageLoader } from "../components/Loader";
-import { Package, Clock, Trash2, Download } from "lucide-react";
+import { Package, Clock, Trash2, Download, Search, X } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Supplier, Purchase, AvailableUnit } from "../lib/types";
 import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
@@ -106,6 +106,8 @@ export default function PurchasesPage() {
   // narrows down cleanly once the list grows.
   const [historyStart, setHistoryStart] = useState<string | null>(null);
   const [historyEnd, setHistoryEnd] = useState<string | null>(null);
+  const [historySearch, setHistorySearch] = useState("");
+  const historySearchRef = useRef<HTMLInputElement>(null);
 
   // Returns tab — folded in from what used to be its own page, since
   // it's really just another view of the same purchases data.
@@ -370,7 +372,9 @@ export default function PurchasesPage() {
     );
   }
 
+  const historyQuery = historySearch.trim().toLowerCase();
   const filteredPurchases = purchases.filter((p) => {
+    if (historyQuery && !`${p.purchase_code} ${p.supplier_name} ${p.description ?? ""}`.toLowerCase().includes(historyQuery)) return false;
     if (!historyStart || !historyEnd) return true;
     const d = p.purchase_date.slice(0, 10);
     return d >= historyStart && d <= historyEnd;
@@ -441,6 +445,8 @@ export default function PurchasesPage() {
     shift: true,
     enabled: activeTab === "history" && filteredPurchases.length > 0,
   });
+  // "/" jumps to the History search, the same as the other lists.
+  useKeyboardShortcut("/", () => historySearchRef.current?.focus(), { enabled: activeTab === "history" });
 
   async function handleReturnLookup() {
     setReturnLookupError(null);
@@ -934,7 +940,25 @@ export default function PurchasesPage() {
         )
       ) : activeTab === "history" ? (
         <>
-          <div className="flex items-center justify-end gap-2 mb-3">
+          <div className="flex flex-wrap items-center justify-end gap-2 mb-3">
+            <div className="relative w-full sm:mr-auto sm:w-72">
+              <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <Input
+                ref={historySearchRef}
+                className="py-2 pl-8 pr-8 text-sm"
+                placeholder="Code, supplier or item…"
+                value={historySearch}
+                onChange={(e) => setHistorySearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setHistorySearch("");
+                }}
+              />
+              {historySearch && (
+                <button onClick={() => setHistorySearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600" title="Clear">
+                  <X size={14} />
+                </button>
+              )}
+            </div>
             <DateRangePicker
               startDate={historyStart}
               endDate={historyEnd}
@@ -950,11 +974,12 @@ export default function PurchasesPage() {
               title="Download PDF (Ctrl/Cmd+Shift+D)"
             >
               <Download size={14} />
-              Download PDF
+              <span className="hidden sm:inline">Download PDF</span>
+              <span className="sr-only sm:hidden">Download PDF</span>
             </Button>
           </div>
           {filteredPurchases.length === 0 ? (
-            <EmptyState icon={Package} title="No purchases recorded in this range" />
+            <EmptyState icon={Package} title={historyQuery ? "No purchases match that search" : "No purchases recorded in this range"} />
           ) : (
             <>
               {/* Desktop / tablet-landscape */}
