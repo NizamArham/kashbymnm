@@ -140,6 +140,8 @@ export default function QuotationsPage() {
     if (isExpired(sale)) return <Badge label="expired" tone="warning" />;
     return null;
   }
+  // The column itself only exists while some request has something to flag.
+  const anyStatus = quotations.some((q) => statusBadge(q) !== null);
   const typeLabel = (sale: Sale) => (sale.exchange_draft ? "Exchange" : sale.sale_type === "online" ? "Online" : "In-Store");
 
   return (
@@ -171,7 +173,7 @@ export default function QuotationsPage() {
                   <Th>Type</Th>
                   <Th>Total</Th>
                   <Th>Pay by</Th>
-                  <Th>Status</Th>
+                  {anyStatus && <Th>Status</Th>}
                   <Th></Th>
                 </tr>
               </thead>
@@ -187,7 +189,7 @@ export default function QuotationsPage() {
                       {q.quotation_valid_until ? q.quotation_valid_until.slice(0, 16).replace("T", " ") : "—"}
                       {q.hold_until && <span className="block text-xs text-gray-400">pieces held</span>}
                     </Td>
-                    <Td>{statusBadge(q)}</Td>
+                    {anyStatus && <Td>{statusBadge(q)}</Td>}
                     <Td>{rowActions(q)}</Td>
                   </tr>
                 ))}
