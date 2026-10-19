@@ -2078,37 +2078,47 @@ export default function PosPage() {
 
                         {paymentMethod === "cash" && (
                           <div>
-                            <div className="flex gap-2">
+                            {/* What the customer handed over. The figure sits on the right like every other amount on this panel (the totals,
+                                the change), under a label that also carries the change to give back, so nothing shifts when it appears. */}
+                            <div className="mb-1 flex items-center justify-between gap-2 text-xs">
+                              <label htmlFor="pos-cash-received" className="font-medium text-gray-500">
+                                Cash received
+                              </label>
+                              {changeDue > 0 && (
+                                <span className="rounded-md bg-green-100 px-2 py-0.5 font-medium tabular-nums text-green-700">Change: Rs. {changeDue.toLocaleString()}</span>
+                              )}
+                            </div>
+                            <div className="relative">
+                              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">Rs.</span>
                               <input
+                                id="pos-cash-received"
                                 type="number"
                                 min="0"
                                 step="1"
                                 value={amountPaid}
                                 onChange={(e) => setAmountPaid(e.target.value)}
-                                placeholder="Cash received"
-                                className="flex-1 border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-black"
+                                placeholder="0"
+                                className="w-full rounded-lg border border-gray-300 py-2 pl-10 pr-3 text-right text-lg font-semibold tabular-nums focus:border-black focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                               />
-                              {changeDue > 0 && (
-                                <div className="bg-green-100 rounded-lg px-3 py-1.5 text-sm text-green-700 font-medium whitespace-nowrap">
-                                  Change: Rs. {changeDue.toLocaleString()}
-                                </div>
-                              )}
                             </div>
-                            <div className="flex gap-1 mt-1.5 flex-wrap">
+                            {/* Notes people hand over, then "Exactly what's due". Two even rows. */}
+                            <div className="mt-2 grid grid-cols-4 gap-1.5">
                               {cashPresets.map((amount) => (
                                 <button
                                   key={amount}
+                                  type="button"
                                   onClick={() => setAmountPaid(amount.toString())}
-                                  className="px-2 py-0.5 border border-gray-300 rounded text-xs hover:bg-gray-100"
+                                  className="rounded-lg border border-gray-300 py-1.5 text-sm font-medium tabular-nums text-gray-800 transition hover:bg-gray-50 active:bg-gray-100"
                                 >
                                   {amount.toLocaleString()}
                                 </button>
                               ))}
                               <button
+                                type="button"
                                 onClick={() => setAmountPaid(remainingAfterCredit.toString())}
-                                className="px-2 py-0.5 bg-black text-white rounded text-xs hover:bg-gray-800"
+                                className="col-span-2 rounded-lg bg-black py-1.5 text-sm font-medium text-white transition hover:bg-gray-800"
                               >
-                                Exact
+                                Exact <span className="tabular-nums opacity-70">· Rs. {remainingAfterCredit.toLocaleString()}</span>
                               </button>
                             </div>
                           </div>
