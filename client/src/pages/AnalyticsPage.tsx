@@ -355,8 +355,8 @@ export default function AnalyticsPage() {
           {data.totals.returns_count > 0 && (
             <p className="-mt-2 mb-5 px-1 text-xs text-gray-500">
               Sales Rs. {data.totals.gross_revenue.toLocaleString()} − Rs. {data.totals.returns_amount.toLocaleString()} returned or
-              exchanged for credit ({data.totals.returns_count} item{data.totals.returns_count === 1 ? "" : "s"}, counted on the day
-              each was processed) = Rs. {data.totals.revenue.toLocaleString()} revenue.
+              exchanged for credit ({data.totals.returns_count} item{data.totals.returns_count === 1 ? "" : "s"}; a return counts on the
+              day it was processed, an exchange by delivery on the day its replacement order was made) = Rs. {data.totals.revenue.toLocaleString()} revenue.
             </p>
           )}
 
