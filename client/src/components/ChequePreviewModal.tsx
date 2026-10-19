@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { useMediaQuery } from "../lib/useMediaQuery";
 import { RotateCcw, Landmark } from "lucide-react";
 import { ChequeInfo } from "../lib/types";
 import { amountInWords } from "../lib/amountInWords";
@@ -70,6 +71,56 @@ function CrossingMark() {
   );
 }
 
+// The bank's verdict, pressed onto the paper like a rubber seal: ink-coloured and worn rather than a bright banner, so it sits in the
+// plain black-and-white cheque — dusty blue when the cheque passed, dusty red when it bounced. It is drawn behind the printed text.
+function ChequeSeal({ status, settledAt, className = "" }: { status: string; settledAt?: string | null; className?: string }) {
+  const passed = status === "cleared";
+  const uid = useId().replace(/:/g, "");
+  const ink = passed ? "#5d7d9a" : "#a45f5b";
+  const ringText = passed ? "PASSED AT THE BANK \u2022 PASSED AT THE BANK \u2022" : "RETURNED UNPAID \u2022 RETURNED UNPAID \u2022";
+  const date = settledAt ? formatDateDisplay(settledAt).toUpperCase() : null;
+  return (
+    <svg viewBox="0 0 160 160" className={`pointer-events-none absolute aspect-square ${className}`} style={{ color: ink, mixBlendMode: "multiply" }} aria-hidden="true">
+      <defs>
+        <path id={`ring-${uid}`} d="M80,80 m-57,0 a57,57 0 1,1 114,0 a57,57 0 1,1 -114,0" />
+        {/* Uneven edges and a few gaps in the ink, so it reads as a real impression. */}
+        <filter id={`worn-${uid}`} x="-5%" y="-5%" width="110%" height="110%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" seed="4" result="noise" />
+          <feDisplacementMap in="SourceGraphic" in2="noise" scale="2" result="rough" />
+          <feColorMatrix in="noise" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  -2.6 0 0 0 1.95" result="gaps" />
+          <feComposite in="rough" in2="gaps" operator="in" />
+        </filter>
+      </defs>
+      <g filter={`url(#worn-${uid})`} opacity="0.62" transform="rotate(-11 80 80)">
+        <circle cx="80" cy="80" r="75" fill="none" stroke="currentColor" strokeWidth="3.4" />
+        <circle cx="80" cy="80" r="69" fill="none" stroke="currentColor" strokeWidth="1" />
+        <circle cx="80" cy="80" r="46" fill="none" stroke="currentColor" strokeWidth="1.2" />
+        <text fontSize="9.5" fontWeight="700" fill="currentColor">
+          <textPath href={`#ring-${uid}`} textLength="352" lengthAdjust="spacing">
+            {ringText}
+          </textPath>
+        </text>
+        <text x="80" y={date ? 76 : 85} textAnchor="middle" fontSize="14.5" fontWeight="800" letterSpacing="1.2" fill="currentColor">
+          {passed ? "CLEARED" : "BOUNCED"}
+        </text>
+        {date && (
+          <>
+            <line x1="56" y1="83" x2="104" y2="83" stroke="currentColor" strokeWidth="1" />
+            <text x="80" y="96" textAnchor="middle" fontSize="8.2" fontWeight="600" letterSpacing="0.8" fill="currentColor">
+              {date}
+            </text>
+          </>
+        )}
+      </g>
+    </svg>
+  );
+}
+
+// The cheque is laid out at this fixed size — a real cheque's proportions, about 19 x 10 — and the whole picture is scaled to fit the
+// dialog, so the ratio never changes however narrow the window gets.
+const CHEQUE_W = 640;
+const CHEQUE_H = 337;
+
 export default function ChequePreviewModal({
   cheque,
   supplierName,
@@ -82,6 +133,20 @@ export default function ChequePreviewModal({
   onClose: () => void;
 }) {
   const [flipped, setFlipped] = useState(false);
+  // A window too narrow to hold a cheque that size (a phone) gets the old taller, stacked layout instead: scaled down to a phone's
+  // width the print would be unreadable.
+  const proportioned = useMediaQuery("(min-width: 640px)");
+  const holder = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
+  useEffect(() => {
+    const el = holder.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const fit = () => setScale(Math.min(1, el.clientWidth / CHEQUE_W));
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [proportioned]);
 
   const dateDigits = formatDateDigits(cheque.cheque_date);
   // Exactly who the cheque was made out to — "Cash" is the honest
@@ -89,11 +154,14 @@ export default function ChequePreviewModal({
   const payeeName = cheque.payee_name?.trim() || "Cash";
   const accountName = cheque.source === "issued" ? businessName : cheque.from_customer_name ?? "Customer";
   const isCrossed = !!cheque.is_crossed;
+  // Only a cheque the bank has actually settled carries a seal.
+  const stamped = cheque.status === "cleared" || cheque.status === "bounced";
   const [wordsLine1, wordsLine2] = splitIntoTwoLines(amountInWords(cheque.amount), 42);
 
   return (
     <Modal
       size="md"
+      widthClass="max-w-[690px]"
       onClose={onClose}
       title={
         <span className="inline-flex items-center gap-2">
@@ -114,10 +182,16 @@ export default function ChequePreviewModal({
         </>
       }
     >
-          <div style={{ perspective: "1800px" }}>
+          {/* A real cheque is about 19 x 10 cm — so the preview keeps that ratio (on a phone, where that would be too small to read, it
+              stands taller instead). */}
+          <div ref={holder} className="mx-auto w-full" style={{ maxWidth: CHEQUE_W, perspective: "1800px" }}>
             <div
-              className="relative w-full min-h-[372px] sm:min-h-[306px] transition-transform duration-500"
-              style={{ transformStyle: "preserve-3d", transform: flipped ? "rotateY(180deg)" : "rotateY(0deg)" }}
+              className={`relative transition-transform duration-500 ${proportioned ? "" : "w-full min-h-[372px]"}`}
+              style={{
+                transformStyle: "preserve-3d",
+                transform: flipped ? "rotateY(180deg)" : "rotateY(0deg)",
+                ...(proportioned ? { width: CHEQUE_W, height: CHEQUE_H, zoom: scale } : {}),
+              }}
             >
               {/* FRONT — flat white paper, thin border, plain black ink.
                   Matches the placement on real Sri Lankan cheques: bank
@@ -145,7 +219,9 @@ export default function ChequePreviewModal({
                 />
 
                 {isCrossed && <CrossingMark />}
+                {stamped && <ChequeSeal status={cheque.status} settledAt={cheque.settled_at} className="bottom-[5%] right-[10%] w-[20%]" />}
 
+                <div className="relative flex min-h-0 flex-1 flex-col">
                 <div
                   className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-3"
                 >
@@ -226,6 +302,7 @@ export default function ChequePreviewModal({
                     </p>
                   </div>
                 </div>
+                              </div>
               </div>
 
               {/* BACK — same flat, plain, monochrome treatment: clean
@@ -244,6 +321,8 @@ export default function ChequePreviewModal({
                   }}
                 />
 
+                {stamped && <ChequeSeal status={cheque.status} settledAt={cheque.settled_at} className="right-[17%] top-1/2 w-[22%] -translate-y-1/2" />}
+                <div className="relative flex min-h-0 flex-1 flex-col">
                 <p className="relative text-[10px] uppercase tracking-wider text-gray-400 mb-2">Endorsement history</p>
 
                 {cheque.source === "transferred" ? (
@@ -306,6 +385,7 @@ export default function ChequePreviewModal({
                     {cheque.cheque_number}
                   </p>
                 </div>
+                              </div>
               </div>
             </div>
           </div>

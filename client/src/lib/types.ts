@@ -738,6 +738,8 @@ export interface ChequeInfo {
   // Who the cheque was actually made out to, exactly as written. Null
   // means it was made out to "Cash".
   payee_name: string | null;
+  // When the bank cleared or bounced it; null while it is still pending.
+  settled_at?: string | null;
 }
 
 export interface BusinessInfo {

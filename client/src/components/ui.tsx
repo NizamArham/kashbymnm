@@ -584,6 +584,7 @@ export function Modal({
   dismissOnBackdrop = true,
   height,
   flush = false,
+  widthClass,
 }: {
   title: ReactNode;
   subtitle?: ReactNode;
@@ -595,6 +596,8 @@ export function Modal({
   dismissOnBackdrop?: boolean;
   height?: string;
   flush?: boolean;
+  // A width of its own for the rare dialog that is a picture of something with fixed proportions (the cheque) rather than a form.
+  widthClass?: string;
 }) {
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
@@ -621,7 +624,7 @@ export function Modal({
       <div
         role="dialog"
         aria-modal="true"
-        className={`flex ${height ?? "max-h-[calc(100dvh-2rem)]"} w-full ${MODAL_WIDTH[size]} flex-col overflow-hidden rounded-2xl bg-white shadow-2xl`}
+        className={`flex ${height ?? "max-h-[calc(100dvh-2rem)]"} w-full ${widthClass ?? MODAL_WIDTH[size]} flex-col overflow-hidden rounded-2xl bg-white shadow-2xl`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex flex-shrink-0 items-start justify-between gap-4 border-b border-gray-100 px-6 py-4">
