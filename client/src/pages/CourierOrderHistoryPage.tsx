@@ -143,7 +143,7 @@ export default function CourierOrderHistoryPage() {
 
       {error && <ErrorText>{error}</ErrorText>}
 
-      <Card className="p-0 overflow-hidden">
+      <Card className="p-0 overflow-clip">
         <div className="p-4 border-b border-gray-100">
           <div className="flex flex-col items-start sm:flex-row sm:items-center sm:justify-between gap-3">
             <h2 className="font-semibold text-gray-900">

@@ -187,7 +187,7 @@ function SortHeader({
         // shows on the column being sorted (an invisible arrow would still take up room and push the label off the edge).
         className={`inline-flex items-center gap-1 hover:text-gray-900 transition ${
           isActive ? "text-gray-900" : ""
-        } ${align === "right" ? "flex-row-reverse justify-end w-full" : ""}`}
+        } ${align === "right" ? "flex-row-reverse justify-start w-full" : ""}`}
       >
         <span>{label}</span>
         {isActive ? currentDir === "asc" ? <ChevronUp size={12} /> : <ChevronDown size={12} /> : null}
@@ -542,7 +542,8 @@ export default function InventoryCategoriesPage() {
   }
 
   return (
-    <div>
+    // The table header pins just under the pinned toolbar (see Th).
+    <div className="lg:[--sticky-top:3.5rem]">
       {/* ================= Header ================= */}
       <div
         className="lg:sticky lg:top-0 z-20 pb-3 mb-5 bg-gray-50/95 backdrop-blur-sm lg:border-b lg:border-gray-200 relative"
@@ -722,7 +723,7 @@ export default function InventoryCategoriesPage() {
           <p className="mt-3 text-sm text-gray-400">Loading categories…</p>
         </div>
       ) : (
-        <Card flatOnPhone className="lg:p-0 lg:overflow-hidden">
+        <Card flatOnPhone className="lg:p-0 lg:overflow-clip">
           <div className="px-1 lg:px-5 py-3.5 lg:border-b lg:border-gray-100 flex items-center justify-between">
             <div className="flex items-center gap-2 min-w-0">
               {appliedQuery && (
@@ -855,13 +856,13 @@ export default function InventoryCategoriesPage() {
                             <ChevronRight size={12} className="text-gray-400" />
                           )}
                         </Td>
-                        <Td className="font-medium text-gray-900 truncate" title={group.product_title}>
+                        <Td className="font-medium text-gray-900 break-words" title={group.product_title}>
                           {group.product_title}
                         </Td>
                         {showSubCategoryColumn && (
-                          <Td className="truncate text-gray-500">{subCategory || "—"}</Td>
+                          <Td className="break-words text-gray-500">{subCategory || "—"}</Td>
                         )}
-                        <Td className="truncate" title={group.brand ?? undefined}>
+                        <Td className="break-words" title={group.brand ?? undefined}>
                           {group.brand ? (
                             <button
                               onClick={(e) => {

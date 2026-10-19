@@ -616,7 +616,7 @@ export default function SaleDetailPage() {
 
           {!isQuotation && !sale.is_voided && <SaleProgress sale={sale} />}
 
-          <Card className="p-0 overflow-hidden">
+          <Card className="p-0 overflow-clip">
             <Table>
               <thead>
                 <tr>

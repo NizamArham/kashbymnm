@@ -995,7 +995,7 @@ function AllReturnsTab({ onDecided }: { onDecided: () => void }) {
       ) : (
         <>
           {/* Desktop / tablet-landscape: table with an inline-expand row */}
-          <Card className="p-0 overflow-hidden hidden lg:block">
+          <Card className="p-0 overflow-clip hidden lg:block">
             <Table>
               <thead>
                 <tr>
@@ -1041,7 +1041,7 @@ function AllReturnsTab({ onDecided }: { onDecided: () => void }) {
                             <span className="text-xs text-amber-600 font-medium">Final Sale</span>
                           )}
                         </Td>
-                        <Td className="max-w-[200px] truncate">{r.reason}</Td>
+                        <Td className="max-w-[200px] break-words" title={r.reason}>{r.reason}</Td>
                         <Td>
                           <span className="inline-flex items-center gap-2">
                             <Badge label={inStoreStage(r)} tone={statusTone(r.status)} />

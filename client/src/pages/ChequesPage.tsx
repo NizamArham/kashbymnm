@@ -526,7 +526,7 @@ export default function ChequesPage() {
         ) : sortedIssuedCheques.length === 0 ? (
           <EmptyState icon={Banknote} title="No cheques match these filters" subtitle="Try “All” under status, or a wider period." />
         ) : (
-          <Card className="p-0 overflow-hidden">
+          <Card className="p-0 overflow-clip">
             <Table>
               <thead>
                 <tr>
@@ -602,7 +602,7 @@ export default function ChequesPage() {
       ) : sortedCheques.length === 0 ? (
         <EmptyState icon={Banknote} title="No cheques match these filters" subtitle="Try “All” under status, or a wider period." />
       ) : (
-        <Card className="p-0 overflow-hidden">
+        <Card className="p-0 overflow-clip">
           <Table>
             <thead>
               <tr>

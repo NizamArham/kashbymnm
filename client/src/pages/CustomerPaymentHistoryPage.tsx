@@ -450,7 +450,7 @@ export default function CustomerPaymentHistoryPage({ customerId }: { customerId?
       ) : filteredEntries.length === 0 ? (
         <EmptyState icon={Receipt} title="No records in this range" subtitle="Try widening the date filter above." />
       ) : (
-        <Card className="p-0 overflow-hidden">
+        <Card className="p-0 overflow-clip">
           <p className="text-[11px] text-gray-400 text-right px-4 pt-3">All amounts in Rs.</p>
           <Table>
             <thead>

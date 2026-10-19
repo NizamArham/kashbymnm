@@ -191,7 +191,7 @@ export default function CustomerOrderHistoryPage({ customerId }: { customerId?: 
       ) : sales.length === 0 ? (
         <EmptyState icon={ShoppingBag} title="No orders yet" subtitle="This customer hasn't placed an order." />
       ) : (
-        <Card className="p-0 overflow-hidden">
+        <Card className="p-0 overflow-clip">
           <Table>
             <thead>
               <tr>

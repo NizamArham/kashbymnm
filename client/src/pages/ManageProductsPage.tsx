@@ -1458,7 +1458,7 @@ export default function ManageProductsPage() {
   }
 
   return (
-    <div>
+    <div className="lg:[--sticky-top:3.5rem]">
       {/* ================= Header — the same as Stock ================= */}
       <div
         className="lg:sticky lg:top-0 z-20 pb-3 mb-5 bg-gray-50/95 backdrop-blur-sm lg:border-b lg:border-gray-200 relative"
@@ -1550,7 +1550,7 @@ export default function ManageProductsPage() {
       ) : products.length === 0 ? (
         <EmptyState icon={Package} title="No products yet" subtitle="Add one to get started" />
       ) : (
-        <Card flatOnPhone className="lg:p-0 lg:overflow-hidden">
+        <Card flatOnPhone className="lg:p-0 lg:overflow-clip">
           <div className="px-1 lg:px-5 py-3.5 lg:border-b lg:border-gray-100 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
             <p className="text-sm text-gray-500 truncate">
               {selectedFilter.gender ? genderGroups.find((g) => g.gender === selectedFilter.gender)?.label : "All"}
@@ -1614,11 +1614,11 @@ export default function ManageProductsPage() {
                         <Td className="w-6">
                           {isExpanded ? <ChevronDown size={12} className="text-gray-400" /> : <ChevronRight size={12} className="text-gray-400" />}
                         </Td>
-                        <Td className="font-medium text-gray-900 truncate" title={p.product_title}>
+                        <Td className="font-medium text-gray-900 break-words" title={p.product_title}>
                           {p.product_title}
                         </Td>
-                        {showSubCategoryColumn && <Td className="truncate text-gray-500">{subCategory || "—"}</Td>}
-                        <Td className="truncate" title={p.brand ?? undefined}>
+                        {showSubCategoryColumn && <Td className="break-words text-gray-500">{subCategory || "—"}</Td>}
+                        <Td className="break-words" title={p.brand ?? undefined}>
                           {p.brand ? (
                             <button
                               onClick={(e) => {

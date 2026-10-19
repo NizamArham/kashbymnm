@@ -164,7 +164,7 @@ export default function QuotationsPage() {
       ) : (
         <>
           {/* Desktop / tablet-landscape */}
-          <Card className="p-0 overflow-hidden hidden lg:block">
+          <Card className="p-0 overflow-clip hidden lg:block">
             <Table>
               <thead>
                 <tr>

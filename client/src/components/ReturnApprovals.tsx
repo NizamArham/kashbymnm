@@ -47,7 +47,7 @@ export default function ReturnApprovalList({ approvals, onChanged }: { approvals
   };
 
   return (
-    <Card className="overflow-hidden p-0">
+    <Card className="overflow-clip p-0">
       <div className="hidden grid-cols-[9.5rem_minmax(0,1.3fr)_minmax(0,1.2fr)_minmax(0,1fr)_6rem_auto] gap-x-3 border-b border-gray-100 bg-gray-50/70 px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-gray-400 lg:grid">
         <span>Type</span>
         <span>Invoice</span>

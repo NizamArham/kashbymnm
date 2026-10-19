@@ -628,7 +628,7 @@ export default function FindPage() {
     const others = view.actions.filter((a) => !a.primary);
 
     return (
-      <Card className="p-0 overflow-hidden">
+      <Card className="p-0 overflow-clip">
         <div className="flex flex-wrap items-start justify-between gap-4 px-6 pt-6">
           <div className="flex min-w-0 items-start gap-3.5">
             <span className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl bg-gray-100">

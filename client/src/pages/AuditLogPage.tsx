@@ -239,7 +239,7 @@ export default function AuditLogPage() {
       ) : filtered.length === 0 ? (
         <EmptyState icon={Search} title={group !== "all" || actionFilter ? "Nothing in this view" : "No entries match your search"} />
       ) : (
-        <Card className="p-0 overflow-hidden">
+        <Card className="p-0 overflow-clip">
           <Table>
             <thead>
               <tr>

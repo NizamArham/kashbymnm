@@ -12,7 +12,7 @@ import { formatDate, formatDateTime } from "../lib/dates";
 // Row geometry used to work out how many entries fit on screen: a one-line row
 // (date and transaction code side by side), and the header row above them.
 const DEFAULT_PAGE_SIZE = 7;
-const TABLE_ROW_HEIGHT = 37;
+const TABLE_ROW_HEIGHT = 44;
 const TABLE_HEAD_HEIGHT = 37;
 
 const PAYMENT_METHOD_OPTIONS = [
@@ -465,7 +465,7 @@ export default function CashBookPage() {
 
       <div className="grid grid-cols-1 lg:grid-rows-[minmax(0,1fr)] gap-4 items-start lg:items-stretch lg:flex-1 lg:min-h-0">
         <div className="min-w-0 flex flex-col lg:min-h-0">
-          <Card className="p-0 overflow-hidden flex flex-col lg:flex-1 lg:min-h-0">
+          <Card className="p-0 overflow-clip flex flex-col lg:flex-1 lg:min-h-0">
             <div className="px-4 py-2.5 border-b border-gray-100 flex items-center justify-between gap-3 flex-wrap flex-shrink-0">
               <div>
                 <h2 className="text-sm font-semibold text-gray-900">All entries</h2>
@@ -534,7 +534,7 @@ export default function CashBookPage() {
             ) : (
               <>
                 <table className="w-full text-sm">
-                  <thead className="sticky top-0 z-10 bg-gray-50 shadow-[inset_0_-1px_0_0_#f3f4f6]">
+                  <thead className="sticky top-0 z-10 bg-gray-50 shadow-[inset_0_-1px_0_0_#f3f4f6] [&_th]:bg-gray-50">
                     <tr className="bg-gray-50">
                       <th className="w-[24px] px-2 py-2"></th>
                       <th className="text-left px-3 py-2 text-xs font-medium text-gray-400">Date</th>
@@ -652,7 +652,7 @@ export default function CashBookPage() {
                         <Fragment key={entry.id}>
                           <tr
                             onClick={() => toggleNotesRow(entry.id)}
-                            className={`cursor-pointer transition-colors ${
+                            className={`h-11 cursor-pointer transition-colors ${
                               isExpanded ? "bg-gray-50" : "hover:bg-gray-50"
                             }`}
                           >

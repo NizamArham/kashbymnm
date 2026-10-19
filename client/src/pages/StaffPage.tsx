@@ -195,7 +195,7 @@ export default function StaffPage() {
         }
       />
 
-      <Card className="p-0 overflow-hidden">
+      <Card className="p-0 overflow-clip">
         <div className="border-b border-gray-100 p-3">
           <div className="relative max-w-sm">
             <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />

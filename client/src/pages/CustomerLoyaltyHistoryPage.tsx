@@ -92,7 +92,7 @@ export default function CustomerLoyaltyHistoryPage({ customerId }: { customerId?
       ) : entries.length === 0 ? (
         <EmptyState icon={Star} title="No points activity yet" subtitle="Loyalty points earned or redeemed will show up here." />
       ) : (
-        <Card className="p-0 overflow-hidden">
+        <Card className="p-0 overflow-clip">
           <Table>
             <thead>
               <tr>

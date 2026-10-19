@@ -148,7 +148,7 @@ function CouponsTab() {
       ) : coupons.length === 0 ? (
         <EmptyState icon={Ticket} title="No coupons yet" subtitle="Create one to offer a discount at checkout." />
       ) : (
-        <Card className="p-0 overflow-hidden">
+        <Card className="p-0 overflow-clip">
           <Table>
             <thead>
               <tr>
@@ -427,7 +427,7 @@ function VouchersTab() {
       ) : vouchers.length === 0 ? (
         <EmptyState icon={Gift} title="No gift vouchers yet" subtitle="Issue one to give a customer a fixed Rs. balance to spend." />
       ) : (
-        <Card className="p-0 overflow-hidden">
+        <Card className="p-0 overflow-clip">
           <Table>
             <thead>
               <tr>
@@ -462,7 +462,7 @@ function VouchersTab() {
                         <ExpiryBadge expiresAt={v.expires_at} />
                       )}
                     </Td>
-                    <Td className="text-gray-500 text-xs max-w-[160px] truncate">{v.notes ?? "—"}</Td>
+                    <Td className="text-gray-500 text-xs max-w-[160px] break-words" title={v.notes ?? undefined}>{v.notes ?? "—"}</Td>
                     <Td>
                       <div className="flex items-center gap-2">
                         <button onClick={() => setEditing(v)} className="text-gray-400 hover:text-gray-700" title="Edit">

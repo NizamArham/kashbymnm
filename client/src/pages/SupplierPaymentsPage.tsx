@@ -809,7 +809,7 @@ export default function SupplierPaymentsPage() {
         <>
           <p className="text-xs text-gray-400 mb-3">Total owed across all suppliers: Rs. {totalOwed.toLocaleString()}</p>
 
-          <Card className="p-0 overflow-hidden mb-5">
+          <Card className="p-0 overflow-clip mb-5">
             <Table>
               <thead>
                 <tr>
@@ -957,7 +957,7 @@ export default function SupplierPaymentsPage() {
             <EmptyState icon={Landmark} title="No payments recorded in this range" />
           ) : (
             <>
-              <Card className="p-0 overflow-hidden">
+              <Card className="p-0 overflow-clip">
                 <Table>
                   <thead>
                     <tr>

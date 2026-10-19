@@ -352,7 +352,7 @@ export default function AnalyticsPage() {
             )}
           </Card>
 
-          <Card className="p-0 overflow-hidden mb-5">
+          <Card className="p-0 overflow-clip mb-5">
             <div className="p-5 pb-0">
               <h3 className="text-sm font-semibold text-gray-900">Margin by product</h3>
             </div>
@@ -376,11 +376,11 @@ export default function AnalyticsPage() {
                 <tbody>
                   {sortedProducts.map((p) => (
                     <tr key={p.product_id} className="hover:bg-gray-50">
-                      <Td className="font-medium max-w-xs truncate" title={p.product_title}>
+                      <Td className="font-medium max-w-xs break-words" title={p.product_title}>
                         {p.product_title}
                         {p.brand && <span className="text-gray-400 font-normal"> · {p.brand}</span>}
                       </Td>
-                      <Td className="text-gray-500 truncate max-w-[160px]" title={p.category ?? undefined}>
+                      <Td className="text-gray-500 break-words max-w-[280px]" title={p.category ?? undefined}>
                         {p.category ?? "—"}
                       </Td>
                       <Td className="text-right">{p.units}</Td>
@@ -397,7 +397,7 @@ export default function AnalyticsPage() {
             )}
           </Card>
 
-          <Card className="p-0 overflow-hidden">
+          <Card className="p-0 overflow-clip">
             <div className="p-5 pb-0">
               <h3 className="text-sm font-semibold text-gray-900">Margin by category</h3>
             </div>

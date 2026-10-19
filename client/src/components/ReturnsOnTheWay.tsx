@@ -319,7 +319,7 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
         <EmptyState icon={Search} title={q ? "Nothing matches that" : "Nothing here"} subtitle={q ? "Try an invoice number, a customer's name or the service." : "Try another view."} />
       )}
       {shownRows.length > 0 && (
-        <Card className="overflow-hidden p-0">
+        <Card className="overflow-clip p-0">
           <div className="hidden grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1fr)_6.5rem_minmax(0,1.6fr)] gap-3 border-b border-gray-100 bg-gray-50/70 px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-gray-400 lg:grid">
             <span>Invoice</span>
             <span>What</span>

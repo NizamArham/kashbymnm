@@ -789,7 +789,7 @@ export default function DeliveriesPage() {
       ) : (
         <>
           {/* Desktop table — detail lives INSIDE the row */}
-          <Card className="p-0 overflow-hidden hidden lg:block">
+          <Card className="p-0 overflow-clip hidden lg:block">
             <Table>
               <thead>
                 <tr>

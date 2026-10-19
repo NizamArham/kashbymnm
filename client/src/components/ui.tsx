@@ -646,9 +646,25 @@ export function EmptyState({ icon: Icon, title, subtitle }: { icon?: any; title:
   );
 }
 
+// A table scrolls sideways only when it really is wider than its box. Until then the wrapper clips instead of scrolling:
+// a scrolling wrapper would trap the header, and a header can only stay pinned to the top of the page (see Th) when none of its
+// ancestors is a scroll container.
 export function Table({ children, className = "" }: { children: ReactNode; className?: string }) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [wide, setWide] = useState(false);
+  useLayoutEffect(() => {
+    const wrap = wrapRef.current;
+    const table = wrap?.firstElementChild as HTMLElement | null;
+    if (!wrap || !table || typeof ResizeObserver === "undefined") return;
+    const measure = () => setWide(table.scrollWidth > wrap.clientWidth + 1);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(wrap);
+    ro.observe(table);
+    return () => ro.disconnect();
+  }, []);
   return (
-    <div className="overflow-x-auto">
+    <div ref={wrapRef} className={wide ? "overflow-x-auto" : "overflow-x-clip"}>
       <table className={`w-full text-sm ${className}`}>{children}</table>
     </div>
   );
@@ -657,8 +673,16 @@ export function Table({ children, className = "" }: { children: ReactNode; class
 // children is optional: an empty header cell (an actions column) is normal.
 // align="right" is for money and other figures: the column's header and every cell in it line up on the right edge, so the
 // digits stack by place value. (Table cells already use tabular figures — see index.css.)
+// The header row stays pinned while a long list scrolls under it (--sticky-top is how far down: 0, unless the page has its own
+// pinned bar above the table). Its bottom line is an inset shadow, not a border: a collapsed border doesn't travel with a pinned cell.
 export function Th({ children, className = "", align }: { children?: ReactNode; className?: string; align?: "right" }) {
-  return <th className={`${align === "right" ? "text-right" : "text-left"} px-3 py-2.5 text-xs font-medium text-gray-400 border-b border-gray-100 ${className}`}>{children}</th>;
+  return (
+    <th
+      className={`${align === "right" ? "text-right" : "text-left"} sticky top-[var(--sticky-top,0px)] z-[5] bg-white px-3 py-2.5 text-xs font-medium text-gray-400 shadow-[inset_0_-1px_0_0_#f3f4f6] ${className}`}
+    >
+      {children}
+    </th>
+  );
 }
 
 // A clickable <Th> that shows the active sort column/direction — pairs
@@ -698,6 +722,9 @@ export function SortHeader<K extends string>({
   );
 }
 
+// Every body cell is at least h-11 (44px) tall, and a row is as tall as its tallest cell — so every one-line row in every list
+// is the same height, and a row only grows when its content really needs two lines. (Sales and the Cash book page their rows
+// by this height: keep ROW_HEIGHT / TABLE_ROW_HEIGHT in step with it.)
 export function Td({
   children,
   colSpan,
@@ -712,7 +739,7 @@ export function Td({
   align?: "right";
 }) {
   return (
-    <td colSpan={colSpan} title={title} className={`px-3 py-2.5 border-b border-gray-50 text-gray-700 ${align === "right" ? "text-right whitespace-nowrap" : ""} ${className}`}>
+    <td colSpan={colSpan} title={title} className={`h-11 px-3 py-1.5 border-b border-gray-50 text-gray-700 ${align === "right" ? "text-right whitespace-nowrap" : ""} ${className}`}>
       {children}
     </td>
   );

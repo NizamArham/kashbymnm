@@ -243,7 +243,7 @@ export default function DeliveryPartnersPage() {
         <EmptyState icon={Truck} title="No delivery partners yet" />
       ) : (
         <>
-          <Card className="p-0 overflow-hidden hidden lg:block">
+          <Card className="p-0 overflow-clip hidden lg:block">
             <Table>
               <thead>
                 <tr>

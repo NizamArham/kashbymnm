@@ -214,7 +214,7 @@ export default function CourierReconciliationPage() {
       {/* minmax(0, …) so neither column can grow past its share because of what's inside it — a wide table or a form row
           used to push the other column off the screen. */}
       <div className="grid grid-cols-1 min-[1400px]:grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)] gap-5">
-        <Card className="p-0 overflow-hidden min-w-0">
+        <Card className="p-0 overflow-clip min-w-0">
           <div className="p-4 border-b border-gray-100 flex items-center justify-between gap-3 flex-wrap">
             <h2 className="font-semibold text-gray-900">
               Courier orders

@@ -64,8 +64,8 @@ const KIND_FILTER: Record<Kind, (s: Sale) => boolean> = {
 // from the room on screen. Phones and tablets get stacked cards, a fixed number to a page.
 // How far back a cashier may browse without asking (today and the days before it) — mirrors CASHIER_HISTORY_DAYS on the server.
 const CASHIER_WEEK_DAYS = 7;
-const ROW_HEIGHT = 57;
-const TAGGED_ROW_HEIGHT = 89;
+const ROW_HEIGHT = 44;
+const TAGGED_ROW_HEIGHT = 76;
 const TABLE_HEAD_HEIGHT = 37;
 const CARDS_PER_PAGE = 12;
 const MENU_HEIGHT = 340;
@@ -961,7 +961,7 @@ export default function SaleHistoryPage() {
       </div>
 
       {/* Desktop / tablet-landscape */}
-      <Card className="p-0 overflow-hidden hidden lg:flex lg:flex-col lg:flex-1 lg:min-h-0">
+      <Card className="p-0 overflow-clip hidden lg:flex lg:flex-col lg:flex-1 lg:min-h-0">
         {/* Scrolls inside itself (an opened row, a narrow window) so the page never has to. */}
         <div ref={tableBodyRef} onScroll={() => setOpenMenuId(null)} className="flex-1 min-h-0 overflow-auto">
           {listMessage ? (
@@ -970,7 +970,7 @@ export default function SaleHistoryPage() {
             /* Fixed column widths: every column keeps the same place and size whichever filter is on,
                instead of stretching and shrinking to fit whatever happens to be in the rows. */
             <table className="w-full text-sm [table-layout:fixed] min-w-[980px]">
-              <thead className="sticky top-0 z-10 bg-gray-50 shadow-[inset_0_-1px_0_0_#f3f4f6]">
+              <thead className="sticky top-0 z-10 bg-gray-50 shadow-[inset_0_-1px_0_0_#f3f4f6] [&_th]:bg-gray-50">
                 <tr className="bg-gray-50">
                   <SortHeader<SaleSortKey> label="Invoice" sortKey="invoice" activeKey={sortKey} dir={sortDir} onClick={toggleSort} className="w-[13%]" />
                   <SortHeader<SaleSortKey> label="Date" sortKey="date" activeKey={sortKey} dir={sortDir} onClick={toggleSort} className="w-[14%]" />
@@ -1116,7 +1116,7 @@ export default function SaleHistoryPage() {
               );
             })}
           </div>
-          <Card className="p-0 overflow-hidden mt-3">{pager}</Card>
+          <Card className="p-0 overflow-clip mt-3">{pager}</Card>
           </>
         )}
       </div>

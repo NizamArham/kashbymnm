@@ -240,7 +240,7 @@ export default function SupplierPaymentHistoryPage() {
       ) : filteredEntries.length === 0 ? (
         <EmptyState icon={Receipt} title="No records in this range" subtitle="Try widening the date filter above." />
       ) : (
-        <Card className="p-0 overflow-hidden">
+        <Card className="p-0 overflow-clip">
           <Table>
             <thead>
               <tr>
