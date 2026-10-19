@@ -220,7 +220,7 @@ export default function CourierPaymentRecordsPage() {
             title={rows.length === 0 ? "No payments or corrections recorded yet" : "Nothing in this date range"}
             actions={[
               rows.length === 0
-                ? { label: "Record a settlement", onClick: () => navigate("/couriers") }
+                ? { label: "Record a settlement", primary: true, onClick: () => navigate("/couriers?record=1") }
                 : {
                     label: "Show everything",
                     onClick: () => {

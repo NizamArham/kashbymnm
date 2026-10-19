@@ -1,55 +1,40 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { Banknote, Check, CircleDollarSign, FileText, History, Pencil, Trash2, Truck } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Check, FileText, History, Plus, Pencil, Trash2, Truck } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { CourierReconciliationData, CourierReconciliationOrder, CourierSummary } from "../lib/types";
 import { useDeliveryPartners, partnerLabel } from "../lib/delivery";
 import CourierChargeModal from "../components/CourierChargeModal";
 import CourierBalanceModal from "../components/CourierBalanceModal";
-import { Button, Card, DatePicker, Dropdown, EmptyState, ErrorText, FormGroup, HelpHint, Input, Label, PageHeader, RefLink, Table, TabToggle, Td, Th } from "../components/ui";
+import CourierSettlementModal from "../components/CourierSettlementModal";
+import { Button, Card, EmptyState, ErrorText, HelpHint, PageHeader, RefLink, Table, TabToggle, Td, Th } from "../components/ui";
 import { useConfirm } from "../components/Feedback";
-import { formatDate } from "../lib/dates";
+import { addDaysIso, formatDate, todayIso } from "../lib/dates";
 
 const money = (value: number) => `Rs. ${value.toLocaleString()}`;
 const signed = (value: number) => `${value > 0 ? "+" : "−"} ${money(Math.abs(value))}`;
-
-function todayIso(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-function addDaysIso(iso: string, days: number): string {
-  const d = new Date(iso + "T00:00:00");
-  d.setDate(d.getDate() + days);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
 
 // A charge only counts once the courier has the parcel back or delivered.
 const countsTowardBalance = (order: CourierReconciliationOrder) => order.delivery_status === "delivered" || order.delivery_status === "returned";
 
 type View = "week" | "check";
-type ReceivedAs = "" | "cash" | "bank_transfer";
-
-// CityPak and Fardar pay into the bank; our own rider hands the cash over. Any other
-// courier has no habit to assume, so it starts empty and has to be chosen.
-function defaultReceivedAs(partnerCode: string): ReceivedAs {
-  if (partnerCode === "CPAK" || partnerCode === "FDR") return "bank_transfer";
-  if (partnerCode === "D2D") return "cash";
-  return "";
-}
-
 export default function CourierReconciliationPage() {
   const { confirm: confirmDialog } = useConfirm();
   const navigate = useNavigate();
-  const { partners } = useDeliveryPartners();
+  useDeliveryPartners(); // loads the courier names the cards and rows are labelled with
   const [data, setData] = useState<CourierReconciliationData>({ summary: [], settlements: [], adjustments: [], orders: [] });
-  const [partner, setPartner] = useState("CPAK");
-  const [weekStart, setWeekStart] = useState("");
-  const [weekEnd, setWeekEnd] = useState("");
-  const [amount, setAmount] = useState("");
-  const [receivedAs, setReceivedAs] = useState<ReceivedAs>(defaultReceivedAs("CPAK"));
-  const [notes, setNotes] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  // Recording a settlement is a dialog, opened from the header or from a courier's own card (which pre-selects that courier).
+  const [recording, setRecording] = useState<{ partner?: string } | null>(null);
+  // "/couriers?record=1" (from an empty payments list) lands with the dialog already open.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    if (searchParams.get("record")) {
+      setRecording({});
+      setSearchParams({}, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [view, setView] = useState<View>("week");
   const [editingOrder, setEditingOrder] = useState<CourierReconciliationOrder | null>(null);
   const [correcting, setCorrecting] = useState<CourierSummary | null>(null);
@@ -65,24 +50,6 @@ export default function CourierReconciliationPage() {
     load();
   }, []);
 
-  // Defaults the settlement period to "since the last one I recorded for
-  // this courier, up to today" — so the common case is just typing the
-  // amount, while the period still gets logged for checking against
-  // their own weekly report later. Only recomputes when the courier or
-  // the settlement history changes, so it won't fight manual edits.
-  useEffect(() => {
-    const priorEnds = data.settlements.filter((s) => s.courier_partner === partner).map((s) => s.week_end);
-    const lastEnd = priorEnds.length > 0 ? priorEnds.reduce((latest, end) => (end > latest ? end : latest)) : null;
-    setWeekStart(lastEnd ? addDaysIso(lastEnd, 1) : "");
-    setWeekEnd(todayIso());
-  }, [partner, data.settlements]);
-
-  // Picking another courier resets how it's usually paid — only on a change of
-  // courier, so a choice made by hand isn't undone when the history reloads.
-  useEffect(() => {
-    setReceivedAs(defaultReceivedAs(partner));
-  }, [partner]);
-
   // A fixed last-7-days glance — no date picker or download here, that's what
   // the full history page is for.
   const recentOrders = useMemo(() => {
@@ -94,37 +61,6 @@ export default function CourierReconciliationPage() {
   // whatever its date — these are the numbers that could be wrong.
   const needsChecking = useMemo(() => data.orders.filter((order) => countsTowardBalance(order) && !order.charge_confirmed), [data.orders]);
   const shownOrders = view === "check" ? needsChecking : recentOrders;
-
-  async function addSettlement(event: FormEvent) {
-    event.preventDefault();
-    setError(null);
-    if (!weekStart || !weekEnd || !amount) {
-      setError("Week dates and amount received are required.");
-      return;
-    }
-    if (!receivedAs) {
-      setError("Choose how it was received — bank transfer or cash.");
-      return;
-    }
-    setSaving(true);
-    try {
-      await api.post("/courier-reconciliation/settlements", {
-        courier_partner: partner,
-        week_start: weekStart,
-        week_end: weekEnd,
-        amount_received: Number(amount),
-        payment_method: receivedAs,
-        notes: notes.trim() || undefined,
-      });
-      setAmount("");
-      setNotes("");
-      load();
-    } catch (err) {
-      setError(err instanceof ApiRequestError ? err.message : "Failed to record settlement");
-    } finally {
-      setSaving(false);
-    }
-  }
 
   async function confirmCharges(orders: CourierReconciliationOrder[]) {
     setError(null);
@@ -153,10 +89,16 @@ export default function CourierReconciliationPage() {
         title="Courier settlements"
         subtitle="Track COD collected, courier charges, weekly settlements, and carry-forward balances."
         action={
-          <Button onClick={() => navigate("/couriers/history")} className="inline-flex items-center gap-1.5">
-            <History size={14} />
-            Order history
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button onClick={() => navigate("/couriers/history")} className="inline-flex items-center gap-1.5">
+              <History size={14} />
+              Order history
+            </Button>
+            <Button variant="primary" onClick={() => setRecording({})} className="inline-flex items-center gap-1.5">
+              <Plus size={14} />
+              Record settlement
+            </Button>
+          </div>
         }
       />
 
@@ -185,20 +127,25 @@ export default function CourierReconciliationPage() {
                 </div>
               )}
             </dl>
-            <div className="mt-3 flex items-center justify-between gap-2">
-              <Button size="sm" onClick={() => setCorrecting(item)} title="Fix this balance if it doesn't match the courier's statement">
+            {item.estimated_orders > 0 && (
+              <button
+                type="button"
+                onClick={() => setView("check")}
+                className="mt-2 text-xs text-gray-500 hover:text-gray-900 underline decoration-dotted"
+                title="These charges are the system's estimate, not yet checked against the courier's bill"
+              >
+                {item.estimated_orders} estimated charge{item.estimated_orders === 1 ? "" : "s"}
+              </button>
+            )}
+            <div className="mt-3 flex flex-wrap items-center gap-1.5">
+              {item.balance > 0 && (
+                <Button size="sm" variant="primary" onClick={() => setRecording({ partner: item.courier_partner })} title={`Record what ${partnerLabel(item.courier_partner)} has paid over`} className="whitespace-nowrap">
+                  Record settlement
+                </Button>
+              )}
+              <Button size="sm" onClick={() => setCorrecting(item)} title="Fix this balance if it doesn't match the courier's statement" className="whitespace-nowrap">
                 Correct balance
               </Button>
-              {item.estimated_orders > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setView("check")}
-                  className="text-xs text-gray-500 hover:text-gray-900 underline decoration-dotted"
-                  title="These charges are the system's estimate, not yet checked against the courier's bill"
-                >
-                  {item.estimated_orders} estimated charge{item.estimated_orders === 1 ? "" : "s"}
-                </button>
-              )}
             </div>
           </Card>
         ))}
@@ -350,72 +297,9 @@ export default function CourierReconciliationPage() {
           )}
         </Card>
 
-        {/* Stacked under the orders on a narrower screen, so it keeps a form-like width instead of stretching across the page. */}
+        {/* What was recorded last — the form itself is the Record settlement dialog. */}
         <Card className="min-w-0 max-w-2xl min-[1400px]:max-w-none">
-          <div className="flex items-center gap-2 mb-4">
-            <Banknote size={18} className="text-gray-600" />
-            <div>
-              <h2 className="font-semibold text-gray-900">
-                Record settlement
-                <HelpHint text="The period defaults to since your last recorded settlement, up to today — adjust it only if it needs to match their report exactly." />
-              </h2>
-            </div>
-          </div>
-          <form onSubmit={addSettlement} className="space-y-3">
-            <FormGroup>
-              <Label>Courier partner</Label>
-              <Dropdown
-                value={partner}
-                onChange={setPartner}
-                options={partners.filter((p) => p.kind === "courier").map((p) => ({ value: p.code, label: p.name }))}
-              />
-            </FormGroup>
-            <div className="grid grid-cols-2 gap-3">
-              <FormGroup>
-                <Label>Week starts</Label>
-                <DatePicker value={weekStart} onChange={setWeekStart} />
-              </FormGroup>
-              <FormGroup>
-                <Label>Week ends</Label>
-                <DatePicker value={weekEnd} onChange={setWeekEnd} />
-              </FormGroup>
-            </div>
-            <FormGroup>
-              <Label>Amount received (Rs.)</Label>
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="0"
-                className="text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-              />
-            </FormGroup>
-            <FormGroup>
-              <Label>
-                Received as
-                <HelpHint text="Where the money landed. The Cash Book uses it to tell the bank balance from cash in hand, so it has to be set." />
-              </Label>
-              <TabToggle<ReceivedAs>
-                value={receivedAs}
-                onChange={setReceivedAs}
-                options={[
-                  { value: "bank_transfer", label: "Bank transfer" },
-                  { value: "cash", label: "Cash" },
-                ]}
-              />
-            </FormGroup>
-            <FormGroup>
-              <Label>Notes</Label>
-              <Input value={notes} onChange={(e) => setNotes(e.target.value)} />
-            </FormGroup>
-            <Button type="submit" variant="primary" disabled={saving}>
-              <CircleDollarSign size={14} /> {saving ? "Saving..." : "Record settlement"}
-            </Button>
-          </form>
-
-          <div className="mt-5 pt-4 border-t border-gray-100">
+          <div>
             <div className="flex items-center justify-between gap-3 mb-2">
               <h3 className="text-sm font-semibold text-gray-900">
                 <FileText size={14} className="inline mr-1" /> Last settlement
@@ -435,7 +319,9 @@ export default function CourierReconciliationPage() {
                 <span className="font-medium">{money(settlement.amount_received)}</span>
               </div>
             ))}
-            {data.settlements.length === 0 && <p className="text-xs text-gray-400">No settlements recorded yet.</p>}
+            {data.settlements.length === 0 && (
+              <EmptyState bare title="No settlements recorded yet" actions={[{ label: "Record a settlement", primary: true, onClick: () => setRecording({}) }]} />
+            )}
           </div>
 
           {data.adjustments.length > 0 && (
@@ -473,6 +359,7 @@ export default function CourierReconciliationPage() {
 
       {editingOrder && <CourierChargeModal order={editingOrder} onClose={() => setEditingOrder(null)} onSaved={load} />}
       {correcting && <CourierBalanceModal courier={correcting} onClose={() => setCorrecting(null)} onSaved={load} />}
+      {recording && <CourierSettlementModal data={data} initialPartner={recording.partner} onClose={() => setRecording(null)} onSaved={load} />}
     </div>
   );
 }

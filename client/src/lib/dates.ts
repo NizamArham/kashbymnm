@@ -52,3 +52,12 @@ export function formatTime(value: string | null | undefined): string | null {
   const h12 = p.hour % 12 === 0 ? 12 : p.hour % 12;
   return `${h12}:${String(p.minute).padStart(2, "0")} ${p.hour < 12 ? "am" : "pm"}`;
 }
+
+// "YYYY-MM-DD" for a Date, in the device's own calendar, and a day shifted by some number of days.
+const isoOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+export const todayIso = () => isoOf(new Date());
+export function addDaysIso(iso: string, days: number): string {
+  const d = new Date(iso + "T00:00:00");
+  d.setDate(d.getDate() + days);
+  return isoOf(d);
+}
