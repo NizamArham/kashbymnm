@@ -83,6 +83,32 @@ const ACTION_META: Record<string, { label: string; icon: typeof AlertTriangle; t
   till_approval: { label: "Approved at the till", icon: UserCog, tone: "warning" },
 };
 
+// Quick views over the log. An entry can sit in more than one (a refund is both a return and money).
+type Group = "all" | "approvals" | "returns" | "money";
+const GROUPS: { value: Group; label: string; hint: string }[] = [
+  { value: "all", label: "Everything", hint: "All entries" },
+  { value: "approvals", label: "Approvals", hint: "Requests, approvals and declines — including an admin's yes at the till" },
+  { value: "returns", label: "Returns", hint: "Returns and exchanges, from request to refund" },
+  { value: "money", label: "Money", hint: "Cash book, cheques, payments, voids, refunds, store credit and courier balances" },
+];
+const APPROVAL_ACTIONS = new Set([
+  "till_approval", "return_approve", "return_decline", "return_pickup_requested", "return_pickup_approved", "return_pickup_declined",
+  "return_pickup_report_approved", "return_pickup_report_sent_back", "return_pickup_rejected", "exchange_requested",
+  "exchange_request_approved", "exchange_request_declined",
+]);
+const MONEY_ACTIONS = new Set([
+  "sale_payment_recorded", "sale_void", "sale_removed", "purchase_delete", "return_pickup_refunded", "courier_charge_edit",
+  "courier_balance_adjust", "courier_balance_adjust_undo", "store_credit_refund", "store_credit_grant", "delivery_fee_change", "delivery_fare_set",
+]);
+function inGroup(action: string, group: Group): boolean {
+  if (group === "all") return true;
+  if (group === "approvals") return APPROVAL_ACTIONS.has(action);
+  if (group === "returns") return action.startsWith("return_") || action.startsWith("exchange_") || action.includes("coming_back") || action === "delivery_undelivered";
+  return MONEY_ACTIONS.has(action) || action.startsWith("cash_book_") || action.startsWith("cheque_");
+}
+// Admins switching in and out of cashier mode is routine, and used to fill the top of the log.
+const isModeSwitch = (action: string) => action === "cashier_mode_on" || action === "cashier_mode_off";
+
 function actionMeta(action: string) {
   return ACTION_META[action] ?? { label: action.replace(/_/g, " "), icon: AlertTriangle, tone: "neutral" as const };
 }
@@ -93,6 +119,8 @@ export default function AuditLogPage() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [actionFilter, setActionFilter] = useState("");
+  const [group, setGroup] = useState<Group>("all");
+  const [showSwitches, setShowSwitches] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   useKeyboardShortcut("/", () => searchInputRef.current?.focus());
@@ -110,12 +138,17 @@ export default function AuditLogPage() {
     label: actionMeta(a).label,
   }));
 
-  const filtered = entries.filter((e) => {
-    if (actionFilter && e.action !== actionFilter) return false;
+  // Mode switches stay out of the way unless asked for (or picked by name in the action list).
+  const switchesWanted = showSwitches || isModeSwitch(actionFilter);
+  const hiddenSwitches = entries.filter((e) => isModeSwitch(e.action)).length;
+  const searched = entries.filter((e) => {
+    if (!switchesWanted && isModeSwitch(e.action)) return false;
     const q = query.trim().toLowerCase();
     if (!q) return true;
     return e.description.toLowerCase().includes(q) || e.staff_name.toLowerCase().includes(q);
   });
+  const groupCounts = Object.fromEntries(GROUPS.map((g) => [g.value, searched.filter((e) => inGroup(e.action, g.value)).length])) as Record<Group, number>;
+  const filtered = searched.filter((e) => inGroup(e.action, group) && (!actionFilter || e.action === actionFilter));
 
   const { sorted, sortKey, sortDir, toggleSort } = useSortableData<AuditLogEntry, AuditSortKey>(
     filtered,
@@ -156,13 +189,45 @@ export default function AuditLogPage() {
           <div className="w-56">
             <Dropdown
               value={actionFilter}
-              onChange={setActionFilter}
+              onChange={(v) => {
+                setActionFilter(v);
+                if (v) setGroup("all");
+              }}
               placeholder="All actions"
               options={[{ value: "", label: "All actions" }, ...actionOptions]}
             />
           </div>
         </div>
       </Card>
+
+      {!loading && entries.length > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          {GROUPS.map((g) => {
+            const active = group === g.value;
+            return (
+              <button
+                key={g.value}
+                title={g.hint}
+                onClick={() => {
+                  setGroup(g.value);
+                  setActionFilter("");
+                }}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-sm font-medium transition ${
+                  active ? "bg-black text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                }`}
+              >
+                {g.label}
+                <span className={`text-xs tabular-nums ${active ? "text-white/70" : "text-gray-400"}`}>{groupCounts[g.value]}</span>
+              </button>
+            );
+          })}
+          {hiddenSwitches > 0 && (
+            <button onClick={() => setShowSwitches((v) => !v)} className="ml-auto text-xs text-gray-400 underline hover:text-gray-700">
+              {showSwitches ? "Hide cashier-mode switches" : `Show ${hiddenSwitches} cashier-mode switch${hiddenSwitches === 1 ? "" : "es"} (hidden)`}
+            </button>
+          )}
+        </div>
+      )}
 
       {error && <ErrorText>{error}</ErrorText>}
 
@@ -171,7 +236,7 @@ export default function AuditLogPage() {
       ) : entries.length === 0 ? (
         <EmptyState icon={ClipboardList} title="No activity recorded yet" subtitle="Sensitive actions will show up here as they happen." />
       ) : filtered.length === 0 ? (
-        <EmptyState icon={Search} title="No entries match your search" />
+        <EmptyState icon={Search} title={group !== "all" || actionFilter ? "Nothing in this view" : "No entries match your search"} />
       ) : (
         <Card className="p-0 overflow-hidden">
           <Table>
