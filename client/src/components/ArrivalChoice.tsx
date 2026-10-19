@@ -46,7 +46,7 @@ export default function ArrivalChoice({ items, state, onChange }: { items: Arriv
             <div key={i.id} className={`rounded-xl border px-3.5 py-2.5 transition ${bad ? "border-gray-300 bg-gray-50" : "border-gray-200 bg-white"}`}>
               <div className="flex items-center gap-3">
                 <p className="min-w-0 flex-1 text-sm text-gray-900">
-                  {i.name} {i.detail && <span className="text-xs text-gray-400">{i.detail}</span>}
+                  {i.name} {i.detail && <span className="text-xs text-gray-500">{i.detail}</span>}
                 </p>
                 <span className="text-xs font-medium text-gray-900">{bad ? "Bad" : "Good"}</span>
                 {/* Two round marks: a tick for fine, a cross for something wrong. */}

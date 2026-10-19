@@ -152,7 +152,7 @@ export default function QuotationsPage() {
       {error && <ErrorText>{error}</ErrorText>}
 
       {!loading && (
-        <p className="text-xs text-gray-400 mb-3">
+        <p className="text-xs text-gray-500 mb-3">
           {quotations.length} payment request{quotations.length !== 1 ? "s" : ""}
         </p>
       )}
@@ -188,7 +188,7 @@ export default function QuotationsPage() {
                     <Td align="right">Rs. {q.total.toLocaleString()}</Td>
                     <Td>
                       {q.quotation_valid_until ? formatDateTime(q.quotation_valid_until) : "—"}
-                      {q.hold_until && <span className="block text-xs text-gray-400">pieces held</span>}
+                      {q.hold_until && <span className="block text-xs text-gray-500">pieces held</span>}
                     </Td>
                     {anyStatus && <Td>{statusBadge(q)}</Td>}
                     <Td>{rowActions(q)}</Td>
@@ -205,7 +205,7 @@ export default function QuotationsPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="font-medium text-gray-900 leading-snug">{q.invoice}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">{formatDateTime(q.date)}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">{formatDateTime(q.date)}</p>
                     <p className="text-xs text-gray-500 mt-1">
                       {q.customer_name ?? "Walk-in"} · {typeLabel(q)}
                     </p>

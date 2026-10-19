@@ -100,7 +100,7 @@ export default function ProductSalesModal({ productId, productTitle, onClose }: 
           <div className="bg-gray-50 rounded-lg px-2.5 sm:px-3 py-2 min-w-0">
             <p className="text-xs text-gray-500">Average price</p>
             <p className="text-sm sm:text-base font-semibold text-gray-900">Rs. {priceRange.average.toLocaleString()}</p>
-            <p className="text-xs text-gray-400">per piece</p>
+            <p className="text-xs text-gray-500">per piece</p>
           </div>
           <PriceStat label="Highest price" stat={priceRange.high} />
         </div>
@@ -160,7 +160,7 @@ function PriceStat({
     <div className="bg-gray-50 rounded-lg px-2.5 sm:px-3 py-2 min-w-0">
       <p className="text-xs text-gray-500">{label}</p>
       <p className="text-sm sm:text-base font-semibold text-gray-900">Rs. {stat.price.toLocaleString()}</p>
-      <p className="text-xs text-gray-400">
+      <p className="text-xs text-gray-500">
         {stat.pieces} pc{stat.pieces === 1 ? "" : "s"}
         <span className="hidden sm:inline"> · {stat.invoices > 1 ? "latest " : ""}</span>
         <span className="block sm:inline break-all sm:break-normal">

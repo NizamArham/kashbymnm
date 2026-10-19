@@ -75,16 +75,16 @@ function PaymentPreviewPane({
 }) {
   if (amount <= 0) {
     return (
-      <p className="text-xs text-gray-400 leading-relaxed">
+      <p className="text-xs text-gray-500 leading-relaxed">
         Enter an amount to see how it covers the customer's oldest unpaid invoices.
       </p>
     );
   }
   if (loading) {
-    return <p className="text-xs text-gray-400">Calculating...</p>;
+    return <p className="text-xs text-gray-500">Calculating...</p>;
   }
   if (!preview || preview.allocations.length === 0) {
-    return <p className="text-xs text-gray-400">Nothing outstanding to apply against.</p>;
+    return <p className="text-xs text-gray-500">Nothing outstanding to apply against.</p>;
   }
 
   const totalApplied = preview.allocations.reduce((s, a) => s + a.applied, 0);
@@ -859,13 +859,13 @@ export default function CustomerProfilePage() {
           {/* ================= The four numbers ================= */}
           <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
             <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
-              <p className="text-xs text-gray-400">Balance due</p>
+              <p className="text-xs text-gray-500">Balance due</p>
               <p className={`mt-0.5 text-lg font-semibold tabular-nums ${customer.balance_due > 0 ? "text-red-600" : "text-gray-900"}`}>
                 {customer.balance_due > 0 ? `Rs. ${customer.balance_due.toLocaleString()}` : "Settled"}
               </p>
             </div>
             <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
-              <p className="text-xs text-gray-400">Loyalty points</p>
+              <p className="text-xs text-gray-500">Loyalty points</p>
               <p className="mt-0.5 text-lg font-semibold tabular-nums text-gray-900">{customer.loyalty_points}</p>
               {customer.loyalty_blocked === 1 && (
                 <p className="mt-0.5 text-xs text-gray-500">
@@ -874,7 +874,7 @@ export default function CustomerProfilePage() {
               )}
             </div>
             <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
-              <p className="text-xs text-gray-400">Store credit</p>
+              <p className="text-xs text-gray-500">Store credit</p>
               <p className="mt-0.5 text-lg font-semibold tabular-nums text-gray-900">
                 {customer.store_credit_balance > 0 ? `Rs. ${customer.store_credit_balance.toLocaleString()}` : "—"}
               </p>
@@ -896,12 +896,12 @@ export default function CustomerProfilePage() {
                       </div>
                     );
                   })}
-                  <p className="text-xs text-gray-400">Applied automatically at checkout</p>
+                  <p className="text-xs text-gray-500">Applied automatically at checkout</p>
                 </div>
               )}
             </div>
             <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
-              <p className="text-xs text-gray-400">Last order</p>
+              <p className="text-xs text-gray-500">Last order</p>
               <p className="mt-0.5 text-lg font-semibold tabular-nums text-gray-900">{customer.last_order_date ? formatDate(customer.last_order_date) : "No orders yet"}</p>
             </div>
           </div>
@@ -983,19 +983,19 @@ export default function CustomerProfilePage() {
                                 ) : (
                                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
                                     <div>
-                                      <p className="text-xs text-gray-400">Name</p>
+                                      <p className="text-xs text-gray-500">Name</p>
                                       <p className="text-gray-900">{customer.name}</p>
                                     </div>
                                     <div>
-                                      <p className="text-xs text-gray-400">Phone</p>
+                                      <p className="text-xs text-gray-500">Phone</p>
                                       <p className="text-gray-900">{customer.phone ?? "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-xs text-gray-400">Phone 2</p>
+                                      <p className="text-xs text-gray-500">Phone 2</p>
                                       <p className="text-gray-900">{customer.phone2 ?? "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-xs text-gray-400">Gender</p>
+                                      <p className="text-xs text-gray-500">Gender</p>
                                       <p className="text-gray-900 capitalize">{customer.gender}</p>
                                     </div>
                                   </div>
@@ -1018,7 +1018,7 @@ export default function CustomerProfilePage() {
                                 </div>
 
                                 {(!customer.addresses || customer.addresses.length === 0) && !showAddAddress ? (
-                                  <p className="text-xs text-gray-400">No saved addresses.</p>
+                                  <p className="text-xs text-gray-500">No saved addresses.</p>
                                 ) : (
                                   <div className="space-y-2">
                                     {customer.addresses?.map((a) =>
@@ -1063,11 +1063,11 @@ export default function CustomerProfilePage() {
                                             {a.is_default ? (
                                               <span className="text-xs text-green-600 font-medium">Default</span>
                                             ) : (
-                                              <button onClick={() => makeDefault(customer.id, a)} className="text-xs text-gray-400 hover:text-gray-700">
+                                              <button onClick={() => makeDefault(customer.id, a)} className="text-xs text-gray-500 hover:text-gray-700">
                                                 Make default
                                               </button>
                                             )}
-                                            <button onClick={() => startEditAddress(a)} className="text-xs text-gray-400 hover:text-gray-700">
+                                            <button onClick={() => startEditAddress(a)} className="text-xs text-gray-500 hover:text-gray-700">
                                               Edit
                                             </button>
                                             <button onClick={() => deleteAddress(customer.id, a.id)} className="text-xs text-red-400 hover:text-red-600">
@@ -1125,7 +1125,7 @@ export default function CustomerProfilePage() {
                                 </div>
 
                                 {(!customer.bank_accounts || customer.bank_accounts.length === 0) && !showAddBankAccount ? (
-                                  <p className="text-xs text-gray-400">
+                                  <p className="text-xs text-gray-500">
                                     No bank accounts on file — needed for a bank-transfer refund or payment.
                                   </p>
                                 ) : (
@@ -1179,7 +1179,7 @@ export default function CustomerProfilePage() {
                                             <span className="text-gray-700">
                                               {a.bank_name} — {a.account_name} — {a.account_number}
                                             </span>
-                                            {a.branch && <div className="text-xs text-gray-400">{a.branch}</div>}
+                                            {a.branch && <div className="text-xs text-gray-500">{a.branch}</div>}
                                           </div>
                                           <div className="flex items-center gap-3 flex-shrink-0">
                                             {a.is_default ? (
@@ -1187,12 +1187,12 @@ export default function CustomerProfilePage() {
                                             ) : (
                                               <button
                                                 onClick={() => makeBankAccountDefault(customer.id, a)}
-                                                className="text-xs text-gray-400 hover:text-gray-700"
+                                                className="text-xs text-gray-500 hover:text-gray-700"
                                               >
                                                 Make default
                                               </button>
                                             )}
-                                            <button onClick={() => startEditBankAccount(a)} className="text-xs text-gray-400 hover:text-gray-700">
+                                            <button onClick={() => startEditBankAccount(a)} className="text-xs text-gray-500 hover:text-gray-700">
                                               Edit
                                             </button>
                                             <button onClick={() => deleteBankAccount(customer.id, a.id)} className="text-xs text-red-400 hover:text-red-600">
@@ -1340,7 +1340,7 @@ export default function CustomerProfilePage() {
                           >
                             <label
                               className={`flex items-center gap-2 text-sm ${
-                                payingCustomer.store_credit_balance > 0 ? "text-gray-800 cursor-pointer" : "text-gray-400 cursor-not-allowed"
+                                payingCustomer.store_credit_balance > 0 ? "text-gray-800 cursor-pointer" : "text-gray-500 cursor-not-allowed"
                               }`}
                             >
                               <input
@@ -1359,7 +1359,7 @@ export default function CustomerProfilePage() {
                               />
                               Deduct from store credit
                             </label>
-                            <p className={`text-xs mt-1 ${payingCustomer.store_credit_balance > 0 ? "text-gray-600" : "text-gray-400"}`}>
+                            <p className={`text-xs mt-1 ${payingCustomer.store_credit_balance > 0 ? "text-gray-600" : "text-gray-500"}`}>
                               {payingCustomer.store_credit_balance > 0
                                 ? `Rs. ${payingCustomer.store_credit_balance.toLocaleString()} store credit available — no money is taken; the credit is used up against what they owe.`
                                 : "This customer has no store credit available."}
@@ -1394,7 +1394,7 @@ export default function CustomerProfilePage() {
                             Add cheque
                             <HelpHint text="Add one or more cheques received from this customer, in one combined payment." />
                           </h3>
-                          <span className="text-[11px] text-gray-400">Clears later</span>
+                          <span className="text-xs text-gray-500">Clears later</span>
                         </div>
 
                         <div className="grid grid-cols-2 gap-2">
@@ -1488,11 +1488,11 @@ export default function CustomerProfilePage() {
                     {paymentMethod === "cheque" && (
                       <div className="border border-gray-200 rounded-lg bg-white flex flex-col">
                         <div className="flex items-baseline justify-between px-3 py-2 border-b border-gray-200">
-                          <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">
+                          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
                             Cheques ({chequeList.length})
                           </p>
                           {chequeList.length > 0 && (
-                            <p className="text-[11px] text-gray-500">
+                            <p className="text-xs text-gray-500">
                               Total <span className="text-gray-900 font-semibold tabular-nums">Rs. {chequeListTotal.toLocaleString()}</span>
                             </p>
                           )}
@@ -1500,7 +1500,7 @@ export default function CustomerProfilePage() {
 
                         <div className="px-2 py-2 space-y-2 max-h-[240px] overflow-y-auto">
                           {chequeList.length === 0 ? (
-                            <p className="text-xs text-gray-400 px-1 py-2 leading-relaxed">
+                            <p className="text-xs text-gray-500 px-1 py-2 leading-relaxed">
                               No cheques yet. Fill the fields on the left and click "Add cheque to list".
                             </p>
                           ) : (
@@ -1519,7 +1519,7 @@ export default function CustomerProfilePage() {
                                 </div>
 
                                 <div className="flex items-center justify-between gap-3 mt-1.5">
-                                  <div className="flex items-center gap-2 text-[11px] text-gray-500 truncate min-w-0">
+                                  <div className="flex items-center gap-2 text-xs text-gray-500 truncate min-w-0">
                                     <span className="truncate">#{c.cheque_number}</span>
                                     <span className="text-gray-300">·</span>
                                     <span className="truncate">{c.bank_name}</span>
@@ -1528,7 +1528,7 @@ export default function CustomerProfilePage() {
                                   </div>
                                   <button
                                     onClick={() => removeCheque(i)}
-                                    className="text-[11px] text-gray-400 hover:text-red-500 flex-shrink-0"
+                                    className="text-xs text-gray-500 hover:text-red-500 flex-shrink-0"
                                   >
                                     Remove
                                   </button>
@@ -1569,7 +1569,7 @@ export default function CustomerProfilePage() {
             </>
           }
         >
-              <p className="text-xs text-gray-400 mb-3">Send a receipt to {receiptAfterPayment.name}? Review it before sending.</p>
+              <p className="text-xs text-gray-500 mb-3">Send a receipt to {receiptAfterPayment.name}? Review it before sending.</p>
               <p className="text-sm text-gray-700 bg-gray-50 rounded-xl p-3 mb-4 whitespace-pre-wrap">{receiptAfterPayment.message}</p>
         </Modal>
       )}
@@ -1619,7 +1619,7 @@ export default function CustomerProfilePage() {
             </>
           }
         >
-              <p className="text-xs text-gray-400 mb-3">
+              <p className="text-xs text-gray-500 mb-3">
                 {redeemTarget.loyalty_points} points available — redeeming converts them to store credit.
               </p>
               <FormGroup>

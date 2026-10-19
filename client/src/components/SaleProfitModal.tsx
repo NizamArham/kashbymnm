@@ -116,14 +116,14 @@ export default function SaleProfitModal({ saleId, invoice, onClose }: { saleId: 
       footer={<Button onClick={onClose}>Close</Button>}
     >
       {error && <ErrorText>{error}</ErrorText>}
-      {!data && !error && <p className="py-6 text-sm text-gray-400">Working it out…</p>}
+      {!data && !error && <p className="py-6 text-sm text-gray-500">Working it out…</p>}
 
       {data?.voided && <p className="py-6 text-sm text-gray-500">This invoice was voided, so it earned nothing.</p>}
 
       {data && !data.voided && data.items && (
         <div className="space-y-5">
           <div className="rounded-xl bg-gray-50 px-5 py-4">
-            <p className="text-xs text-gray-400">Profit on this bill</p>
+            <p className="text-xs text-gray-500">Profit on this bill</p>
             <p className={`mt-0.5 text-3xl font-semibold tabular-nums ${tone(data.net_profit ?? 0)}`}>{rs(data.net_profit ?? 0)}</p>
             {data.goods_margin_pct != null && (
               <p className="mt-1 text-xs text-gray-500">
@@ -144,22 +144,22 @@ export default function SaleProfitModal({ saleId, invoice, onClose }: { saleId: 
               { label: "Profit on goods", value: rs(data.goods_profit ?? 0), className: tone(data.goods_profit ?? 0) },
             ].map((s) => (
               <div key={s.label} className="bg-white px-4 py-3">
-                <p className="text-xs text-gray-400">{s.label}</p>
+                <p className="text-xs text-gray-500">{s.label}</p>
                 <p className={`mt-0.5 text-base font-semibold tabular-nums ${s.className ?? "text-gray-900"}`}>{s.value}</p>
-                {s.hint && <p className="mt-0.5 text-[11px] text-gray-400">{s.hint}</p>}
+                {s.hint && <p className="mt-0.5 text-xs text-gray-500">{s.hint}</p>}
               </div>
             ))}
           </div>
 
           <div>
-            <p className="mb-1.5 text-xs font-medium text-gray-400">
+            <p className="mb-1.5 text-xs font-medium text-gray-500">
               {data.items.reduce((n, i) => n + i.quantity, 0)} piece{data.items.reduce((n, i) => n + i.quantity, 0) === 1 ? "" : "s"}
               {groups.length > 1 ? ` · ${groups.length} products` : ""}
             </p>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-xs text-gray-400">
+                  <tr className="text-xs text-gray-500">
                     <th className="py-1.5 pr-3 text-left font-medium">Product</th>
                     <th className="px-3 py-1.5 text-right font-medium">Sold for</th>
                     <th className="px-3 py-1.5 text-right font-medium">Cost</th>
@@ -179,7 +179,7 @@ export default function SaleProfitModal({ saleId, invoice, onClose }: { saleId: 
                                 {g.title}
                                 {d.quantity > 1 && <span className="ml-1.5 text-gray-500">× {d.quantity}</span>}
                               </span>
-                              {d.label !== "—" && <span className="ml-2 text-xs text-gray-400">{d.label}</span>}
+                              {d.label !== "—" && <span className="ml-2 text-xs text-gray-500">{d.label}</span>}
                               {STATE_LABEL[d.state] && (
                                 <span className="ml-2 align-middle">
                                   <Badge label={STATE_LABEL[d.state]!} />
@@ -212,7 +212,7 @@ export default function SaleProfitModal({ saleId, invoice, onClose }: { saleId: 
                                 {g.quantity > 1 && <span className="ml-1.5 text-gray-500">× {g.quantity}</span>}
                               </span>
                             </span>
-                            <span className="ml-2 text-xs text-gray-400">{g.details.length} size / colour lines</span>
+                            <span className="ml-2 text-xs text-gray-500">{g.details.length} size / colour lines</span>
                             {g.returned > 0 && (
                               <span className="ml-2 align-middle">
                                 <Badge label={allBack ? "Returned" : `${g.returned} returned`} />
@@ -228,7 +228,7 @@ export default function SaleProfitModal({ saleId, invoice, onClose }: { saleId: 
                           g.details.map((d, idx) => {
                             const back = d.state === "returned" || d.state === "returned_damaged";
                             return (
-                              <tr key={`${g.title}-${idx}`} className={`bg-gray-50/70 text-xs ${back ? "text-gray-400" : "text-gray-600"}`}>
+                              <tr key={`${g.title}-${idx}`} className={`bg-gray-50/70 text-xs ${back ? "text-gray-500" : "text-gray-600"}`}>
                                 <td className="py-1.5 pl-6 pr-3">
                                   <span className={back ? "line-through" : ""}>
                                     {d.label}
@@ -268,11 +268,11 @@ export default function SaleProfitModal({ saleId, invoice, onClose }: { saleId: 
                 Customer paid {rs(data.delivery.charged)} · courier charge {rs(data.delivery.courier_cost)}
                 {data.delivery.estimated && data.delivery.courier_cost > 0 ? " (estimate — not checked against their bill yet)" : ""}
               </p>
-              {data.delivery.note && <p className="mt-1 text-xs text-gray-400">{data.delivery.note}</p>}
+              {data.delivery.note && <p className="mt-1 text-xs text-gray-500">{data.delivery.note}</p>}
             </div>
           )}
 
-          <div className="space-y-1 text-xs text-gray-400">
+          <div className="space-y-1 text-xs text-gray-500">
             {(data.not_collected ?? 0) > 0.009 && <p>{rs(data.not_collected ?? 0)} of this bill hasn't been collected yet — the profit above counts it as if it will be.</p>}
             {(data.unknown_cost_items ?? 0) > 0 && <p>{data.unknown_cost_items} piece{data.unknown_cost_items === 1 ? "" : "s"} no longer in the system, so their cost is unknown and left out.</p>}
             <p>Cost is what each piece itself cost when it was stocked — not the product's current cost price.</p>

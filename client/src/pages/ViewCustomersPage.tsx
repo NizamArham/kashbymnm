@@ -230,7 +230,7 @@ export default function ViewCustomersPage() {
         </div>
         {!isAdmin && (
           <div className="mt-3 flex items-center justify-between gap-3">
-            <p className="text-xs text-gray-400">
+            <p className="text-xs text-gray-500">
               {showingCredit ? "Customers who owe money, most owing first." : "Showing up to 5 people at a time."}
             </p>
             {showingCredit ? (
@@ -275,12 +275,12 @@ export default function ViewCustomersPage() {
             })}
           </div>
           {segment === "owes" && segmentCustomers.length > 0 && (
-            <p className="mb-3 text-xs text-gray-400">
+            <p className="mb-3 text-xs text-gray-500">
               {segmentCustomers.length} customer{segmentCustomers.length === 1 ? "" : "s"} owe <span className="font-medium text-red-600">Rs. {owedTotal.toLocaleString()}</span> in total
             </p>
           )}
           {segment === "credit" && segmentCustomers.length > 0 && (
-            <p className="mb-3 text-xs text-gray-400">
+            <p className="mb-3 text-xs text-gray-500">
               {segmentCustomers.length} customer{segmentCustomers.length === 1 ? "" : "s"} hold <span className="font-medium text-green-700">Rs. {creditTotal.toLocaleString()}</span> in store credit
             </p>
           )}
@@ -390,7 +390,7 @@ export default function ViewCustomersPage() {
                       {c.name}
                       {c.is_suspended === 1 && <span className="ml-1.5 text-xs font-normal text-red-600">(suspended)</span>}
                     </p>
-                    <p className="mt-0.5 text-xs text-gray-400">
+                    <p className="mt-0.5 text-xs text-gray-500">
                       {c.customer_code}
                       {c.phone ? ` · ${c.phone}` : ""}
                     </p>

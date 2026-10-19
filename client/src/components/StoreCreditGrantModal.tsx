@@ -88,7 +88,7 @@ export default function StoreCreditGrantModal({
         <Label>Valid for (days, optional)</Label>
         <Input inputMode="numeric" value={expiry} onChange={(e) => setExpiry(e.target.value.replace(/\D/g, ""))} placeholder="Leave empty for no expiry" />
       </FormGroup>
-      <p className="text-xs text-gray-400">No money is recorded here — the cash is already in the books wherever it came in (for example the courier's settlement).</p>
+      <p className="text-xs text-gray-500">No money is recorded here — the cash is already in the books wherever it came in (for example the courier's settlement).</p>
     </Modal>
   );
 }

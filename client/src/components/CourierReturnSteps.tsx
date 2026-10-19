@@ -162,7 +162,7 @@ export function CourierReceivedModal({ pickup, onClose, onDone }: { pickup: Retu
           <FormGroup>
             <Label>What we paid for the parcel (Rs.)</Label>
             <MoneyInput placeholder="0 if the customer paid" value={paid} onChange={setPaid} />
-            <p className="mt-1 text-xs text-gray-400">Who finally bears it is decided in the inspection report.</p>
+            <p className="mt-1 text-xs text-gray-500">Who finally bears it is decided in the inspection report.</p>
           </FormGroup>
         </>
       }
@@ -312,11 +312,11 @@ export function InspectionReportModal({ pickup, onClose, onDone }: { pickup: Ret
                       }`}
                     >
                       <span className="text-sm font-medium text-gray-900">{o.label}</span>
-                      <span className="text-right text-[11px] leading-tight text-gray-500">{o.hint}</span>
+                      <span className="text-right text-xs leading-tight text-gray-500">{o.hint}</span>
                     </button>
                   ))}
                 </div>
-                <p className="mt-1.5 text-xs text-gray-400">
+                <p className="mt-1.5 text-xs text-gray-500">
                   We paid {money(pickup.pickup_charge)} for the parcel.{" "}
                   {sharePct === 0 ? "We carry all of it." : sharePct === 100 ? "It comes off what the customer is paid back." : `Half (${money(customerShare)}) comes off what the customer is paid back.`}
                 </p>
@@ -329,12 +329,12 @@ export function InspectionReportModal({ pickup, onClose, onDone }: { pickup: Ret
           <FormGroup>
             <Label>Proposed {creditNoun} (Rs.)</Label>
             <MoneyInput value={proposed ?? String(estimate)} onChange={setProposed} disabled={takenBack.length === 0} aria-label="Proposed amount" />
-            <p className="mt-1 text-xs text-gray-400">
+            <p className="mt-1 text-xs text-gray-500">
               Items {money(itemsTotal)}
               {heldBack > 0 ? ` less ${money(heldBack)} delivery share` : ""} = {money(estimate)}. Shown for an order paid in full — a refund is never more than was actually paid.
             </p>
             {lessThanItems && <p className="mt-1 text-xs text-gray-600">{money(estimate - proposedNum)} is held back (for damage, say) — say why in the note.</p>}
-            {takenBack.length === 0 && <p className="mt-1 text-xs text-gray-400">Nothing is being taken back, so nothing is paid.</p>}
+            {takenBack.length === 0 && <p className="mt-1 text-xs text-gray-500">Nothing is being taken back, so nothing is paid.</p>}
           </FormGroup>
 
           <FormGroup>
@@ -353,7 +353,7 @@ export function InspectionReportModal({ pickup, onClose, onDone }: { pickup: Ret
           return (
             <div key={i.id} className="rounded-xl border border-gray-200 px-3.5 py-3">
               <p className="text-sm text-gray-900">
-                {itemName(i)} <span className="text-xs text-gray-400">{money(i.amount)}</span>
+                {itemName(i)} <span className="text-xs text-gray-500">{money(i.amount)}</span>
               </p>
               {i.arrival_condition === "damaged" && (
                 <p className="mt-0.5 text-xs text-gray-500">Marked Bad when it arrived{i.arrival_note ? ` — ${i.arrival_note}` : ""}</p>
@@ -375,13 +375,13 @@ export function InspectionReportModal({ pickup, onClose, onDone }: { pickup: Ret
                   </button>
                 ))}
               </div>
-              {v && <p className="mt-2 text-xs text-gray-400">{v.hint}</p>}
+              {v && <p className="mt-2 text-xs text-gray-500">{v.hint}</p>}
             </div>
           );
         })}
         {missing.map((i) => (
           <div key={i.id} className="rounded-xl border border-dashed border-gray-300 px-3.5 py-3 text-sm text-gray-500">
-            {itemName(i)} <span className="text-xs text-gray-400">{money(i.amount)}</span> — marked missing when the parcel was opened. Nothing to refund for it.
+            {itemName(i)} <span className="text-xs text-gray-500">{money(i.amount)}</span> — marked missing when the parcel was opened. Nothing to refund for it.
           </div>
         ))}
       </div>

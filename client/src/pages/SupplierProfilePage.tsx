@@ -275,7 +275,7 @@ export default function SupplierProfilePage() {
           {/* ================= The four numbers ================= */}
           <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
             <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
-              <p className="text-xs text-gray-400">
+              <p className="text-xs text-gray-500">
                 You owe
                 <HelpHint text="Calculated live from purchases minus payments made, minus any credit they hold for you." />
               </p>
@@ -289,12 +289,12 @@ export default function SupplierProfilePage() {
               )}
             </div>
             <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
-              <p className="text-xs text-gray-400">Credit with them</p>
+              <p className="text-xs text-gray-500">Credit with them</p>
               <p className="mt-0.5 text-lg font-semibold tabular-nums text-gray-900">{credit > 0 ? money(credit) : "—"}</p>
               {credit > 0 && <p className="mt-0.5 text-xs text-gray-500">Comes off your next purchase automatically</p>}
             </div>
             <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
-              <p className="text-xs text-gray-400">Total purchased</p>
+              <p className="text-xs text-gray-500">Total purchased</p>
               <p className="mt-0.5 text-lg font-semibold tabular-nums text-gray-900">
                 {(supplier.total_purchased ?? 0) > 0 ? money(supplier.total_purchased ?? 0) : "—"}
               </p>
@@ -304,7 +304,7 @@ export default function SupplierProfilePage() {
               </p>
             </div>
             <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
-              <p className="text-xs text-gray-400">Last purchase</p>
+              <p className="text-xs text-gray-500">Last purchase</p>
               <p className="mt-0.5 text-lg font-semibold tabular-nums text-gray-900">
                 {supplier.last_purchase_date ? formatDate(supplier.last_purchase_date) : "No purchases yet"}
               </p>
@@ -378,27 +378,27 @@ export default function SupplierProfilePage() {
                   <>
                     <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-3">
                       <div>
-                        <p className="text-xs text-gray-400">Name</p>
+                        <p className="text-xs text-gray-500">Name</p>
                         <p className="text-gray-900">{supplier.name}</p>
                       </div>
                       <div>
-                        <p className="text-xs text-gray-400">Supplier code</p>
+                        <p className="text-xs text-gray-500">Supplier code</p>
                         <p className="text-gray-900">{supplier.supplier_code}</p>
                       </div>
                       <div>
-                        <p className="text-xs text-gray-400">Phone</p>
+                        <p className="text-xs text-gray-500">Phone</p>
                         <p className="text-gray-900">{supplier.phone ?? "—"}</p>
                       </div>
                       <div>
-                        <p className="text-xs text-gray-400">City</p>
+                        <p className="text-xs text-gray-500">City</p>
                         <p className="text-gray-900">{supplier.city ?? "—"}</p>
                       </div>
                       <div>
-                        <p className="text-xs text-gray-400">Products from this supplier</p>
+                        <p className="text-xs text-gray-500">Products from this supplier</p>
                         <p className="text-gray-900">{(supplier.product_count ?? 0).toLocaleString()}</p>
                       </div>
                       <div>
-                        <p className="text-xs text-gray-400">Notes</p>
+                        <p className="text-xs text-gray-500">Notes</p>
                         <p className="text-gray-900">{supplier.notes ?? "—"}</p>
                       </div>
                     </div>
@@ -422,7 +422,7 @@ export default function SupplierProfilePage() {
                 </div>
 
                 {(!supplier.bank_accounts || supplier.bank_accounts.length === 0) && !showAddBankAccount ? (
-                  <p className="text-xs text-gray-400">No bank accounts on file — needed to pay this supplier by bank transfer.</p>
+                  <p className="text-xs text-gray-500">No bank accounts on file — needed to pay this supplier by bank transfer.</p>
                 ) : (
                   <div className="space-y-2">
                     {supplier.bank_accounts?.map((a) =>
@@ -462,17 +462,17 @@ export default function SupplierProfilePage() {
                             <span className="text-gray-700">
                               {a.bank_name} — {a.account_name} — {a.account_number}
                             </span>
-                            {a.branch && <div className="text-xs text-gray-400">{a.branch}</div>}
+                            {a.branch && <div className="text-xs text-gray-500">{a.branch}</div>}
                           </div>
                           <div className="flex flex-shrink-0 items-center gap-3">
                             {a.is_default ? (
                               <span className="text-xs font-medium text-green-600">Default</span>
                             ) : (
-                              <button onClick={() => makeBankAccountDefault(a)} className="text-xs text-gray-400 hover:text-gray-700">
+                              <button onClick={() => makeBankAccountDefault(a)} className="text-xs text-gray-500 hover:text-gray-700">
                                 Make default
                               </button>
                             )}
-                            <button onClick={() => startEditBankAccount(a)} className="text-xs text-gray-400 hover:text-gray-700">
+                            <button onClick={() => startEditBankAccount(a)} className="text-xs text-gray-500 hover:text-gray-700">
                               Edit
                             </button>
                             <button onClick={() => deleteBankAccount(a.id)} className="text-xs text-red-400 hover:text-red-600">

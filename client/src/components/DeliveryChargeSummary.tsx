@@ -29,7 +29,7 @@ export default function DeliveryChargeSummary({ sale, className = "" }: { sale: 
       {d.state === "paid" && !d.free && <Badge label="delivery paid" tone="success" />}
       {d.state === "collected" && !d.free && <Badge label="collected on delivery" tone="success" />}
       {d.state === "due" && <Badge label={`Rs. ${d.cod.toLocaleString()} to pay on delivery`} tone="warning" />}
-      {d.note && <span className="text-xs text-gray-400">{d.note}</span>}
+      {d.note && <span className="text-xs text-gray-500">{d.note}</span>}
     </div>
   );
 }

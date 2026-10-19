@@ -67,7 +67,7 @@ export default function ExchangeNotice({
         {exchange.items.map((i) => (
           <li key={i.id} className="flex flex-wrap items-baseline gap-x-2 text-gray-600">
             <span className="text-gray-900">{itemName(i)}</span>
-            <span className="text-xs text-gray-400">
+            <span className="text-xs text-gray-500">
               {i.old_invoice} · worth {money(i.credit_amount)}
             </span>
             {i.status === "received" && <span className="text-xs text-emerald-700">received{i.item_condition === "damaged" ? " (damaged)" : ""}</span>}
@@ -303,7 +303,7 @@ export function ExchangedOutNotice({ exchanges, className = "" }: { exchanges: S
                       {i.title ?? "Item"}
                       {v ? ` (${v})` : ""}
                     </span>
-                    <span className="text-xs text-gray-400">{money(i.credit_amount)}</span>
+                    <span className="text-xs text-gray-500">{money(i.credit_amount)}</span>
                     <span className={`text-xs ${s.className}`}>{s.text}</span>
                   </li>
                 );

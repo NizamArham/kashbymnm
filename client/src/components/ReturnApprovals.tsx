@@ -55,7 +55,7 @@ export default function ReturnApprovalList({ approvals, onChanged, emptyActions 
 
   return (
     <Card className="overflow-clip p-0">
-      <div className="hidden grid-cols-[9.5rem_minmax(0,1.3fr)_minmax(0,1.2fr)_minmax(0,1fr)_6rem_auto] gap-x-3 border-b border-gray-100 bg-gray-50/70 px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-gray-400 lg:grid">
+      <div className="hidden grid-cols-[9.5rem_minmax(0,1.3fr)_minmax(0,1.2fr)_minmax(0,1fr)_6rem_auto] gap-x-3 border-b border-gray-100 bg-gray-50/70 px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-gray-500 lg:grid">
         <span>Type</span>
         <span>Invoice</span>
         <span>Customer</span>
@@ -83,14 +83,14 @@ export default function ReturnApprovalList({ approvals, onChanged, emptyActions 
                   >
                     {view.invoice}
                   </RefLink>
-                  <p className="truncate text-xs text-gray-400">
+                  <p className="truncate text-xs text-gray-500">
                     {view.note}
                     {view.noReturns && <span className="font-medium text-amber-600"> · Final Sale</span>}
                   </p>
                 </div>
                 <span className="hidden truncate text-gray-700 lg:block">{view.customer}</span>
                 <span className="hidden truncate text-gray-500 lg:block">{view.askedBy ?? "—"}</span>
-                <span className="hidden text-xs text-gray-400 lg:block">{formatDate(e.at)}</span>
+                <span className="hidden text-xs text-gray-500 lg:block">{formatDate(e.at)}</span>
                 <span className="flex items-center justify-end gap-2">
                   <span className="text-xs text-gray-500">{e.kind === "courier_report" ? courierStage(e.p) : "Pending"}</span>
                   {isOpen ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-400" />}
@@ -156,7 +156,7 @@ function describe(e: Entry) {
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <p className="text-xs text-gray-400">{label}</p>
+      <p className="text-xs text-gray-500">{label}</p>
       <p className="text-sm text-gray-900">{children}</p>
     </div>
   );
@@ -178,12 +178,12 @@ function CourierReturnPanel({ p, onChanged }: { p: ReturnPickup; onChanged: () =
   return (
     <div className="space-y-4">
       <div>
-        <p className="mb-1 text-xs text-gray-400">Being sent back</p>
+        <p className="mb-1 text-xs text-gray-500">Being sent back</p>
         <ul className="space-y-0.5 text-sm">
           {p.items.map((i) => (
             <li key={i.id} className="flex flex-wrap items-baseline gap-x-2">
               <span className="text-gray-900">{nameOf(i)}</span>
-              <span className="text-xs text-gray-400">{money(i.amount)}</span>
+              <span className="text-xs text-gray-500">{money(i.amount)}</span>
               {i.allow_returns === 0 && <span className="text-xs font-medium text-amber-600">Final Sale</span>}
             </li>
           ))}
@@ -193,9 +193,9 @@ function CourierReturnPanel({ p, onChanged }: { p: ReturnPickup; onChanged: () =
         <Fact label="Customer would like">{p.resolution === "refund" ? "A refund" : "Store credit"}</Fact>
         <Fact label="Asked by">{p.requested_by_name ?? "—"}</Fact>
       </div>
-      <p className="text-xs text-gray-400">Approving only means "yes, send it back" — its condition isn't known yet. It gets inspected when it arrives.</p>
+      <p className="text-xs text-gray-500">Approving only means "yes, send it back" — its condition isn't known yet. It gets inspected when it arrives.</p>
       <div>
-        <p className="mb-1 text-xs text-gray-400">Reason for return</p>
+        <p className="mb-1 text-xs text-gray-500">Reason for return</p>
         <p className="text-sm text-gray-900">{p.reason}</p>
       </div>
       {noReturns.length > 0 && <NoReturnsWarning>{`${noReturns.map((i) => i.title ?? "An item").join(", ")} — Final Sale. Approving needs an explicit override reason.`}</NoReturnsWarning>}
@@ -242,12 +242,12 @@ function CourierReportPanel({ p, onChanged }: { p: ReturnPickup; onChanged: () =
   return (
     <div className="space-y-4">
       <div>
-        <p className="mb-1 text-xs text-gray-400">What the inspection found</p>
+        <p className="mb-1 text-xs text-gray-500">What the inspection found</p>
         <ul className="space-y-0.5 text-sm">
           {arrived.map((i) => (
             <li key={i.id} className="flex flex-wrap items-baseline gap-x-2">
               <span className="text-gray-900">{nameOf(i)}</span>
-              <span className="text-xs text-gray-400">{money(i.amount)}</span>
+              <span className="text-xs text-gray-500">{money(i.amount)}</span>
               <span className="text-xs font-medium text-gray-700">{VERDICT_TEXT[i.verdict ?? (i.arrival_condition === "missing" ? "not_received" : "clean")]}</span>
               {i.arrival_condition === "damaged" && <span className="text-xs text-amber-700">marked Bad when it arrived{i.arrival_note ? ` — ${i.arrival_note}` : ""}</span>}
               {i.allow_returns === 0 && <span className="text-xs font-medium text-amber-600">Final Sale</span>}
@@ -266,7 +266,7 @@ function CourierReportPanel({ p, onChanged }: { p: ReturnPickup; onChanged: () =
         </Fact>
         <Fact label={p.resolution === "refund" ? "Proposed refund" : "Proposed store credit"}>
           <span className="font-semibold">{money(payBack)}</span>
-          {p.report_proposed !== null && p.report_proposed < estimate - 0.5 && <span className="text-xs text-gray-400"> (items {money(estimate)} — {money(estimate - p.report_proposed)} held back)</span>}
+          {p.report_proposed !== null && p.report_proposed < estimate - 0.5 && <span className="text-xs text-gray-500"> (items {money(estimate)} — {money(estimate - p.report_proposed)} held back)</span>}
         </Fact>
         <Fact label="Report by">
           {p.report_by_name ?? "—"}
@@ -279,12 +279,12 @@ function CourierReportPanel({ p, onChanged }: { p: ReturnPickup; onChanged: () =
       </div>
       {p.report_note && (
         <div>
-          <p className="mb-1 text-xs text-gray-400">Note</p>
+          <p className="mb-1 text-xs text-gray-500">Note</p>
           <p className="text-sm text-gray-900">{p.report_note}</p>
         </div>
       )}
       <div>
-        <p className="mb-1 text-xs text-gray-400">Reason for return</p>
+        <p className="mb-1 text-xs text-gray-500">Reason for return</p>
         <p className="text-sm text-gray-900">{p.reason}</p>
       </div>
       <div className="border-t border-gray-200 pt-4">
@@ -320,12 +320,12 @@ function ExchangeRequestPanel({ s, onChanged }: { s: Exchange; onChanged: () => 
     <div className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
-          <p className="mb-1 text-xs text-gray-400">Old items coming back</p>
+          <p className="mb-1 text-xs text-gray-500">Old items coming back</p>
           <ul className="space-y-0.5 text-sm">
             {(q?.old_items ?? []).map((i) => (
               <li key={i.sale_item_id} className="flex flex-wrap items-baseline gap-x-2">
                 <span className="text-gray-900">{nameOf(i)}</span>
-                <span className="text-xs text-gray-400">
+                <span className="text-xs text-gray-500">
                   {i.old_invoice} · {money(i.unit_price)}
                 </span>
                 {i.allow_returns === 0 && <span className="text-xs font-medium text-amber-600">Final Sale</span>}
@@ -334,12 +334,12 @@ function ExchangeRequestPanel({ s, onChanged }: { s: Exchange; onChanged: () => 
           </ul>
         </div>
         <div>
-          <p className="mb-1 text-xs text-gray-400">New items going out</p>
+          <p className="mb-1 text-xs text-gray-500">New items going out</p>
           <ul className="space-y-0.5 text-sm">
             {s.new_items.map((i, idx) => (
               <li key={idx} className="flex flex-wrap items-baseline gap-x-2">
                 <span className="text-gray-900">{nameOf(i)}</span>
-                <span className="text-xs text-gray-400">{money(i.unit_price)}</span>
+                <span className="text-xs text-gray-500">{money(i.unit_price)}</span>
               </li>
             ))}
           </ul>
@@ -356,7 +356,7 @@ function ExchangeRequestPanel({ s, onChanged }: { s: Exchange; onChanged: () => 
             {shareSummary({ pickup_charge: q.pickup_charge, customer_share_pct: q.customer_share_pct, customer_share: q.pickup_collected })}
           </Fact>
           <Fact label="Customer pays">
-            {money(q.amount_to_pay)} <span className="text-xs text-gray-400">(after {money(q.applied_amount)} for the old items)</span>
+            {money(q.amount_to_pay)} <span className="text-xs text-gray-500">(after {money(q.applied_amount)} for the old items)</span>
           </Fact>
           <Fact label="Asked by">{s.salesperson ?? "—"}</Fact>
           <Fact label="Pieces held">{s.hold_until ? `until ${formatDateTime(s.hold_until)}` : "not held"}</Fact>

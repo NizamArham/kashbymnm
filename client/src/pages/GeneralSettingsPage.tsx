@@ -243,27 +243,27 @@ export default function GeneralSettingsPage() {
           </div>
 
           <div className="mt-4 pt-4 border-t border-gray-100">
-            <p className="text-xs text-gray-400 mb-2 flex items-center gap-1">
+            <p className="text-xs text-gray-500 mb-2 flex items-center gap-1">
               <Landmark size={12} />
               Bank details
             </p>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
               <div>
-                <p className="text-xs text-gray-400">Bank</p>
+                <p className="text-xs text-gray-500">Bank</p>
                 <p className="text-gray-900">{saved.bank_name || "—"}</p>
               </div>
               <div>
-                <p className="text-xs text-gray-400">Account number</p>
+                <p className="text-xs text-gray-500">Account number</p>
                 <p className="text-gray-900">{saved.bank_account_no || "—"}</p>
               </div>
               <div>
-                <p className="text-xs text-gray-400">Account name</p>
+                <p className="text-xs text-gray-500">Account name</p>
                 <p className="text-gray-900">{saved.bank_account_name || "—"}</p>
               </div>
             </div>
           </div>
 
-          {saved.notes && <p className="text-xs text-gray-400 mt-4 pt-4 border-t border-gray-100">{saved.notes}</p>}
+          {saved.notes && <p className="text-xs text-gray-500 mt-4 pt-4 border-t border-gray-100">{saved.notes}</p>}
 
           {success && <SuccessText>{success}</SuccessText>}
         </Card>
@@ -368,7 +368,7 @@ export default function GeneralSettingsPage() {
             <span className="text-gray-600">Online, fully paid upfront</span>
           </div>
         </div>
-        <p className="text-xs text-gray-400 mt-3">
+        <p className="text-xs text-gray-500 mt-3">
           After the prefix: 3 digits for the sale's date (month−1)×30 + day, then a fixed "X", then a running number
           shared across every prefix, starting at 0240 and never resetting — e.g. STR261X0240 was created on day 261
           of that scheme, and whichever sale came next (any prefix) became ...0241.
@@ -400,7 +400,7 @@ export default function GeneralSettingsPage() {
             <span className="text-gray-600">Gender at signup — Male / Female / Unspecified</span>
           </div>
         </div>
-        <p className="text-xs text-gray-400 mt-3">
+        <p className="text-xs text-gray-500 mt-3">
           Correcting a customer's gender later only changes future filtering/segmentation — it never regenerates their
           code, the same way a sale's invoice number is fixed forever once issued.
         </p>
@@ -422,15 +422,15 @@ export default function GeneralSettingsPage() {
               <span className="min-w-0">
                 <span className="block text-gray-900 truncate">
                   {s.label}
-                  {s.adminOnly && <span className="ml-1.5 text-[10px] text-gray-400 align-middle">admin</span>}
+                  {s.adminOnly && <span className="ml-1.5 text-xs text-gray-500 align-middle">admin</span>}
                 </span>
-                {s.withCtrlCmd && <span className="block text-[11px] text-gray-400">also Ctrl/Cmd + {s.letter.toUpperCase()}</span>}
+                {s.withCtrlCmd && <span className="block text-xs text-gray-500">also Ctrl/Cmd + {s.letter.toUpperCase()}</span>}
               </span>
               <span className="font-mono text-xs bg-gray-100 text-gray-700 rounded-md px-2 py-1 flex-shrink-0">Alt/Option + {s.letter.toUpperCase()}</span>
             </div>
           ))}
         </div>
-        <p className="text-xs text-gray-400 mt-3">
+        <p className="text-xs text-gray-500 mt-3">
           Plain letters (just “S” or “C”) aren't used on purpose — they'd fire while you type or while a barcode scanner is entering a code — and Ctrl/Cmd + S or C
           are Save and Copy.
         </p>
@@ -448,7 +448,7 @@ export default function GeneralSettingsPage() {
               <span className="font-mono text-xs bg-gray-100 text-gray-700 rounded-md px-2 py-1 flex-shrink-0">{s.keys}</span>
               <div className="text-right">
                 <p className="text-gray-900">{s.action}</p>
-                <p className="text-gray-400 text-xs">{s.where}</p>
+                <p className="text-gray-500 text-xs">{s.where}</p>
               </div>
             </div>
           ))}
@@ -469,7 +469,7 @@ export default function GeneralSettingsPage() {
         <div className="flex items-center justify-between py-3 border-t border-gray-100">
           <div>
             <p className="text-sm font-medium text-gray-900">Download backup now</p>
-            <p className="text-xs text-gray-400">Saves a .db file straight to your computer.</p>
+            <p className="text-xs text-gray-500">Saves a .db file straight to your computer.</p>
           </div>
           {confirmingBackup ? (
             <div className="flex items-center gap-2">
@@ -493,7 +493,7 @@ export default function GeneralSettingsPage() {
         <div className="flex items-center justify-between py-3 border-t border-gray-100">
           <div>
             <p className="text-sm font-medium text-gray-900">Email backup now</p>
-            <p className="text-xs text-gray-400">Sends the same file to the address(es) configured on the server.</p>
+            <p className="text-xs text-gray-500">Sends the same file to the address(es) configured on the server.</p>
           </div>
           <Button onClick={handleEmailBackup} disabled={emailingBackup} className="inline-flex items-center gap-1.5">
             <Send size={14} />

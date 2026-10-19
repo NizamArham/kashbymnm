@@ -64,7 +64,7 @@ export function OnDemandPaidByPicker({ value, onChange }: { value: OnDemandFare;
           </button>
         ))}
       </div>
-      <p className="text-[11px] text-gray-500 mt-1.5">
+      <p className="text-xs text-gray-500 mt-1.5">
         {waiting
           ? "On hold: nothing is charged for delivery yet, and the order can't be packed until you add the fare (Deliveries → Add fare)."
           : selected?.hint}

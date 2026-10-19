@@ -710,7 +710,7 @@ export default function PurchasesPage() {
 
                   {chequeKind === "in_hand" ? (
                     <>
-                      <p className="text-xs text-gray-400 mb-2">Use a cheque already received from a customer.</p>
+                      <p className="text-xs text-gray-500 mb-2">Use a cheque already received from a customer.</p>
                       <div className="flex gap-2 mb-2">
                         <Input
                           placeholder="Cheque number"
@@ -734,7 +734,7 @@ export default function PurchasesPage() {
                     </>
                   ) : (
                     <>
-                      <p className="text-xs text-gray-400 mb-2">Write a new cheque from your own account.</p>
+                      <p className="text-xs text-gray-500 mb-2">Write a new cheque from your own account.</p>
                       <FormGroup>
                         <Label>Cheque number</Label>
                         <Input value={ownChequeNumber} onChange={(e) => setOwnChequeNumber(e.target.value)} />
@@ -845,7 +845,7 @@ export default function PurchasesPage() {
                     <p className="text-sm font-semibold text-gray-900">
                       {p.purchase_code} — {p.supplier_name}
                     </p>
-                    <p className="text-xs text-gray-400">{formatDate(p.purchase_date)}</p>
+                    <p className="text-xs text-gray-500">{formatDate(p.purchase_date)}</p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     {statusBadge(p.payment_status)}
@@ -854,13 +854,13 @@ export default function PurchasesPage() {
                     </Button>
                     {isWithinEditWindow(p.purchase_date) && (
                       <>
-                        <button onClick={() => openEdit(p)} className="text-gray-400 hover:text-black text-xs underline">
+                        <button onClick={() => openEdit(p)} className="text-gray-500 hover:text-black text-xs underline">
                           Edit
                         </button>
                         <button
                           onClick={() => handleDeletePurchase(p)}
                           disabled={deletingId === p.id}
-                          className="text-gray-400 hover:text-red-500 text-xs underline"
+                          className="text-gray-500 hover:text-red-500 text-xs underline"
                         >
                           {deletingId === p.id ? "Deleting..." : "Delete"}
                         </button>
@@ -1019,13 +1019,13 @@ export default function PurchasesPage() {
                         <Td>
                           {isWithinEditWindow(p.purchase_date) && (
                             <div className="flex items-center gap-2">
-                              <button onClick={() => openEdit(p)} className="text-gray-400 hover:text-black text-xs underline">
+                              <button onClick={() => openEdit(p)} className="text-gray-500 hover:text-black text-xs underline">
                                 Edit
                               </button>
                               <button
                                 onClick={() => handleDeletePurchase(p)}
                                 disabled={deletingId === p.id}
-                                className="text-gray-400 hover:text-red-500 text-xs underline"
+                                className="text-gray-500 hover:text-red-500 text-xs underline"
                               >
                                 {deletingId === p.id ? "Deleting..." : "Delete"}
                               </button>
@@ -1045,7 +1045,7 @@ export default function PurchasesPage() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="font-medium text-gray-900">{p.purchase_code}</p>
-                        <p className="text-xs text-gray-400 mt-0.5">
+                        <p className="text-xs text-gray-500 mt-0.5">
                           {p.supplier_name} · {formatDate(p.purchase_date)}
                         </p>
                       </div>
@@ -1059,13 +1059,13 @@ export default function PurchasesPage() {
 
                     {isWithinEditWindow(p.purchase_date) && (
                       <div className="flex items-center gap-3 mt-2.5 pt-2.5 border-t border-gray-100">
-                        <button onClick={() => openEdit(p)} className="text-gray-400 hover:text-black text-xs underline">
+                        <button onClick={() => openEdit(p)} className="text-gray-500 hover:text-black text-xs underline">
                           Edit
                         </button>
                         <button
                           onClick={() => handleDeletePurchase(p)}
                           disabled={deletingId === p.id}
-                          className="text-gray-400 hover:text-red-500 text-xs underline"
+                          className="text-gray-500 hover:text-red-500 text-xs underline"
                         >
                           {deletingId === p.id ? "Deleting..." : "Delete"}
                         </button>
@@ -1113,7 +1113,7 @@ export default function PurchasesPage() {
                       }`}
                     >
                       Not yet in inventory
-                      <div className={`text-xs mt-0.5 ${returnScenario === "pending_line" ? "text-gray-300" : "text-gray-400"}`}>
+                      <div className={`text-xs mt-0.5 ${returnScenario === "pending_line" ? "text-gray-300" : "text-gray-500"}`}>
                         Still a pending purchase line
                       </div>
                     </button>
@@ -1129,7 +1129,7 @@ export default function PurchasesPage() {
                       }`}
                     >
                       Already in inventory
-                      <div className={`text-xs mt-0.5 ${returnScenario === "in_stock" ? "text-gray-300" : "text-gray-400"}`}>
+                      <div className={`text-xs mt-0.5 ${returnScenario === "in_stock" ? "text-gray-300" : "text-gray-500"}`}>
                         Pick specific unsold units
                       </div>
                     </button>
@@ -1176,7 +1176,7 @@ export default function PurchasesPage() {
                   <FormGroup>
                     <Label>Select the specific units being returned</Label>
                     {availableUnits.length === 0 ? (
-                      <p className="text-xs text-gray-400">No available (unsold) units found for this purchase.</p>
+                      <p className="text-xs text-gray-500">No available (unsold) units found for this purchase.</p>
                     ) : (
                       <div className="border border-gray-200 rounded-xl divide-y divide-gray-100 max-h-64 overflow-y-auto">
                         {availableUnits.map((u) => (
@@ -1221,7 +1221,7 @@ export default function PurchasesPage() {
                           }`}
                         >
                           Cash refund now
-                          <div className={`text-xs mt-0.5 ${returnResolution === "cash_refund" ? "text-gray-300" : "text-gray-400"}`}>
+                          <div className={`text-xs mt-0.5 ${returnResolution === "cash_refund" ? "text-gray-300" : "text-gray-500"}`}>
                             Supplier pays back immediately — nothing carried forward
                           </div>
                         </button>
@@ -1233,7 +1233,7 @@ export default function PurchasesPage() {
                           }`}
                         >
                           Supplier credit
-                          <div className={`text-xs mt-0.5 ${returnResolution === "supplier_credit" ? "text-gray-300" : "text-gray-400"}`}>
+                          <div className={`text-xs mt-0.5 ${returnResolution === "supplier_credit" ? "text-gray-300" : "text-gray-500"}`}>
                             Reduces what you owe on their next purchase
                           </div>
                         </button>
@@ -1317,7 +1317,7 @@ export default function PurchasesPage() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="font-medium text-gray-900">{r.purchase_code}</p>
-                        <p className="text-xs text-gray-400 mt-0.5">
+                        <p className="text-xs text-gray-500 mt-0.5">
                           {r.supplier_name} · {formatDateTime(r.created_at)}
                         </p>
                       </div>
@@ -1325,7 +1325,7 @@ export default function PurchasesPage() {
                     </div>
                     <div className="mt-2.5 pt-2.5 border-t border-gray-100 text-sm">
                       <p className="text-gray-900">{r.reason}</p>
-                      <p className="text-xs text-gray-400 mt-0.5 capitalize">{r.resolution?.replace(/_/g, " ")}</p>
+                      <p className="text-xs text-gray-500 mt-0.5 capitalize">{r.resolution?.replace(/_/g, " ")}</p>
                     </div>
                   </RowCard>
                 ))}
@@ -1383,7 +1383,7 @@ export default function PurchasesPage() {
                   </div>
                 </>
               ) : (
-                <p className="text-xs text-gray-400 mb-3 border border-gray-200 rounded-lg px-3 py-2">
+                <p className="text-xs text-gray-500 mb-3 border border-gray-200 rounded-lg px-3 py-2">
                   This purchase is already fulfilled — its lines are frozen since real inventory units were created from them. Only supplier
                   and description can still be changed here.
                 </p>

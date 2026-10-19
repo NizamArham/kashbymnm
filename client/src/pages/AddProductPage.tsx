@@ -832,14 +832,14 @@ export default function AddProductPage() {
                     <table className="w-full text-sm">
                       <thead>
                         <tr>
-                          <th className="text-left px-3 py-2 text-xs font-medium text-gray-400 border-b border-gray-100">Color</th>
-                          <th className="text-left px-3 py-2 text-xs font-medium text-gray-400 border-b border-gray-100">Size</th>
+                          <th className="text-left px-3 py-2 text-xs font-medium text-gray-500 border-b border-gray-100">Color</th>
+                          <th className="text-left px-3 py-2 text-xs font-medium text-gray-500 border-b border-gray-100">Size</th>
                           {mode === "existing" && (
-                            <th className="text-left px-3 py-2 text-xs font-medium text-gray-400 border-b border-gray-100">Currently in stock</th>
+                            <th className="text-left px-3 py-2 text-xs font-medium text-gray-500 border-b border-gray-100">Currently in stock</th>
                           )}
-                          <th className="text-left px-3 py-2 text-xs font-medium text-gray-400 border-b border-gray-100">Quantity to add</th>
+                          <th className="text-left px-3 py-2 text-xs font-medium text-gray-500 border-b border-gray-100">Quantity to add</th>
                           {mode === "existing" && (
-                            <th className="text-left px-3 py-2 text-xs font-medium text-gray-400 border-b border-gray-100">New total</th>
+                            <th className="text-left px-3 py-2 text-xs font-medium text-gray-500 border-b border-gray-100">New total</th>
                           )}
                         </tr>
                       </thead>
@@ -880,7 +880,7 @@ export default function AddProductPage() {
                       </tbody>
                     </table>
                   </div>
-                  <p className="text-xs text-gray-400 mt-2">Barcodes are generated automatically when you save.</p>
+                  <p className="text-xs text-gray-500 mt-2">Barcodes are generated automatically when you save.</p>
                 </div>
               )}
             </Card>

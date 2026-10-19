@@ -48,7 +48,7 @@ export default function OptionsModal({
               </div>
               <div className="min-w-0">
                 <p className="text-sm font-medium text-gray-900">{opt.title}</p>
-                <p className="text-xs text-gray-400">{opt.subtitle}</p>
+                <p className="text-xs text-gray-500">{opt.subtitle}</p>
               </div>
             </button>
           ))}

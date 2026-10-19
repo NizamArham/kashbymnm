@@ -413,7 +413,7 @@ export default function OnlineExchangeModal({
       subtitle={`${sale.customer_name ?? "Customer"} — the old items come back with the new order, or by another service`}
       footer={
         <>
-          <span className={`mr-auto min-w-0 basis-full text-xs sm:basis-0 sm:flex-1 ${error ? "text-red-500" : "text-gray-400"}`}>{hint}</span>
+          <span className={`mr-auto min-w-0 basis-full text-xs sm:basis-0 sm:flex-1 ${error ? "text-red-500" : "text-gray-500"}`}>{hint}</span>
           <Button
             onClick={() => {
               clearExchangeDraft();
@@ -446,7 +446,7 @@ export default function OnlineExchangeModal({
         </>
       }
     >
-      {!eligible && !error && <p className="px-6 py-5 text-sm text-gray-400">Loading…</p>}
+      {!eligible && !error && <p className="px-6 py-5 text-sm text-gray-500">Loading…</p>}
       {!eligible && error && <p className="px-6 py-5 text-sm text-red-500">{error}</p>}
       {eligible && eligible.length === 0 && (
         <p className="px-6 py-5 text-sm text-gray-500">
@@ -480,7 +480,7 @@ export default function OnlineExchangeModal({
                   <span className="min-w-0 flex-1 truncate text-gray-900">
                     {i.product_title ?? "Item"}
                     {variant(i.size, i.color) && <span className="text-gray-500"> · {variant(i.size, i.color)}</span>}
-                    <span className="ml-2 text-xs text-gray-400">{i.invoice}</span>
+                    <span className="ml-2 text-xs text-gray-500">{i.invoice}</span>
                     {i.allow_returns === 0 && <span className="ml-2 text-xs text-amber-700">Final Sale</span>}
                   </span>
                   <span className="tabular-nums text-gray-600">{money(i.unit_price)}</span>
@@ -539,7 +539,7 @@ export default function OnlineExchangeModal({
                       )}
                     </div>
                     {pinned && (
-                      <p className="mt-1 text-xs text-gray-400">
+                      <p className="mt-1 text-xs text-gray-500">
                         This piece: {pinned.sku}
                         {pinned.barcode ? ` · ${pinned.barcode}` : ""} ·{" "}
                         <button type="button" onClick={() => updateLine(i, { unitId: undefined })} className="underline hover:text-gray-700">
@@ -565,7 +565,7 @@ export default function OnlineExchangeModal({
               <Dropdown value={partnerCode} onChange={setPartnerCode} options={couriers.map((c) => ({ value: c.code, label: c.name }))} />
               <div className="relative">
                 <Input inputMode="decimal" value={weight} onChange={(e) => setWeight(cleanDecimal(e.target.value))} className="pr-9" aria-label="Parcel weight in kg" />
-                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">kg</span>
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500">kg</span>
               </div>
               <label className="col-span-2 flex items-center gap-2 whitespace-nowrap text-sm text-gray-700 sm:col-span-1">
                 <input type="checkbox" checked={freeDelivery} onChange={(e) => setFreeDelivery(e.target.checked)} className="h-4 w-4 accent-black" />
@@ -652,7 +652,7 @@ export default function OnlineExchangeModal({
                   }`}
                 >
                   <span className="text-sm font-medium text-gray-900">{o.label}</span>
-                  <span className="text-right text-[11px] leading-tight text-gray-500">{o.hint}</span>
+                  <span className="text-right text-xs leading-tight text-gray-500">{o.hint}</span>
                 </button>
               ))}
             </div>

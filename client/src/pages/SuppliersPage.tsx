@@ -161,7 +161,7 @@ export default function SuppliersPage() {
         <EmptyState icon={Truck} title="No suppliers yet" actions={[{ label: "Add supplier", primary: true, onClick: () => setShowAddModal(true) }]} />
       ) : (
         <>
-          <p className="text-xs text-gray-400 mb-3">
+          <p className="text-xs text-gray-500 mb-3">
             {owingCount > 0
               ? `${owingCount} supplier${owingCount === 1 ? "" : "s"} awaiting payment — Rs. ${totalOwed.toLocaleString()} total`
               : "All suppliers settled"}
@@ -220,7 +220,7 @@ export default function SuppliersPage() {
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="font-medium text-gray-900 leading-snug">{s.name}</p>
-                      <p className="mt-0.5 text-xs text-gray-400">
+                      <p className="mt-0.5 text-xs text-gray-500">
                         {s.supplier_code}
                         {s.phone ? ` · ${s.phone}` : ""}
                         {s.city ? ` · ${s.city}` : ""}

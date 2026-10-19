@@ -240,7 +240,7 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
               Refund paid
             </Button>
           )}
-          {p.stage === "report_pending" && <span className="text-xs text-gray-400">{user?.role === "admin" ? "Approve it in Returns ▸ To approve" : "An admin approves it"}</span>}
+          {p.stage === "report_pending" && <span className="text-xs text-gray-500">{user?.role === "admin" ? "Approve it in Returns ▸ To approve" : "An admin approves it"}</span>}
         </>
       ),
     };
@@ -299,7 +299,7 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
             />
           )}
           {q && (
-            <p className="text-xs text-gray-400">
+            <p className="text-xs text-gray-500">
               {shownRows.length} match{shownRows.length === 1 ? "" : "es"} for "{query.trim()}" —{" "}
               <button type="button" onClick={() => setQuery("")} className="underline hover:text-gray-700">
                 clear
@@ -325,7 +325,7 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
       )}
       {shownRows.length > 0 && (
         <Card className="overflow-clip p-0">
-          <div className="hidden grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1fr)_6.5rem_minmax(0,1.6fr)] gap-3 border-b border-gray-100 bg-gray-50/70 px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-gray-400 lg:grid">
+          <div className="hidden grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1fr)_6.5rem_minmax(0,1.6fr)] gap-3 border-b border-gray-100 bg-gray-50/70 px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-gray-500 lg:grid">
             <span>Invoice</span>
             <span>What</span>
             <span>Customer</span>
@@ -343,12 +343,12 @@ export default function ReturnPickupList({ status = "open", onChanged }: { statu
                   <RefLink to={`/sales/${r.saleId}`} className="font-medium text-gray-900 underline decoration-gray-300 underline-offset-2 hover:decoration-gray-500">
                     {r.invoice}
                   </RefLink>
-                  <p className="truncate text-xs text-gray-400">{r.note}</p>
+                  <p className="truncate text-xs text-gray-500">{r.note}</p>
                 </div>
                 <span className="text-gray-700">{r.type}</span>
                 <span className="truncate text-gray-700">{r.customer}</span>
                 <span className="truncate text-gray-600">{r.via}</span>
-                <span className="text-xs text-gray-400">{formatDate(r.at)}</span>
+                <span className="text-xs text-gray-500">{formatDate(r.at)}</span>
                 {/* The status on its own line, the buttons together on the next. */}
                 <div className="col-span-2 lg:col-span-1">
                   <p className="flex items-center justify-between gap-2 text-xs text-gray-500">

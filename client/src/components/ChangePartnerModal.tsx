@@ -109,7 +109,7 @@ export default function ChangePartnerModal({
               >
                 <span>
                   <span className="text-sm font-medium block">{p.name}</span>
-                  <span className={`text-xs ${isSelected ? "text-gray-300" : "text-gray-400"}`}>
+                  <span className={`text-xs ${isSelected ? "text-gray-300" : "text-gray-500"}`}>
                     {p.kind === "on_demand" ? "On-demand — fare typed in, or added later" : "Courier"}
                     {isCurrent ? " · current" : ""}
                   </span>
@@ -131,7 +131,7 @@ export default function ChangePartnerModal({
           <>
             <OnDemandFareInput value={fare} onChange={(patch) => setFare({ ...fare, ...patch })} partnerName={target.name} />
             <OnDemandPaidByPicker value={fare} onChange={(patch) => setFare({ ...fare, ...patch })} />
-            <p className="text-xs text-gray-400 -mt-2 mb-3">This re-prices the delivery: the customer's charge and COD are recalculated from the fare.</p>
+            <p className="text-xs text-gray-500 -mt-2 mb-3">This re-prices the delivery: the customer's charge and COD are recalculated from the fare.</p>
           </>
         )}
 

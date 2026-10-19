@@ -167,7 +167,7 @@ export default function AddCustomerPage() {
             </h2>
             <div className="mb-4 pb-4 border-b border-gray-100">
               <p className="text-lg font-semibold text-gray-900">{name.trim() || "New customer"}</p>
-              <p className="text-xs text-gray-400 mt-1">Preview updates as you type</p>
+              <p className="text-xs text-gray-500 mt-1">Preview updates as you type</p>
             </div>
             <div className="space-y-3 text-sm">
               <div className="flex items-center gap-2">

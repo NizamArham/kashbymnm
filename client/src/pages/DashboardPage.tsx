@@ -300,7 +300,7 @@ export default function DashboardPage() {
           <p className="text-2xl font-semibold text-gray-900 tabular-nums">
             Rs. {todayTotal.toLocaleString()}
           </p>
-          <p className="text-xs text-gray-400 mt-1">
+          <p className="text-xs text-gray-500 mt-1">
             {todaySales.length === 0
               ? "No sales yet today"
               : `${todaySales.length} sale${todaySales.length === 1 ? "" : "s"} today`}
@@ -313,7 +313,7 @@ export default function DashboardPage() {
           <p className="text-2xl font-semibold text-gray-900 tabular-nums">
             Rs. {(cashTotal ?? 0).toLocaleString()}
           </p>
-          <p className="text-xs text-gray-400 mt-1">Physical currency on hand</p>
+          <p className="text-xs text-gray-500 mt-1">Physical currency on hand</p>
         </Card>
 
         <Card>
@@ -321,7 +321,7 @@ export default function DashboardPage() {
           <p className="text-2xl font-semibold text-gray-900 tabular-nums">
             Rs. {(bankTotal ?? 0).toLocaleString()}
           </p>
-          <p className="text-xs text-gray-400 mt-1">Including cheques</p>
+          <p className="text-xs text-gray-500 mt-1">Including cheques</p>
         </Card>
       </div>
 
@@ -340,7 +340,7 @@ export default function DashboardPage() {
           {loading ? (
             <Loader size={34} label="" className="py-8" />
           ) : needsAttentionCount === 0 ? (
-            <p className="text-sm text-gray-400">Nothing pending. All clear.</p>
+            <p className="text-sm text-gray-500">Nothing pending. All clear.</p>
           ) : (
             <div className="divide-y divide-gray-100">
               {approvalsWaiting > 0 && (
@@ -454,12 +454,12 @@ export default function DashboardPage() {
           {loading ? (
             <Loader size={34} label="" className="py-8" />
           ) : !hasCheques ? (
-            <p className="text-sm text-gray-400">No cheques due today or tomorrow.</p>
+            <p className="text-sm text-gray-500">No cheques due today or tomorrow.</p>
           ) : (
             <div className="space-y-3">
               {chequesToDeposit.length > 0 && (
                 <div>
-                  <p className="text-xs uppercase tracking-wide text-gray-400 font-medium mb-1.5">To deposit</p>
+                  <p className="text-xs uppercase tracking-wide text-gray-500 font-medium mb-1.5">To deposit</p>
                   <div className="space-y-1.5">
                     {chequesToDeposit.slice(0, 3).map((c) => (
                       <div key={`d-${c.id}`} className="flex items-baseline justify-between gap-3 text-sm">
@@ -474,7 +474,7 @@ export default function DashboardPage() {
                       </div>
                     ))}
                     {chequesToDeposit.length > 3 && (
-                      <p className="text-xs text-gray-400">+{chequesToDeposit.length - 3} more</p>
+                      <p className="text-xs text-gray-500">+{chequesToDeposit.length - 3} more</p>
                     )}
                   </div>
                 </div>
@@ -482,7 +482,7 @@ export default function DashboardPage() {
 
               {chequesToPay.length > 0 && (
                 <div>
-                  <p className="text-xs uppercase tracking-wide text-gray-400 font-medium mb-1.5">To pay</p>
+                  <p className="text-xs uppercase tracking-wide text-gray-500 font-medium mb-1.5">To pay</p>
                   <div className="space-y-1.5">
                     {chequesToPay.slice(0, 3).map((c) => (
                       <div key={`p-${c.id}`} className="flex items-baseline justify-between gap-3 text-sm">
@@ -497,7 +497,7 @@ export default function DashboardPage() {
                       </div>
                     ))}
                     {chequesToPay.length > 3 && (
-                      <p className="text-xs text-gray-400">+{chequesToPay.length - 3} more</p>
+                      <p className="text-xs text-gray-500">+{chequesToPay.length - 3} more</p>
                     )}
                   </div>
                 </div>
@@ -553,7 +553,7 @@ export default function DashboardPage() {
                   </div>
                   <div className="min-w-0 pt-1">
                     <p className="text-sm text-gray-800">{ev.title}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">{timeAgo(ev.date)}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">{timeAgo(ev.date)}</p>
                   </div>
                 </div>
               );

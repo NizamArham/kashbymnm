@@ -635,7 +635,7 @@ export default function FindPage() {
               <Icon size={19} className="text-gray-700" />
             </span>
             <div className="min-w-0">
-              <p className="text-[11px] font-medium uppercase tracking-wider text-gray-400">{meta.label}</p>
+              <p className="text-xs font-medium uppercase tracking-wider text-gray-500">{meta.label}</p>
               <h2 className="break-words text-xl font-semibold leading-tight text-gray-900">{view.title}</h2>
               {view.chips && <div className="mt-2 flex flex-wrap items-center gap-1.5">{view.chips}</div>}
             </div>
@@ -659,9 +659,9 @@ export default function FindPage() {
             <div className={`grid gap-px ${view.stats.length >= 3 ? "grid-cols-1 sm:grid-cols-3" : view.stats.length === 2 ? "grid-cols-2" : "grid-cols-1"}`}>
               {view.stats.map((st) => (
                 <div key={st.label} className="bg-gray-50 px-4 py-3">
-                  <p className="text-xs text-gray-400">{st.label}</p>
+                  <p className="text-xs text-gray-500">{st.label}</p>
                   <p className={`mt-0.5 text-lg font-semibold tabular-nums ${TONE_CLASS[st.tone ?? "default"]}`}>{st.value}</p>
-                  {st.hint && <p className="mt-0.5 text-xs text-gray-400">{st.hint}</p>}
+                  {st.hint && <p className="mt-0.5 text-xs text-gray-500">{st.hint}</p>}
                 </div>
               ))}
             </div>
@@ -670,7 +670,7 @@ export default function FindPage() {
                 <div className="h-1.5 overflow-hidden rounded-full bg-gray-200">
                   <div className="h-full rounded-full bg-gray-900" style={{ width: `${Math.round(view.bar.used * 100)}%` }} />
                 </div>
-                <p className="mt-1 text-xs text-gray-400">{view.bar.label}</p>
+                <p className="mt-1 text-xs text-gray-500">{view.bar.label}</p>
               </div>
             )}
           </div>
@@ -680,7 +680,7 @@ export default function FindPage() {
           <dl className="grid grid-cols-1 gap-x-10 gap-y-3.5 px-6 py-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
             {view.details.map(([label, value]) => (
               <div key={label} className="min-w-0">
-                <dt className="text-xs text-gray-400">{label}</dt>
+                <dt className="text-xs text-gray-500">{label}</dt>
                 <dd className="mt-0.5 break-words text-sm font-medium text-gray-900">{value}</dd>
               </div>
             ))}
@@ -689,7 +689,7 @@ export default function FindPage() {
 
         {view.items && view.items.length > 0 && (
           <div className="border-t border-gray-100 px-6 py-4">
-            <p className="mb-2 text-xs font-medium text-gray-400">
+            <p className="mb-2 text-xs font-medium text-gray-500">
               {view.items.length} item{view.items.length === 1 ? "" : "s"}
             </p>
             <ul className="divide-y divide-gray-50">
@@ -697,13 +697,13 @@ export default function FindPage() {
                 <li key={i} className="flex items-baseline justify-between gap-3 py-1.5 text-sm">
                   <span className="min-w-0 truncate text-gray-900">
                     {it.title}
-                    {it.sub && <span className="ml-2 text-xs text-gray-400">{it.sub}</span>}
+                    {it.sub && <span className="ml-2 text-xs text-gray-500">{it.sub}</span>}
                   </span>
                   <span className="flex-shrink-0 tabular-nums text-gray-600">{money(it.price)}</span>
                 </li>
               ))}
             </ul>
-            {view.items.length > 6 && <p className="pt-1 text-xs text-gray-400">+ {view.items.length - 6} more on the sale page</p>}
+            {view.items.length > 6 && <p className="pt-1 text-xs text-gray-500">+ {view.items.length - 6} more on the sale page</p>}
           </div>
         )}
         {!(view.items && view.items.length > 0) && view.details.length > 0 && <div className="h-1" />}
@@ -747,7 +747,7 @@ export default function FindPage() {
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block text-sm text-gray-900 truncate">{s.title}</span>
-                        <span className="block text-xs text-gray-400 truncate">
+                        <span className="block text-xs text-gray-500 truncate">
                           {meta.label} · {s.subtitle || "—"}
                         </span>
                       </span>
@@ -768,10 +768,10 @@ export default function FindPage() {
             Find
           </Button>
         </form>
-        <p className="mt-2.5 text-xs text-gray-400">
-          <kbd className="rounded border border-gray-200 bg-gray-50 px-1 text-[10px] text-gray-500">↑</kbd> <kbd className="rounded border border-gray-200 bg-gray-50 px-1 text-[10px] text-gray-500">↓</kbd> recent codes ·{" "}
-          <kbd className="rounded border border-gray-200 bg-gray-50 px-1 text-[10px] text-gray-500">Esc</kbd> clear ·{" "}
-          <kbd className="rounded border border-gray-200 bg-gray-50 px-1 text-[10px] text-gray-500">/</kbd> jump here
+        <p className="mt-2.5 text-xs text-gray-500">
+          <kbd className="rounded border border-gray-200 bg-gray-50 px-1 text-xs text-gray-500">↑</kbd> <kbd className="rounded border border-gray-200 bg-gray-50 px-1 text-xs text-gray-500">↓</kbd> recent codes ·{" "}
+          <kbd className="rounded border border-gray-200 bg-gray-50 px-1 text-xs text-gray-500">Esc</kbd> clear ·{" "}
+          <kbd className="rounded border border-gray-200 bg-gray-50 px-1 text-xs text-gray-500">/</kbd> jump here
         </p>
 
         {history.length > 0 && (
@@ -818,7 +818,7 @@ export default function FindPage() {
 
       {showHints && (
         <div>
-          <p className="mb-2.5 text-xs font-medium text-gray-400">What you can look up</p>
+          <p className="mb-2.5 text-xs font-medium text-gray-500">What you can look up</p>
           <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3 xl:grid-cols-5">
             {(isAdmin ? LOOKUP_HINTS : CASHIER_LOOKUP_HINTS).map((h) => {
               const HIcon = h.icon;
@@ -829,7 +829,7 @@ export default function FindPage() {
                   </span>
                   <span className="min-w-0">
                     <span className="block text-sm font-medium text-gray-900">{h.label}</span>
-                    <span className="block truncate text-xs text-gray-400">{h.example}</span>
+                    <span className="block truncate text-xs text-gray-500">{h.example}</span>
                   </span>
                 </div>
               );

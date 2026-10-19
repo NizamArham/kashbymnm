@@ -112,7 +112,7 @@ function CodCell({ delivery, awaitingFare }: { delivery: Delivery; awaitingFare:
     return (
       <span className="font-semibold text-gray-900 whitespace-nowrap">
         {money(delivery.cod_amount)}
-        {awaitingFare && <span className="block text-[11px] font-normal text-gray-400">+ fare</span>}
+        {awaitingFare && <span className="block text-xs font-normal text-gray-500">+ fare</span>}
       </span>
     );
   }
@@ -125,7 +125,7 @@ function CodCell({ delivery, awaitingFare }: { delivery: Delivery; awaitingFare:
 function CourierStatusLine({ delivery }: { delivery: Delivery }) {
   if (!delivery.courier_status) return null;
   return (
-    <div className="text-[11px] text-gray-400 mt-0.5" title="Latest status reported by the courier">
+    <div className="text-xs text-gray-500 mt-0.5" title="Latest status reported by the courier">
       Courier: {delivery.courier_status}
       {delivery.courier_status_at ? ` · ${formatDateTime(delivery.courier_status_at)}` : ""}
     </div>
@@ -162,7 +162,7 @@ function TimelineStep({ label, date, reached, isLast }: { label: string; date: s
         {!isLast && <div className={`w-px flex-1 min-h-[28px] ${reached ? "bg-black" : "bg-gray-200"}`} />}
       </div>
       <div className={isLast ? "" : "pb-5"}>
-        <p className={`text-sm font-medium ${reached ? "text-gray-900" : "text-gray-400"}`}>{label}</p>
+        <p className={`text-sm font-medium ${reached ? "text-gray-900" : "text-gray-500"}`}>{label}</p>
         <p className="text-xs text-gray-500 mt-0.5">{date ? formatDate(date) : "Not yet"}</p>
       </div>
     </div>
@@ -697,7 +697,7 @@ export default function DeliveriesPage() {
         </div>
       );
     } else if (d.delivery_status === "delivered") {
-      content = <span className="text-xs text-gray-400">{formatDate(d.delivery_date)}</span>;
+      content = <span className="text-xs text-gray-500">{formatDate(d.delivery_date)}</span>;
     } else {
       content = null;
     }

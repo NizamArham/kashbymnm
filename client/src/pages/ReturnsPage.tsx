@@ -494,7 +494,7 @@ function RequestReturnTab({ onRequested, waiting, onGoTo }: { onRequested: () =>
                 {customerResults.map((c) => (
                   <button key={c.id} type="button" onClick={() => pickCustomer(c)} className="flex w-full items-center justify-between gap-3 px-3.5 py-2 text-left text-sm hover:bg-gray-50">
                     <span className="min-w-0 truncate font-medium text-gray-900">{c.name}</span>
-                    <span className="flex-shrink-0 text-xs text-gray-400">{c.phone ?? c.customer_code}</span>
+                    <span className="flex-shrink-0 text-xs text-gray-500">{c.phone ?? c.customer_code}</span>
                   </button>
                 ))}
               </div>
@@ -505,15 +505,15 @@ function RequestReturnTab({ onRequested, waiting, onGoTo }: { onRequested: () =>
                   {pickedCustomer.name}'s recent bills — pick the one they're returning from
                 </p>
                 {customerBills === null ? (
-                  <p className="text-xs text-gray-400">Loading…</p>
+                  <p className="text-xs text-gray-500">Loading…</p>
                 ) : customerBills.length === 0 ? (
-                  <p className="text-xs text-gray-400">No bills on record for this customer.</p>
+                  <p className="text-xs text-gray-500">No bills on record for this customer.</p>
                 ) : (
                   <div className="divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200">
                     {customerBills.map((b) => (
                       <button key={b.id} type="button" onClick={() => openBill(b.invoice)} className="flex w-full items-center justify-between gap-3 px-3.5 py-2 text-left text-sm hover:bg-gray-50">
                         <span className="font-medium text-gray-900">{b.invoice}</span>
-                        <span className="text-xs text-gray-400">{formatDate(b.date)}</span>
+                        <span className="text-xs text-gray-500">{formatDate(b.date)}</span>
                         <span className="tabular-nums text-gray-700">Rs. {b.total.toLocaleString()}</span>
                       </button>
                     ))}
@@ -532,7 +532,7 @@ function RequestReturnTab({ onRequested, waiting, onGoTo }: { onRequested: () =>
             {matches.map((m) => (
               <button key={m.id} type="button" onClick={() => openBill(m.invoice)} className="flex w-full items-center justify-between gap-3 px-3.5 py-2 text-left text-sm hover:bg-gray-50">
                 <span className="font-medium text-gray-900">{m.invoice}</span>
-                <span className="text-xs text-gray-400">{formatDate(m.date)}</span>
+                <span className="text-xs text-gray-500">{formatDate(m.date)}</span>
                 <span className="min-w-0 flex-1 truncate text-right text-gray-600">{m.customer_name ?? "Walk-in"}</span>
                 <span className="tabular-nums text-gray-700">Rs. {m.total.toLocaleString()}</span>
               </button>
@@ -622,11 +622,11 @@ function RequestReturnTab({ onRequested, waiting, onGoTo }: { onRequested: () =>
                             <span className="text-gray-400"> · {[item.color, item.size].filter(Boolean).join(" / ")}</span>
                           )}
                         </p>
-                        <p className="text-xs text-gray-400">
+                        <p className="text-xs text-gray-500">
                           {item.sku} · Rs. {item.unit_price.toLocaleString()}
                         </p>
                       </div>
-                      {alreadyReturned && <span className="text-xs text-gray-400 flex-shrink-0">Already returned</span>}
+                      {alreadyReturned && <span className="text-xs text-gray-500 flex-shrink-0">Already returned</span>}
                     </label>
 
                     {checked && !alreadyReturned && (
@@ -772,7 +772,7 @@ function RequestReturnTab({ onRequested, waiting, onGoTo }: { onRequested: () =>
               ? `Record ${selectedItemIds.size > 1 ? `${selectedItemIds.size} returns` : "return"}`
               : `Send ${selectedItemIds.size > 1 ? `${selectedItemIds.size} return requests` : "return request"} for approval`}
           </Button>
-          {isAdmin && selectedItemIds.size > 0 && <p className="mt-1.5 text-xs text-gray-400">{AUTO_APPROVED} — stock and money move straight away.</p>}
+          {isAdmin && selectedItemIds.size > 0 && <p className="mt-1.5 text-xs text-gray-500">{AUTO_APPROVED} — stock and money move straight away.</p>}
           </>
           )}
         </Card>
@@ -995,7 +995,7 @@ function AllReturnsTab({ onDecided }: { onDecided: () => void }) {
 
       {error && <ErrorText>{error}</ErrorText>}
       {!loading && (
-        <p className="text-xs text-gray-400 mb-3">
+        <p className="text-xs text-gray-500 mb-3">
           {filtered.length} request(s){q ? ` matching "${query.trim()}" — all dates` : ""} — click a row to see full details
         </p>
       )}
@@ -1054,7 +1054,7 @@ function AllReturnsTab({ onDecided }: { onDecided: () => void }) {
                               e.stopPropagation();
                               copySku(`sku-${r.id}`, r.sku, e);
                             }}
-                            className="text-xs text-gray-400 inline-block cursor-pointer hover:bg-gray-100 rounded transition-colors select-none"
+                            className="text-xs text-gray-500 inline-block cursor-pointer hover:bg-gray-100 rounded transition-colors select-none"
                             title="Click to copy SKU"
                           >
                             {r.sku}
@@ -1073,7 +1073,7 @@ function AllReturnsTab({ onDecided }: { onDecided: () => void }) {
                         <Td>
                           {r.decided_by_name ?? "—"}
                           {r.auto_approved === 1 && (
-                            <span className="block text-xs text-gray-400" title={AUTO_APPROVED}>
+                            <span className="block text-xs text-gray-500" title={AUTO_APPROVED}>
                               Auto-approved
                             </span>
                           )}
@@ -1112,7 +1112,7 @@ function AllReturnsTab({ onDecided }: { onDecided: () => void }) {
                       <p className="font-medium text-gray-900 leading-snug">
                         {r.product_id ? <RefLink to={`/products/${r.product_id}`}>{r.product_title}</RefLink> : r.product_title}
                       </p>
-                      <p className="text-xs text-gray-400 mt-0.5">{r.sku}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">{r.sku}</p>
                       <p className="text-xs text-gray-500 mt-1">
                         #{r.id} · {shortDate(r.requested_at)} ·{" "}
                         {r.customer_name ?? (r.deleted_customer_snapshot ? `[Deleted: ${r.deleted_customer_snapshot}]` : "Walk-in")}

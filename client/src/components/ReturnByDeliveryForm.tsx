@@ -116,8 +116,8 @@ export default function ReturnByDeliveryForm({ sale, onBooked }: { sale: Sale; o
               </button>
             ))}
           </div>
-          {noCustomer && <p className="mt-1 text-xs text-gray-400">This sale has no customer attached, so store credit isn't available.</p>}
-          <p className="mt-1 text-xs text-gray-400">It's settled after the parcel has been inspected.</p>
+          {noCustomer && <p className="mt-1 text-xs text-gray-500">This sale has no customer attached, so store credit isn't available.</p>}
+          <p className="mt-1 text-xs text-gray-500">It's settled after the parcel has been inspected.</p>
         </FormGroup>
 
         <FormGroup>
@@ -126,7 +126,7 @@ export default function ReturnByDeliveryForm({ sale, onBooked }: { sale: Sale; o
         </FormGroup>
       </div>
 
-      <p className="text-xs text-gray-400">
+      <p className="text-xs text-gray-500">
         Approving only means "yes, send it back" — we don't know what state it will come back in. The customer can use any delivery service; the delivery charge and who pays it are decided after it
         arrives and has been checked.
         {chosen.length > 0 && ` The items come to ${money(itemsTotal)}.`}
@@ -146,7 +146,7 @@ export default function ReturnByDeliveryForm({ sale, onBooked }: { sale: Sale; o
       <Button variant="primary" onClick={book} disabled={busy || chosen.length === 0} className="mt-4">
         {busy ? "Saving…" : isAdmin ? "Record the return" : "Send for approval"}
       </Button>
-      {chosen.length > 0 && <p className="mt-1.5 text-xs text-gray-400">{isAdmin ? `${AUTO_APPROVED}.` : "An admin approves it first; the customer is told to send it after that."}</p>}
+      {chosen.length > 0 && <p className="mt-1.5 text-xs text-gray-500">{isAdmin ? `${AUTO_APPROVED}.` : "An admin approves it first; the customer is told to send it after that."}</p>}
     </div>
   );
 }

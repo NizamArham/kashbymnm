@@ -563,7 +563,7 @@ export default function ChequesPage() {
                     <Td>
                       <Badge label={c.status} tone={statusTone(c.status)} />
                       {c.status === "bounced" && c.bounced_reason && (
-                        <div className="text-xs text-gray-400 mt-0.5">{c.bounced_reason}</div>
+                        <div className="text-xs text-gray-500 mt-0.5">{c.bounced_reason}</div>
                       )}
                     </Td>
                     <Td className="text-right">
@@ -639,13 +639,13 @@ export default function ChequesPage() {
                   <Td>
                     {c.customer_name} ({c.customer_code})
                     {c.transferred_to_supplier_name && (
-                      <div className="text-xs text-gray-400 mt-0.5">→ given to {c.transferred_to_supplier_name}</div>
+                      <div className="text-xs text-gray-500 mt-0.5">→ given to {c.transferred_to_supplier_name}</div>
                     )}
                   </Td>
                   <Td>
                     <Badge label={c.status.replace(/_/g, " ")} tone={statusTone(c.status)} />
                     {c.status === "bounced" && c.bounced_reason && (
-                      <div className="text-xs text-gray-400 mt-0.5">{c.bounced_reason}</div>
+                      <div className="text-xs text-gray-500 mt-0.5">{c.bounced_reason}</div>
                     )}
                   </Td>
                   <Td className="text-right">

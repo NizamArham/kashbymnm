@@ -177,7 +177,7 @@ export default function CourierPaymentRecordsPage() {
                     setStartDate(monthAgoIso());
                     setEndDate(todayIso());
                   }}
-                  className="text-xs text-gray-400 hover:text-gray-700 underline"
+                  className="text-xs text-gray-500 hover:text-gray-700 underline"
                 >
                   Past month
                 </button>
@@ -188,7 +188,7 @@ export default function CourierPaymentRecordsPage() {
                     setStartDate(null);
                     setEndDate(null);
                   }}
-                  className="text-xs text-gray-400 hover:text-gray-700 underline"
+                  className="text-xs text-gray-500 hover:text-gray-700 underline"
                 >
                   Show everything
                 </button>
@@ -213,7 +213,7 @@ export default function CourierPaymentRecordsPage() {
         </div>
 
         {!loaded ? (
-          <p className="p-5 text-sm text-gray-400">Loading…</p>
+          <p className="p-5 text-sm text-gray-500">Loading…</p>
         ) : sorted.length === 0 ? (
           <EmptyState
             bare
@@ -253,7 +253,7 @@ export default function CourierPaymentRecordsPage() {
                   </Td>
                   <Td className="max-w-sm">
                     <span className="block text-gray-900">{r.title}</span>
-                    {r.detail && <span className="block text-xs text-gray-400">{r.detail}</span>}
+                    {r.detail && <span className="block text-xs text-gray-500">{r.detail}</span>}
                   </Td>
                   {kind !== "correction" && (
                     <Td className="whitespace-nowrap text-gray-600">{r.kind === "settlement" ? r.receivedAs ?? <span className="text-gray-300">Not recorded</span> : <span className="text-gray-300">—</span>}</Td>

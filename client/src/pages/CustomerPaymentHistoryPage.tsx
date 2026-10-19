@@ -113,7 +113,7 @@ function TransactionId({ code }: { code: string }) {
           // Clipboard blocked — the ID is still on screen to copy by hand.
         }
       }}
-      className="inline-flex items-center gap-1 text-[11px] font-mono text-gray-500 hover:text-gray-800 mt-0.5"
+      className="inline-flex items-center gap-1 text-xs font-mono text-gray-500 hover:text-gray-800 mt-0.5"
     >
       {code}
       {copied ? <Check size={12} className="text-gray-900" /> : <Copy size={12} className="text-gray-300" />}
@@ -285,7 +285,7 @@ export default function CustomerPaymentHistoryPage({ customerId }: { customerId?
           setStartDate(ninetyDaysAgoISO());
           setEndDate(toISODate(new Date()));
         }}
-        className="text-xs text-gray-400 hover:text-gray-700 underline"
+        className="text-xs text-gray-500 hover:text-gray-700 underline"
       >
         Reset to last 90 days
       </button>
@@ -294,7 +294,7 @@ export default function CustomerPaymentHistoryPage({ customerId }: { customerId?
           setStartDate(null);
           setEndDate(null);
         }}
-        className="text-xs text-gray-400 hover:text-gray-700 underline"
+        className="text-xs text-gray-500 hover:text-gray-700 underline"
       >
         Show everything
       </button>
@@ -396,11 +396,11 @@ export default function CustomerPaymentHistoryPage({ customerId }: { customerId?
         <Card className="mb-4">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-0 sm:divide-x sm:divide-gray-100">
             <div className="sm:pr-6">
-              <p className="text-xs text-gray-400">Balance now</p>
+              <p className="text-xs text-gray-500">Balance now</p>
               <p className="text-2xl mt-0.5 tabular-nums text-gray-900 font-semibold">
                 {headline.text}
               </p>
-              <p className="text-xs text-gray-400 mt-0.5">
+              <p className="text-xs text-gray-500 mt-0.5">
                 {refundOwed > 0
                   ? `includes ${money(refundOwed)} refund still to be paid out`
                   : finalBalance > 0
@@ -411,11 +411,11 @@ export default function CustomerPaymentHistoryPage({ customerId }: { customerId?
               </p>
             </div>
             <div className="sm:px-6">
-              <p className="text-xs text-gray-400">Owed on invoices</p>
+              <p className="text-xs text-gray-500">Owed on invoices</p>
               <p className="text-lg font-medium text-gray-900 mt-1 tabular-nums">{money(owed)}</p>
             </div>
             <div className="sm:pl-6">
-              <p className="text-xs text-gray-400">Store credit available</p>
+              <p className="text-xs text-gray-500">Store credit available</p>
               <p className="text-lg font-medium text-gray-900 mt-1 tabular-nums">{money(credit)}</p>
             </div>
           </div>
@@ -432,7 +432,7 @@ export default function CustomerPaymentHistoryPage({ customerId }: { customerId?
             </p>
           )}
           {credit > 0 && owed > 0 && (
-            <p className="text-xs text-gray-400 mt-3 pt-3 border-t border-gray-100">
+            <p className="text-xs text-gray-500 mt-3 pt-3 border-t border-gray-100">
               Balance = {money(owed)} owed − {money(credit)} store credit. The credit comes off automatically at the next payment or invoice.
             </p>
           )}
@@ -464,7 +464,7 @@ export default function CustomerPaymentHistoryPage({ customerId }: { customerId?
         />
       ) : (
         <Card className="p-0 overflow-clip">
-          <p className="text-[11px] text-gray-400 text-right px-4 pt-3">All amounts in Rs.</p>
+          <p className="text-xs text-gray-500 text-right px-4 pt-3">All amounts in Rs.</p>
           <Table>
             <thead>
               <tr>
@@ -484,7 +484,7 @@ export default function CustomerPaymentHistoryPage({ customerId }: { customerId?
                   <tr key={i} className="align-top">
                     <Td className="whitespace-nowrap">
                       <div className="text-gray-900">{formatDate(entry.date)}</div>
-                      {time && <div className="text-[11px] text-gray-400 tabular-nums">{time}</div>}
+                      {time && <div className="text-xs text-gray-500 tabular-nums">{time}</div>}
                     </Td>
                     <Td>
                       <div className="text-gray-900">
@@ -516,7 +516,7 @@ export default function CustomerPaymentHistoryPage({ customerId }: { customerId?
                         // Goods returned, or money paid out for them — it doesn't change what they owe, so it has no + or −.
                         <>
                           <div>{num(entry.amount)}</div>
-                          <div className="text-[11px] font-normal text-gray-400">{entry.amount_label}</div>
+                          <div className="text-xs font-normal text-gray-500">{entry.amount_label}</div>
                         </>
                       ) : (
                         signedAmount(entry.effect)
@@ -528,7 +528,7 @@ export default function CustomerPaymentHistoryPage({ customerId }: { customerId?
               })}
             </tbody>
           </Table>
-          <p className="text-xs text-gray-400 px-4 py-3 border-t border-gray-100">
+          <p className="text-xs text-gray-500 px-4 py-3 border-t border-gray-100">
             <strong className="font-medium text-gray-500">+</strong> adds to what they owe (a sale) · <strong className="font-medium text-gray-500">−</strong> takes
             away from it (a payment, or store credit for a return) · a return paid back in money reads <strong className="font-medium text-gray-500">Returned</strong> (what the goods came to — the shop owes them that), then what is <strong className="font-medium text-gray-500">deducted</strong> (the delivery charge), then <strong className="font-medium text-gray-500">Paid out</strong> (with a printable receipt), and the balance is settled · <strong className="font-medium text-gray-500">Balance</strong> = what's owed after counting that credit.
           </p>

@@ -399,7 +399,7 @@ export default function WaybillGeneratorPage() {
                 { value: "package", label: "Package Details" },
               ]}
             />
-            <button onClick={resetAll} className="text-xs text-gray-400 hover:text-gray-700 underline">
+            <button onClick={resetAll} className="text-xs text-gray-500 hover:text-gray-700 underline">
               Start over
             </button>
           </div>
@@ -425,7 +425,7 @@ export default function WaybillGeneratorPage() {
                         >
                           <div className="min-w-0">
                             <p className="text-sm text-gray-900 truncate">{c.name}</p>
-                            <p className="text-xs text-gray-400">{c.phone ?? c.customer_code}</p>
+                            <p className="text-xs text-gray-500">{c.phone ?? c.customer_code}</p>
                           </div>
                         </button>
                       ))}
@@ -648,7 +648,7 @@ export default function WaybillGeneratorPage() {
                 className="bg-white border border-gray-200 rounded-xl shadow-lg"
                 style={{ position: "absolute", top: 40, left: 8, width: 280, zIndex: 30 }}
               >
-                <p className="text-xs text-gray-400 px-3 pt-2.5 pb-1">Delivery partner</p>
+                <p className="text-xs text-gray-500 px-3 pt-2.5 pb-1">Delivery partner</p>
                 {activePartners.map((p) => (
                   <button
                     key={p.code}
@@ -658,11 +658,11 @@ export default function WaybillGeneratorPage() {
                     }`}
                   >
                     <span>{p.name}</span>
-                    <span className="text-xs text-gray-400">{p.waybill_code}</span>
+                    <span className="text-xs text-gray-500">{p.waybill_code}</span>
                   </button>
                 ))}
                 <div className="border-t border-gray-100 px-3 py-2">
-                  <p className="text-xs text-gray-400 mb-1.5">Custom</p>
+                  <p className="text-xs text-gray-500 mb-1.5">Custom</p>
                   <div className="flex gap-1.5">
                     <Input
                       value={customShopCodeInput}

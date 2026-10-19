@@ -76,7 +76,7 @@ export default function DeliveryFareModal({
     >
         <OnDemandFareInput value={{ ...value, fareLater: false }} onChange={(patch) => setValue({ ...value, ...patch, fareLater: false })} partnerName={name} allowLater={false} />
         <OnDemandPaidByPicker value={{ ...value, fareLater: false }} onChange={(patch) => setValue({ ...value, ...patch, fareLater: false })} />
-        <p className="text-xs text-gray-400 -mt-2 mb-3">
+        <p className="text-xs text-gray-500 -mt-2 mb-3">
           The customer's charge and the amount to collect on delivery are recalculated from the fare
           {delivery.delivery_fee > 0 ? ` (currently Rs. ${delivery.delivery_fee.toLocaleString()})` : ""}.
         </p>

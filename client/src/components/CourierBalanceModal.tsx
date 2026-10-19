@@ -161,7 +161,7 @@ export default function CourierBalanceModal({
           <ReasonPicker value={reason} onChange={setReason} presets={REASONS} placeholder="What's different…" />
         </FormGroup>
 
-        <p className="text-xs text-gray-400 mb-3">
+        <p className="text-xs text-gray-500 mb-3">
           No money moves — this only corrects what's owed. It's saved with your reason, shown on the Courier settlements page and in the Audit Log, and can be undone.
         </p>
 

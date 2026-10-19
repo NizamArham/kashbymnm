@@ -459,7 +459,7 @@ export default function CashBookPage() {
             <div className="px-4 py-2.5 border-b border-gray-100 flex items-center justify-between gap-3 flex-wrap flex-shrink-0">
               <div>
                 <h2 className="text-sm font-semibold text-gray-900">All entries</h2>
-                <p className="text-xs text-gray-400 mt-0.5">
+                <p className="text-xs text-gray-500 mt-0.5">
                   {entriesTotal === 0 ? "No entries in this range" : `${entriesTotal.toLocaleString()} total`}
                   {isFiltered && (
                     <>
@@ -539,11 +539,11 @@ export default function CashBookPage() {
                   <thead className="sticky top-0 z-10 bg-gray-50 shadow-[inset_0_-1px_0_0_#f3f4f6] [&_th]:bg-gray-50">
                     <tr className="bg-gray-50">
                       <th className="w-[24px] px-2 py-2"></th>
-                      <th className="text-left px-3 py-2 text-xs font-medium text-gray-400">Date</th>
-                      <th className="text-left px-3 py-2 text-xs font-medium text-gray-400 min-w-[84px]">Type</th>
-                      <th className="text-left px-3 py-2 text-xs font-medium text-gray-400 min-w-[128px]">Method</th>
-                      <th className="text-right px-3 py-2 text-xs font-medium text-gray-400">Amount</th>
-                      <th className="text-right px-3 py-2 text-xs font-medium text-gray-400">Balance</th>
+                      <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">Date</th>
+                      <th className="text-left px-3 py-2 text-xs font-medium text-gray-500 min-w-[84px]">Type</th>
+                      <th className="text-left px-3 py-2 text-xs font-medium text-gray-500 min-w-[128px]">Method</th>
+                      <th className="text-right px-3 py-2 text-xs font-medium text-gray-500">Amount</th>
+                      <th className="text-right px-3 py-2 text-xs font-medium text-gray-500">Balance</th>
                       <th className="w-[90px] px-2 py-2"></th>
                     </tr>
                   </thead>
@@ -568,7 +568,7 @@ export default function CashBookPage() {
                             <td className="px-3 py-2 text-gray-500 text-xs whitespace-nowrap">
                               {formatDateTime(entry.entry_date)}
                               {entry.transaction_code && (
-                                <span className="ml-2 text-[10px] text-gray-300 font-mono">{entry.transaction_code}</span>
+                                <span className="ml-2 text-xs text-gray-500 font-mono">{entry.transaction_code}</span>
                               )}
                             </td>
                             <td className="px-3 py-2">
@@ -644,7 +644,7 @@ export default function CashBookPage() {
                                   <X size={14} />
                                 </button>
                               </div>
-                              {editError && <p className="text-[10px] text-red-500 mt-0.5">{editError}</p>}
+                              {editError && <p className="text-xs text-red-500 mt-0.5">{editError}</p>}
                             </td>
                           </tr>
                         );
@@ -666,7 +666,7 @@ export default function CashBookPage() {
                             <td className="px-3 py-2 text-gray-500 text-xs whitespace-nowrap">
                               {formatDateTime(entry.entry_date)}
                               {entry.transaction_code && (
-                                <span className="ml-2 text-[10px] text-gray-300 font-mono">{entry.transaction_code}</span>
+                                <span className="ml-2 text-xs text-gray-500 font-mono">{entry.transaction_code}</span>
                               )}
                             </td>
                             <td className="px-3 py-2">
@@ -704,7 +704,7 @@ export default function CashBookPage() {
                             <tr className="bg-gray-50">
                               <td colSpan={7} className="px-4 py-3 border-t border-gray-100">
                                 <div className="flex items-start gap-2">
-                                  <div className="text-[10px] uppercase tracking-wide text-gray-400 font-medium pt-0.5 flex-shrink-0">
+                                  <div className="text-xs uppercase tracking-wide text-gray-500 font-medium pt-0.5 flex-shrink-0">
                                     Notes
                                   </div>
                                   <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">
@@ -858,7 +858,7 @@ export default function CashBookPage() {
               }`}
             >
               Cash → Bank
-              <div className={`text-xs mt-0.5 ${transferDirection === "cash_to_bank" ? "text-gray-300" : "text-gray-400"}`}>
+              <div className={`text-xs mt-0.5 ${transferDirection === "cash_to_bank" ? "text-gray-300" : "text-gray-500"}`}>
                 Depositing cash in hand
               </div>
             </button>
@@ -870,7 +870,7 @@ export default function CashBookPage() {
               }`}
             >
               Bank → Cash
-              <div className={`text-xs mt-0.5 ${transferDirection === "bank_to_cash" ? "text-gray-300" : "text-gray-400"}`}>
+              <div className={`text-xs mt-0.5 ${transferDirection === "bank_to_cash" ? "text-gray-300" : "text-gray-500"}`}>
                 Withdrawing to cash in hand
               </div>
             </button>

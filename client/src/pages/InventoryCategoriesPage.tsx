@@ -143,7 +143,7 @@ function ProductDownloadModal({
             </div>
             <div>
               <p className="text-sm font-medium text-gray-900">Stock Breakdown (PDF)</p>
-              <p className="text-xs text-gray-400">Color × Size matrix with totals</p>
+              <p className="text-xs text-gray-500">Color × Size matrix with totals</p>
             </div>
           </button>
 
@@ -612,7 +612,7 @@ export default function InventoryCategoriesPage() {
 
               {searchOpen && (
                 <div className="absolute right-0 top-full mt-1.5 w-[28rem] max-w-[95vw] bg-white border border-gray-200 rounded-xl shadow-lg z-30 max-h-96 overflow-y-auto">
-                  <div className="px-4 py-2 text-[11px] uppercase tracking-wide text-gray-400 border-b border-gray-100 bg-gray-50/60 flex items-center justify-between">
+                  <div className="px-4 py-2 text-xs uppercase tracking-wide text-gray-500 border-b border-gray-100 bg-gray-50/60 flex items-center justify-between">
                     <span>
                       {searchMatches.length > 0
                         ? `${searchMatches.length} match${searchMatches.length === 1 ? "" : "es"}`
@@ -641,12 +641,12 @@ export default function InventoryCategoriesPage() {
                       >
                         <div className="min-w-0">
                           <p className="text-sm text-gray-900 truncate">{group.product_title}</p>
-                          <p className="text-xs text-gray-400 truncate">
+                          <p className="text-xs text-gray-500 truncate">
                             {[parts.category, parts.subCategory].filter(Boolean).join(" › ")}
                             {group.brand ? ` · ${group.brand}` : ""}
                           </p>
                         </div>
-                        <span className="text-xs text-gray-400 flex-shrink-0 tabular-nums">
+                        <span className="text-xs text-gray-500 flex-shrink-0 tabular-nums">
                           {group.units.length}
                         </span>
                       </button>
@@ -714,7 +714,7 @@ export default function InventoryCategoriesPage() {
       {loading ? (
         <div className="flex flex-col items-center justify-center py-24">
           <Loader2 size={28} className="animate-spin text-gray-300" />
-          <p className="mt-3 text-sm text-gray-400">Loading categories…</p>
+          <p className="mt-3 text-sm text-gray-500">Loading categories…</p>
         </div>
       ) : (
         <Card flatOnPhone className="lg:p-0 lg:overflow-clip">
@@ -728,7 +728,7 @@ export default function InventoryCategoriesPage() {
                 >
                   <Search size={12} />
                   <span className="max-w-[160px] truncate">"{appliedQuery}"</span>
-                  <span className="text-[10px] bg-gray-200 text-gray-600 rounded-full px-1.5 py-0.5 tabular-nums">
+                  <span className="text-xs bg-gray-200 text-gray-600 rounded-full px-1.5 py-0.5 tabular-nums">
                     {groups.length}
                   </span>
                   <X size={12} />
@@ -760,7 +760,7 @@ export default function InventoryCategoriesPage() {
                 )}
               </p>
             </div>
-            <p className="text-xs text-gray-400 tabular-nums flex-shrink-0">
+            <p className="text-xs text-gray-500 tabular-nums flex-shrink-0">
               {groups.length} product{groups.length === 1 ? "" : "s"}, {filteredUnits.length} unit
               {filteredUnits.length === 1 ? "" : "s"}
             </p>
@@ -1044,7 +1044,7 @@ export default function InventoryCategoriesPage() {
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <p className="font-medium text-gray-900 leading-snug">{group.product_title}</p>
-                        {(subCategory || group.brand) && <p className="mt-0.5 text-xs text-gray-400">{[subCategory, group.brand].filter(Boolean).join(" · ")}</p>}
+                        {(subCategory || group.brand) && <p className="mt-0.5 text-xs text-gray-500">{[subCategory, group.brand].filter(Boolean).join(" · ")}</p>}
                       </div>
                       <div className="flex flex-shrink-0 items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
                         <ActionMenu
@@ -1083,12 +1083,12 @@ export default function InventoryCategoriesPage() {
                             </p>
                             <p
                               onClick={(e) => copyValue(`bc-${group.product_id}-${i}`, firstBarcode(row.barcodeRange), e)}
-                              className="cursor-pointer select-none break-all font-mono text-[11px] text-gray-400"
+                              className="cursor-pointer select-none break-all font-mono text-xs text-gray-500"
                               title="Tap to copy the barcode"
                             >
                               {row.barcodeRange}
                             </p>
-                            {isAdmin && row.batchSupplierCode && <p className="text-[11px] text-gray-400">Supplier {row.batchSupplierCode}</p>}
+                            {isAdmin && row.batchSupplierCode && <p className="text-xs text-gray-500">Supplier {row.batchSupplierCode}</p>}
                           </div>
                         ))}
                       </div>

@@ -116,7 +116,7 @@ export function AdminApprovalProvider({ children }: { children: ReactNode }) {
               }}
             />
           </FormGroup>
-          <p className="text-xs text-gray-400 -mt-1">Any admin's password works. It approves this one action only.</p>
+          <p className="text-xs text-gray-500 -mt-1">Any admin's password works. It approves this one action only.</p>
           {error && <ErrorText>{error}</ErrorText>}
         </Modal>
       )}

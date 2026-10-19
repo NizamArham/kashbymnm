@@ -76,7 +76,7 @@ export default function AttendancePage() {
       {error && <ErrorText>{error}</ErrorText>}
 
       {!loading && (
-        <p className="text-xs text-gray-400 mb-3">
+        <p className="text-xs text-gray-500 mb-3">
           {markedCount} of {staff.length} marked for {formatDate(date)}
         </p>
       )}
@@ -91,10 +91,10 @@ export default function AttendancePage() {
             <Card key={s.user_id} className="flex items-center justify-between gap-2 py-3 flex-wrap">
               <div>
                 <p className="text-sm font-medium text-gray-900">{s.name ?? "—"}</p>
-                <p className="text-xs text-gray-400">{s.job_title ?? "—"}</p>
+                <p className="text-xs text-gray-500">{s.job_title ?? "—"}</p>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
-                {s.status && <span className="text-xs text-gray-400 mr-1">Marked {formatTime(s.marked_at) ?? ""}</span>}
+                {s.status && <span className="text-xs text-gray-500 mr-1">Marked {formatTime(s.marked_at) ?? ""}</span>}
                 {STATUS_OPTIONS.map((opt) => (
                   <button
                     key={opt.value}

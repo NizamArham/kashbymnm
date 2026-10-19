@@ -247,11 +247,11 @@ export default function CustomerOrderHistoryPage({ customerId }: { customerId?: 
                       <tr>
                         <Td colSpan={7} className="bg-gray-50/70 !py-3 !px-4">
                           {itemsLoading === sale.id ? (
-                            <p className="text-xs text-gray-400 px-1">Loading items...</p>
+                            <p className="text-xs text-gray-500 px-1">Loading items...</p>
                           ) : itemsError ? (
                             <ErrorText>{itemsError}</ErrorText>
                           ) : !items || items.length === 0 ? (
-                            <p className="text-xs text-gray-400 px-1">No line items on record for this order.</p>
+                            <p className="text-xs text-gray-500 px-1">No line items on record for this order.</p>
                           ) : (
                             <div className="bg-white rounded-xl overflow-hidden shadow-sm">
                               <table className="w-full text-sm">

@@ -37,7 +37,7 @@ export function GenderNavTabs({
             }`}
           >
             {item.label}
-            <span className="text-xs text-gray-400">{item.count}</span>
+            <span className="text-xs text-gray-500">{item.count}</span>
             {isActive && (
               <span className="absolute left-3 right-3 -bottom-2 h-0.5 bg-gray-900 rounded-full" />
             )}
@@ -90,7 +90,7 @@ export function GenderNavPanel({
                   >
                     {cat.category}
                   </span>
-                  <span className="flex-shrink-0 text-[11px] font-medium text-gray-400 bg-gray-50 rounded-full px-2 py-0.5">
+                  <span className="flex-shrink-0 text-xs font-medium text-gray-500 bg-gray-50 rounded-full px-2 py-0.5">
                     {cat.count}
                   </span>
                 </button>
@@ -110,7 +110,7 @@ export function GenderNavPanel({
                           }`}
                         >
                           <span className="truncate">{sub.name}</span>
-                          <span className={`flex-shrink-0 text-[11px] ${isSubActive ? "text-gray-300" : "text-gray-400"}`}>
+                          <span className={`flex-shrink-0 text-xs ${isSubActive ? "text-gray-300" : "text-gray-500"}`}>
                             {sub.count}
                           </span>
                         </button>

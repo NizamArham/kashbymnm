@@ -113,9 +113,9 @@ export default function CourierReconciliationPage() {
               <p className="text-sm font-semibold text-gray-900">{partnerLabel(item.courier_partner)}</p>
               <Truck size={16} className="text-gray-400" />
             </div>
-            <p className="text-xs text-gray-400 mt-3">{item.balance > 0 ? "Balance due" : item.balance < 0 ? "Credit — you owe them" : "Settled"}</p>
+            <p className="text-xs text-gray-500 mt-3">{item.balance > 0 ? "Balance due" : item.balance < 0 ? "Credit — you owe them" : "Settled"}</p>
             <p className="text-2xl font-bold text-gray-900 tabular-nums">{money(Math.abs(item.balance))}</p>
-            <dl className="mt-2.5 space-y-0.5 text-xs text-gray-400">
+            <dl className="mt-2.5 space-y-0.5 text-xs text-gray-500">
               <div className="flex justify-between">
                 <dt>Expected net owed</dt>
                 <dd className="tabular-nums">{money(item.expected_net)}</dd>
@@ -255,7 +255,7 @@ export default function CourierReconciliationPage() {
                       <span className="font-medium">
                         <RefLink to={`/sales/${order.sale_id}`}>{order.invoice}</RefLink>
                       </span>
-                      <span className="block text-xs text-gray-400">{order.customer_name ?? "Walk-in"}</span>
+                      <span className="block text-xs text-gray-500">{order.customer_name ?? "Walk-in"}</span>
                     </Td>
                     <Td>{partnerLabel(order.courier_partner)}</Td>
                     <Td>
@@ -275,7 +275,7 @@ export default function CourierReconciliationPage() {
                       >
                         {money(totalCharge)}
                       </button>
-                      <div className="mt-0.5 flex items-center justify-end gap-1.5 text-[11px] text-gray-400">
+                      <div className="mt-0.5 flex items-center justify-end gap-1.5 text-xs text-gray-500">
                         {order.charge_confirmed ? (
                           <span className="inline-flex items-center gap-0.5 text-gray-500">
                             <Check size={12} />
@@ -285,7 +285,7 @@ export default function CourierReconciliationPage() {
                         {weight ? <span>{weight} kg</span> : null}
                       </div>
                       {order.charge_confirmed === 1 && order.estimated_charge !== null && order.estimated_charge !== order.courier_charge && (
-                        <div className="text-[11px] text-gray-400">estimate was {money(order.estimated_charge)}</div>
+                        <div className="text-xs text-gray-500">estimate was {money(order.estimated_charge)}</div>
                       )}
                     </Td>
                     <Td align="right" className="font-semibold">{money((order.delivery_status === "delivered" ? order.cod_amount : 0) - totalCharge)}</Td>

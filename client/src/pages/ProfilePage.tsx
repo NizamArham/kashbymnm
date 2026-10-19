@@ -79,7 +79,7 @@ export default function ProfilePage() {
             </div>
             <div>
               <p className="text-base font-semibold text-gray-900">{user?.name ?? user?.username}</p>
-              <p className="text-xs text-gray-400 capitalize">
+              <p className="text-xs text-gray-500 capitalize">
                 {myProfile?.job_title ?? user?.role} · @{user?.username}
               </p>
             </div>
@@ -87,28 +87,28 @@ export default function ProfilePage() {
 
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div>
-              <p className="text-xs text-gray-400">Joined</p>
+              <p className="text-xs text-gray-500">Joined</p>
               <p className="text-gray-900">{myProfile?.joined_date ?? "—"}</p>
             </div>
             <div>
-              <p className="text-xs text-gray-400">Reports to</p>
+              <p className="text-xs text-gray-500">Reports to</p>
               <p className="text-gray-900">{myProfile?.reports_to_name ?? "—"}</p>
             </div>
             <div>
-              <p className="text-xs text-gray-400">Phone</p>
+              <p className="text-xs text-gray-500">Phone</p>
               <p className="text-gray-900">{myProfile?.phone ?? "—"}</p>
             </div>
             <div>
-              <p className="text-xs text-gray-400">NIC</p>
+              <p className="text-xs text-gray-500">NIC</p>
               <p className="text-gray-900">{myProfile?.nic ?? "—"}</p>
             </div>
             <div className="col-span-2">
-              <p className="text-xs text-gray-400">Address</p>
+              <p className="text-xs text-gray-500">Address</p>
               <p className="text-gray-900">{myProfile?.address ?? "—"}</p>
             </div>
           </div>
 
-          <p className="text-xs text-gray-400 mt-4">
+          <p className="text-xs text-gray-500 mt-4">
             Need to update your bank details or a mistake in these fields? Ask an admin to update them for you.
           </p>
 
@@ -125,13 +125,13 @@ export default function ProfilePage() {
               {(["present", "absent", "half_day", "leave"] as const).map((s) => (
                 <div key={s} className="bg-gray-50 rounded-xl p-3 text-center">
                   <p className="text-lg font-bold text-gray-900">{attendanceTotals[s] ?? 0}</p>
-                  <p className="text-xs text-gray-400 capitalize">{s.replace("_", " ")}</p>
+                  <p className="text-xs text-gray-500 capitalize">{s.replace("_", " ")}</p>
                 </div>
               ))}
             </div>
           )}
           {attendanceRecords.length === 0 ? (
-            <p className="text-sm text-gray-400">No attendance records yet.</p>
+            <p className="text-sm text-gray-500">No attendance records yet.</p>
           ) : (
             <Table>
               <thead>
@@ -160,7 +160,7 @@ export default function ProfilePage() {
       {activeTab === "activity" && (
         <Card className="max-w-2xl mb-5">
           {activityLog.length === 0 ? (
-            <p className="text-sm text-gray-400">No activity recorded yet.</p>
+            <p className="text-sm text-gray-500">No activity recorded yet.</p>
           ) : (
             <Table>
               <thead>

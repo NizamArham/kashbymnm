@@ -181,7 +181,7 @@ export default function SupplierPaymentHistoryPage({ supplierId }: { supplierId?
           setStartDate(ninetyDaysAgoISO());
           setEndDate(toISODate(new Date()));
         }}
-        className="text-xs text-gray-400 hover:text-gray-700 underline"
+        className="text-xs text-gray-500 hover:text-gray-700 underline"
       >
         Reset to last 90 days
       </button>
@@ -190,7 +190,7 @@ export default function SupplierPaymentHistoryPage({ supplierId }: { supplierId?
           setStartDate(null);
           setEndDate(null);
         }}
-        className="text-xs text-gray-400 hover:text-gray-700 underline"
+        className="text-xs text-gray-500 hover:text-gray-700 underline"
       >
         Show everything
       </button>
@@ -272,7 +272,7 @@ export default function SupplierPaymentHistoryPage({ supplierId }: { supplierId?
                     <Td>
                       {entry.label}
                       {clickable && (
-                        <span className="inline-flex items-center gap-1 ml-2 text-[11px] text-gray-500 align-middle">
+                        <span className="inline-flex items-center gap-1 ml-2 text-xs text-gray-500 align-middle">
                           <CreditCard size={12} />
                           View cheque
                         </span>

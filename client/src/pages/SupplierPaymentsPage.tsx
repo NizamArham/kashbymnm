@@ -591,7 +591,7 @@ export default function SupplierPaymentsPage() {
                               }
                             />
                           </h3>
-                          <span className="text-[11px] text-gray-400">Clears later</span>
+                          <span className="text-xs text-gray-500">Clears later</span>
                         </div>
 
                         <div className="flex gap-2">
@@ -682,9 +682,9 @@ export default function SupplierPaymentsPage() {
 
                     {method === "bank_transfer" && (
                       <div className="border border-gray-200 rounded-xl p-3">
-                        <p className="text-xs text-gray-400 mb-2">Pick which of this supplier's accounts the money is going to.</p>
+                        <p className="text-xs text-gray-500 mb-2">Pick which of this supplier's accounts the money is going to.</p>
                         {!supplierId ? (
-                          <p className="text-xs text-gray-400">Select a supplier first.</p>
+                          <p className="text-xs text-gray-500">Select a supplier first.</p>
                         ) : supplierBankAccounts.length === 0 ? (
                           <p className="text-xs text-amber-600">
                             No bank account on file for this supplier — add one from the Suppliers page before paying by bank transfer.
@@ -747,7 +747,7 @@ export default function SupplierPaymentsPage() {
                           );
                         })()
                       ) : (
-                        <p className="text-xs text-gray-400">Select a supplier to see a summary.</p>
+                        <p className="text-xs text-gray-500">Select a supplier to see a summary.</p>
                       )}
                     </div>
 
@@ -769,13 +769,13 @@ export default function SupplierPaymentsPage() {
                                 </p>
                               </div>
                               <div className="flex items-center justify-between gap-3 mt-1.5">
-                                <div className="flex items-center gap-2 text-[11px] text-gray-500 truncate min-w-0">
+                                <div className="flex items-center gap-2 text-xs text-gray-500 truncate min-w-0">
                                   <span className="truncate">
                                     {c.kind === "in_hand" ? c.receipt.bank_name : c.bank_name}
                                     {c.kind === "in_hand" ? ` — from ${c.receipt.customer_name}` : " — own cheque"}
                                   </span>
                                 </div>
-                                <button onClick={() => removeCheque(i)} className="text-[11px] text-gray-400 hover:text-red-500 flex-shrink-0">
+                                <button onClick={() => removeCheque(i)} className="text-xs text-gray-500 hover:text-red-500 flex-shrink-0">
                                   Remove
                                 </button>
                               </div>
@@ -799,7 +799,7 @@ export default function SupplierPaymentsPage() {
         <PageLoader />
       ) : (
         <>
-          <p className="text-xs text-gray-400 mb-3">Total owed across all suppliers: Rs. {totalOwed.toLocaleString()}</p>
+          <p className="text-xs text-gray-500 mb-3">Total owed across all suppliers: Rs. {totalOwed.toLocaleString()}</p>
 
           <Card className="p-0 overflow-clip mb-5">
             <Table>
@@ -831,7 +831,7 @@ export default function SupplierPaymentsPage() {
                               <div className="flex items-center justify-between mb-4">
                                 <div>
                                   <h2 className="text-base font-semibold text-gray-900">{b.name}</h2>
-                                  <p className="text-xs text-gray-400">{b.supplier_code}</p>
+                                  <p className="text-xs text-gray-500">{b.supplier_code}</p>
                                 </div>
                                 <button onClick={() => setExpandedSupplierId(null)} aria-label="Close" title="Close" className="text-gray-400 hover:text-gray-600">
                                   <X size={18} />
@@ -870,16 +870,16 @@ export default function SupplierPaymentsPage() {
                                   ) : ledgerError ? (
                                     <ErrorText>{ledgerError}</ErrorText>
                                   ) : ledgerEntries.length === 0 ? (
-                                    <p className="text-sm text-gray-400">No activity recorded for this supplier yet.</p>
+                                    <p className="text-sm text-gray-500">No activity recorded for this supplier yet.</p>
                                   ) : (
                                     <div className="rounded-xl overflow-hidden">
                                       <table className="w-full text-sm">
                                         <thead>
                                           <tr className="bg-gray-50">
-                                            <th className="text-left px-3 py-2 text-xs font-medium text-gray-400">Date</th>
-                                            <th className="text-left px-3 py-2 text-xs font-medium text-gray-400">Event</th>
-                                            <th className="text-right px-3 py-2 text-xs font-medium text-gray-400">Amount</th>
-                                            <th className="text-right px-3 py-2 text-xs font-medium text-gray-400">Running balance</th>
+                                            <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">Date</th>
+                                            <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">Event</th>
+                                            <th className="text-right px-3 py-2 text-xs font-medium text-gray-500">Amount</th>
+                                            <th className="text-right px-3 py-2 text-xs font-medium text-gray-500">Running balance</th>
                                           </tr>
                                         </thead>
                                         <tbody>
@@ -986,7 +986,7 @@ export default function SupplierPaymentsPage() {
               </Card>
 
               <div className="flex items-center justify-between mt-3">
-                <p className="text-xs text-gray-400">
+                <p className="text-xs text-gray-500">
                   Showing {(paymentsPage - 1) * paymentsPageSize + 1}–{Math.min(paymentsPage * paymentsPageSize, paymentsTotal)} of{" "}
                   {paymentsTotal}
                 </p>

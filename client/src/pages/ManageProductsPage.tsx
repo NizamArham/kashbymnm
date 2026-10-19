@@ -441,7 +441,7 @@ function CategoryRow({
           </div>
         ))}
         {subError && <ErrorText>{subError}</ErrorText>}
-        <button onClick={() => onAddSub(category)} className="text-xs text-gray-400 hover:text-gray-700 flex items-center gap-1 mt-1">
+        <button onClick={() => onAddSub(category)} className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1 mt-1">
           <Plus size={12} />
           Add sub-category
         </button>
@@ -1003,20 +1003,20 @@ export default function ManageProductsPage() {
                                 {expandedTab === "stock" && (
                                   <>
                                     {units.length === 0 ? (
-                                      <p className="text-xs text-gray-400 px-1 py-2">No inventory units yet for this product.</p>
+                                      <p className="text-xs text-gray-500 px-1 py-2">No inventory units yet for this product.</p>
                                     ) : (
                                       <>
                                         <div className="rounded-xl overflow-x-auto bg-white">
                                           <table className="w-full text-sm">
                                             <thead>
                                               <tr>
-                                                <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Color</th>
-                                                <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Size</th>
-                                                <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Qty</th>
-                                                <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">SKU</th>
-                                                <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Barcode</th>
-                                                <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Status</th>
-                                                <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400"></th>
+                                                <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-500">Color</th>
+                                                <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-500">Size</th>
+                                                <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-500">Qty</th>
+                                                <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-500">SKU</th>
+                                                <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-500">Barcode</th>
+                                                <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-500">Status</th>
+                                                <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-500"></th>
                                               </tr>
                                             </thead>
                                             <tbody className="divide-y divide-gray-100">
@@ -1037,7 +1037,7 @@ export default function ManageProductsPage() {
                                                         {row.hasMixedBatches && (
                                                           <button
                                                             onClick={() => setBatchDetailKey(batchDetailKey === rowKey ? null : rowKey)}
-                                                            className="ml-2 inline-flex items-center text-[11px] font-medium text-gray-900 bg-gray-100 rounded-full px-2 py-0.5 hover:bg-gray-200"
+                                                            className="ml-2 inline-flex items-center text-xs font-medium text-gray-900 bg-gray-100 rounded-full px-2 py-0.5 hover:bg-gray-200"
                                                             title="This variant has units from more than one batch"
                                                           >
                                                             mixed batches
@@ -1065,7 +1065,7 @@ export default function ManageProductsPage() {
                                                         {canRemove && (
                                                           <button
                                                             onClick={() => (removeOpenKey === rowKey ? setRemoveOpenKey(null) : openRemove(rowKey))}
-                                                            className="text-gray-400 hover:text-red-500 transition inline-flex items-center gap-1 text-xs"
+                                                            className="text-gray-500 hover:text-red-500 transition inline-flex items-center gap-1 text-xs"
                                                             title="Remove one unit from stock (damage, gift, etc.)"
                                                           >
                                                             <MinusCircle size={14} />
@@ -1174,11 +1174,11 @@ export default function ManageProductsPage() {
                                         <table className="w-full text-sm">
                                           <thead>
                                             <tr className="bg-gray-50">
-                                              <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Color</th>
-                                              <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Size</th>
-                                              <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Currently in stock</th>
-                                              <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">Quantity to add</th>
-                                              <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-400">New total</th>
+                                              <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-500">Color</th>
+                                              <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-500">Size</th>
+                                              <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-500">Currently in stock</th>
+                                              <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-500">Quantity to add</th>
+                                              <th className="text-left px-3 py-1.5 text-xs font-medium text-gray-500">New total</th>
                                             </tr>
                                           </thead>
                                           <tbody>
@@ -1420,27 +1420,27 @@ export default function ManageProductsPage() {
                                     ) : (
                                       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
                                         <div>
-                                          <p className="text-xs text-gray-400">Title</p>
+                                          <p className="text-xs text-gray-500">Title</p>
                                           <p className="text-gray-900">{p.product_title}</p>
                                         </div>
                                         <div>
-                                          <p className="text-xs text-gray-400">Brand</p>
+                                          <p className="text-xs text-gray-500">Brand</p>
                                           <p className="text-gray-900">{p.brand ?? "—"}</p>
                                         </div>
                                         <div>
-                                          <p className="text-xs text-gray-400">Category</p>
+                                          <p className="text-xs text-gray-500">Category</p>
                                           <p className="text-gray-900">{p.category ?? "—"}</p>
                                         </div>
                                         <div>
-                                          <p className="text-xs text-gray-400">Cost price</p>
+                                          <p className="text-xs text-gray-500">Cost price</p>
                                           <p className="text-gray-900">Rs. {p.cost_price?.toLocaleString() ?? "—"}</p>
                                         </div>
                                         <div>
-                                          <p className="text-xs text-gray-400">Selling price</p>
+                                          <p className="text-xs text-gray-500">Selling price</p>
                                           <p className="text-gray-900">Rs. {p.selling_price.toLocaleString()}</p>
                                         </div>
                                         <div>
-                                          <p className="text-xs text-gray-400">Returns</p>
+                                          <p className="text-xs text-gray-500">Returns</p>
                                           <p className="text-gray-900">{p.allow_returns !== 0 ? "Allowed" : "Final Sale — No Returns"}</p>
                                         </div>
                                       </div>
@@ -1543,7 +1543,7 @@ export default function ManageProductsPage() {
       {loading && products.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-24">
           <Loader2 size={28} className="animate-spin text-gray-300" />
-          <p className="mt-3 text-sm text-gray-400">Loading products…</p>
+          <p className="mt-3 text-sm text-gray-500">Loading products…</p>
         </div>
       ) : products.length === 0 ? (
         <EmptyState icon={Package} title="No products yet" subtitle="Add one to get started" actions={[{ label: "Add product", primary: true, onClick: () => navigate("/products/add") }]} />
@@ -1567,7 +1567,7 @@ export default function ManageProductsPage() {
               {searchQuery.trim() && <span className="text-gray-400"> · matching “{searchQuery.trim()}”</span>}
             </p>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-              <p className="text-xs text-gray-400 tabular-nums">
+              <p className="text-xs text-gray-500 tabular-nums">
                 {filteredProducts.length} product{filteredProducts.length === 1 ? "" : "s"}, {visibleUnits.toLocaleString()} unit{visibleUnits === 1 ? "" : "s"}
               </p>
               <button
@@ -1679,7 +1679,7 @@ export default function ManageProductsPage() {
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <p className="font-medium text-gray-900 leading-snug">{p.product_title}</p>
-                        {(subCategory || p.brand) && <p className="mt-0.5 text-xs text-gray-400">{[subCategory, p.brand].filter(Boolean).join(" · ")}</p>}
+                        {(subCategory || p.brand) && <p className="mt-0.5 text-xs text-gray-500">{[subCategory, p.brand].filter(Boolean).join(" · ")}</p>}
                       </div>
                       <div className="flex flex-shrink-0 items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
                         <ActionMenu

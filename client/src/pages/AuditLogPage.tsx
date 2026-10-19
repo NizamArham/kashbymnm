@@ -223,7 +223,7 @@ export default function AuditLogPage() {
             );
           })}
           {hiddenSwitches > 0 && (
-            <button onClick={() => setShowSwitches((v) => !v)} className="ml-auto text-xs text-gray-400 underline hover:text-gray-700">
+            <button onClick={() => setShowSwitches((v) => !v)} className="ml-auto text-xs text-gray-500 underline hover:text-gray-700">
               {showSwitches ? "Hide cashier-mode switches" : `Show ${hiddenSwitches} cashier-mode switch${hiddenSwitches === 1 ? "" : "es"} (hidden)`}
             </button>
           )}

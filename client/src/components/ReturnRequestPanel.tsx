@@ -42,7 +42,7 @@ export default function ReturnRequestPanel({ r, onChanged }: { r: ReturnRequest;
   return (
     <div className="space-y-4">
       <div>
-        <p className="mb-1 text-xs text-gray-400">Item</p>
+        <p className="mb-1 text-xs text-gray-500">Item</p>
         <p className="text-sm font-medium text-gray-900">
           {r.product_id ? <RefLink to={`/products/${r.product_id}`}>{r.product_title}</RefLink> : r.product_title} ({r.sku})
           {(r.color || r.size) && <span className="font-normal text-gray-400"> · {[r.color, r.size].filter(Boolean).join(" / ")}</span>}
@@ -51,21 +51,21 @@ export default function ReturnRequestPanel({ r, onChanged }: { r: ReturnRequest;
 
       <div className="grid grid-cols-3 gap-3 text-sm">
         <div>
-          <p className="text-xs text-gray-400">Condition</p>
+          <p className="text-xs text-gray-500">Condition</p>
           <p className="capitalize text-gray-900">{r.condition}</p>
         </div>
         <div>
-          <p className="text-xs text-gray-400">Resolution</p>
+          <p className="text-xs text-gray-500">Resolution</p>
           <p className="capitalize text-gray-900">{r.resolution.replace(/_/g, " ")}</p>
         </div>
         <div>
-          <p className="text-xs text-gray-400">Requested by</p>
+          <p className="text-xs text-gray-500">Requested by</p>
           <p className="text-gray-900">{r.requested_by_name ?? "—"}</p>
         </div>
       </div>
 
       <div>
-        <p className="mb-1 text-xs text-gray-400">Reason for return</p>
+        <p className="mb-1 text-xs text-gray-500">Reason for return</p>
         <p className="text-sm text-gray-900">{r.reason}</p>
       </div>
 
@@ -74,24 +74,24 @@ export default function ReturnRequestPanel({ r, onChanged }: { r: ReturnRequest;
       {!pending && (
         <div className="grid grid-cols-2 gap-3 border-t border-gray-200 pt-3 text-sm">
           <div>
-            <p className="text-xs text-gray-400">Decision</p>
+            <p className="text-xs text-gray-500">Decision</p>
             <p className="text-gray-900">{decidedLine(r.auto_approved === 1, r.status as "approved" | "declined", r.decided_by_name, r.decided_at)}</p>
           </div>
           {r.decision_reason && (
             <div>
-              <p className="text-xs text-gray-400">{r.status === "approved" ? "Approval reason" : "Decline reason"}</p>
+              <p className="text-xs text-gray-500">{r.status === "approved" ? "Approval reason" : "Decline reason"}</p>
               <p className="text-gray-900">{r.decision_reason}</p>
             </div>
           )}
           {r.status === "approved" && r.resolution === "refund" && (
             <div>
-              <p className="text-xs text-gray-400">Refund amount</p>
+              <p className="text-xs text-gray-500">Refund amount</p>
               <p className="font-semibold text-gray-900">Rs. {(r.refund_amount ?? 0).toLocaleString()}</p>
             </div>
           )}
           {r.status === "approved" && r.resolution === "store_credit_exchange" && (
             <div>
-              <p className="text-xs text-gray-400">Store credit granted</p>
+              <p className="text-xs text-gray-500">Store credit granted</p>
               <p className="font-semibold text-gray-900">
                 Rs. {r.unit_price.toLocaleString()}
                 {r.credit_expiry_days ? ` — expires in ${r.credit_expiry_days} days` : ""}

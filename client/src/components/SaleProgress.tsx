@@ -120,7 +120,7 @@ export default function SaleProgress({ sale }: { sale: Sale }) {
                 {s.state === "done" ? <Check size={13} strokeWidth={3} /> : s.state === "bad" ? <X size={13} strokeWidth={3} /> : s.state === "current" ? <span className="h-2 w-2 rounded-full bg-black" /> : null}
               </span>
               <span className="flex min-h-6 flex-wrap items-center gap-x-2 sm:mt-1.5 sm:flex-col sm:gap-x-0">
-                <span className={`text-sm ${s.state === "current" ? "font-semibold text-gray-900" : s.state === "todo" ? "text-gray-400" : s.state === "bad" ? "font-medium text-red-600" : "font-medium text-gray-900"}`}>{s.label}</span>
+                <span className={`text-sm ${s.state === "current" ? "font-semibold text-gray-900" : s.state === "todo" ? "text-gray-500" : s.state === "bad" ? "font-medium text-red-600" : "font-medium text-gray-900"}`}>{s.label}</span>
                 {s.note && <span className="text-xs text-gray-500">{s.note}</span>}
               </span>
             </li>
@@ -131,7 +131,7 @@ export default function SaleProgress({ sale }: { sale: Sale }) {
       <div className={`grid grid-cols-1 gap-x-6 gap-y-4 text-sm md:grid-cols-3 ${stages ? "mt-5 border-t border-gray-100 pt-4" : ""}`}>
         {stages && (
           <div>
-            <p className="text-xs text-gray-400">Delivery</p>
+            <p className="text-xs text-gray-500">Delivery</p>
             <p className="font-medium text-gray-900">{partner ?? "No courier yet"}</p>
             {tracking && (
               <p className="text-xs text-gray-500">
@@ -151,7 +151,7 @@ export default function SaleProgress({ sale }: { sale: Sale }) {
 
         {stages && (
           <div>
-            <p className="text-xs text-gray-400">To collect on delivery</p>
+            <p className="text-xs text-gray-500">To collect on delivery</p>
             {closed ? (
               <p className="font-medium text-gray-900">Nothing — the parcel {sale.delivery_status === "returned" ? "came back" : "was cancelled"}</p>
             ) : cod > 0 && unpaid ? (
@@ -165,7 +165,7 @@ export default function SaleProgress({ sale }: { sale: Sale }) {
         )}
 
         <div className={stages ? "" : "md:col-span-3"}>
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-gray-500">
             Payments · {money(sale.amount_paid)} of {money(sale.total)}
           </p>
           {payments.length === 0 && elsewhere <= 0 ? (
@@ -181,14 +181,14 @@ export default function SaleProgress({ sale }: { sale: Sale }) {
                   <span className="text-gray-600">
                     {p.payment_method ? (METHOD[p.payment_method] ?? p.payment_method) : "—"} · {entryLabel(p)}
                   </span>
-                  <span className="text-xs text-gray-400">{whenLabel(p.entry_date)}</span>
+                  <span className="text-xs text-gray-500">{whenLabel(p.entry_date)}</span>
                 </li>
               ))}
               {elsewhere > 0 && (
                 <li className="flex flex-wrap items-baseline gap-x-2">
                   <span className="font-medium text-gray-900">{money(elsewhere)}</span>
                   <span className="text-gray-600">Settled another way</span>
-                  <span className="text-xs text-gray-400">a courier settlement or a payment on the customer's account</span>
+                  <span className="text-xs text-gray-500">a courier settlement or a payment on the customer's account</span>
                 </li>
               )}
               {(sale.store_credit_applied ?? 0) > 0 && (

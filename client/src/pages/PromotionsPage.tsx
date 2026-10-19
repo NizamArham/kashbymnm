@@ -266,7 +266,7 @@ function CouponFormModal({ coupon, onClose, onSaved }: { coupon?: Coupon; onClos
         </>
       }
     >
-      <p className="text-xs text-gray-400 mb-4 -mt-2">
+      <p className="text-xs text-gray-500 mb-4 -mt-2">
         Shared by text, social media, or however you like — the code alone is what a customer needs, so it's live the moment you create it.
       </p>
 
@@ -445,7 +445,7 @@ function VouchersTab({ showCreate, setShowCreate }: { showCreate: boolean; setSh
                     <Td>
                       Rs. {v.remaining_value.toLocaleString()}
                       {v.remaining_value !== v.initial_value && (
-                        <span className="text-xs text-gray-400"> / Rs. {v.initial_value.toLocaleString()}</span>
+                        <span className="text-xs text-gray-500"> / Rs. {v.initial_value.toLocaleString()}</span>
                       )}
                     </Td>
                     <Td>
@@ -453,7 +453,7 @@ function VouchersTab({ showCreate, setShowCreate }: { showCreate: boolean; setSh
                     </Td>
                     <Td>
                       {!v.activated_at ? (
-                        <span className="text-xs text-gray-400">{v.validity_days} days, once sold</span>
+                        <span className="text-xs text-gray-500">{v.validity_days} days, once sold</span>
                       ) : (
                         <ExpiryBadge expiresAt={v.expires_at} />
                       )}
@@ -605,7 +605,7 @@ function VoucherFormModal({ voucher, onClose, onSaved }: { voucher?: GiftVoucher
       }
     >
       {!isEdit && (
-        <p className="text-xs text-gray-400 mb-4 -mt-2">
+        <p className="text-xs text-gray-500 mb-4 -mt-2">
           Printed with its own barcode, like a cheque book — it sits dormant until a customer actually buys it at POS. That sale is what
           activates it and starts the expiry countdown, so pick a duration below rather than a fixed date.
         </p>

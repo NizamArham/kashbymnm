@@ -662,12 +662,12 @@ export default function SaleHistoryPage() {
           </tbody>
         </table>
         {sale.is_wholesale ? (
-          <p className="text-xs text-gray-400 mt-2">
+          <p className="text-xs text-gray-500 mt-2">
             Wholesale bill — counted in pieces per product. <RefLink to={`/sales/${sale.id}`}>Open the invoice</RefLink> for the size and colour breakdown.
           </p>
         ) : null}
         {sale.discount > 0 && (
-          <p className="text-xs text-gray-400 mt-2">
+          <p className="text-xs text-gray-500 mt-2">
             Discounts & Coupons: Rs. {sale.discount.toLocaleString()}
             {sale.manual_discount > 0 && ` (manual: Rs. ${sale.manual_discount.toLocaleString()})`}
             {sale.coupon_discount > 0 && ` (coupon ${sale.coupon_code}: Rs. ${sale.coupon_discount.toLocaleString()})`}
@@ -675,7 +675,7 @@ export default function SaleHistoryPage() {
         )}
         <DeliveryChargeSummary sale={sale} className="mt-2" />
         {!sale.is_voided && (
-          <p className="text-xs text-gray-400 mt-1">
+          <p className="text-xs text-gray-500 mt-1">
             {sale.is_wholesale ? "Wholesale order — no loyalty points" : `Loyalty points earned: ${sale.loyalty_points_earned}`}
           </p>
         )}
@@ -902,7 +902,7 @@ export default function SaleHistoryPage() {
                 setStartDate(null);
                 setEndDate(null);
               }}
-              className="text-xs text-gray-400 hover:text-gray-700 underline"
+              className="text-xs text-gray-500 hover:text-gray-700 underline"
             >
               Clear dates
             </button>
@@ -950,7 +950,7 @@ export default function SaleHistoryPage() {
       {error && <ErrorText>{error}</ErrorText>}
 
       {!loading && (
-        <p className="text-xs text-gray-400 mb-3">
+        <p className="text-xs text-gray-500 mb-3">
           {filteredSales.length} sale{filteredSales.length !== 1 ? "s" : ""}
           {isAdmin && <> · Rs. {periodTotal.toLocaleString()} total</>}
           {isAdmin && kind === "credit" && filteredSales.length > 0 && (
@@ -1030,7 +1030,7 @@ export default function SaleHistoryPage() {
                       <Td align="right">Rs. {sale.amount_paid.toLocaleString()}</Td>
                       <Td>
                         <div className="capitalize">{salePaymentLabel(sale)}</div>
-                        {sale.change_due > 0 && <div className="text-xs text-gray-400 whitespace-nowrap">Change: Rs. {sale.change_due.toLocaleString()}</div>}
+                        {sale.change_due > 0 && <div className="text-xs text-gray-500 whitespace-nowrap">Change: Rs. {sale.change_due.toLocaleString()}</div>}
                         {sale.overpaid_amount > 0 && (
                           <div className="text-xs text-amber-600 whitespace-nowrap">Overpaid: Rs. {sale.overpaid_amount.toLocaleString()}</div>
                         )}
@@ -1093,7 +1093,7 @@ export default function SaleHistoryPage() {
                         {sale.is_voided ? " (Voided)" : ""}
                       </p>
                       <ExchangeTag sale={sale} />
-                      <p className="text-xs text-gray-400 mt-0.5">{formatDateTime(sale.date)}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">{formatDateTime(sale.date)}</p>
                       <p className="text-xs text-gray-500 mt-1">
                         <CustomerName sale={sale} /> · {sale.sale_type === "online" ? "Online" : "In-Store"}
                       </p>

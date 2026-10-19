@@ -438,7 +438,7 @@ export default function SaleDetailPage() {
                       {i.title ?? "Item"}
                       {[i.size, i.color].filter(Boolean).length > 0 && <span className="text-gray-500"> · {[i.size, i.color].filter(Boolean).join(" / ")}</span>}
                     </span>
-                    <span className="text-xs text-gray-400">
+                    <span className="text-xs text-gray-500">
                       {i.old_invoice} · worth Rs. {Math.round(i.unit_price).toLocaleString()}
                     </span>
                     {i.allow_returns === 0 && <span className="text-xs font-medium text-amber-600">Final Sale</span>}
@@ -447,21 +447,21 @@ export default function SaleDetailPage() {
               </ul>
               <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1 border-t border-gray-100 pt-3 text-sm md:grid-cols-4">
                 <div>
-                  <p className="text-xs text-gray-400">Old items come off</p>
+                  <p className="text-xs text-gray-500">Old items come off</p>
                   <p className="font-medium text-gray-900">− Rs. {Math.round(sale.exchange_quote.applied_amount).toLocaleString()}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-gray-400">Delivery ({sale.exchange_quote.partner_name})</p>
+                  <p className="text-xs text-gray-500">Delivery ({sale.exchange_quote.partner_name})</p>
                   <p className="font-medium text-gray-900">{sale.exchange_quote.is_free_delivery ? "Free" : `+ Rs. ${Math.round(sale.exchange_quote.delivery_fee).toLocaleString()}`}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-gray-400">Customer's return share</p>
+                  <p className="text-xs text-gray-500">Customer's return share</p>
                   <p className="font-medium text-gray-900">
                     {sale.exchange_quote.pickup_collected > 0 ? `+ Rs. ${Math.round(sale.exchange_quote.pickup_collected).toLocaleString()}` : "—"}
                   </p>
                 </div>
                 <div>
-                  <p className="text-xs text-gray-400">Customer pays</p>
+                  <p className="text-xs text-gray-500">Customer pays</p>
                   <p className="font-semibold text-gray-900">Rs. {Math.round(sale.exchange_quote.amount_to_pay).toLocaleString()}</p>
                 </div>
               </div>
@@ -514,7 +514,7 @@ export default function SaleDetailPage() {
                     <li key={i.id}>
                       <span className="text-gray-900">{i.title ?? "Item"}</span>
                       <span className="text-gray-500">{[i.size, i.color].filter(Boolean).length ? ` · ${[i.size, i.color].filter(Boolean).join(" / ")}` : ""}</span>
-                      <span className="text-xs text-gray-400"> · Rs. {Math.round(i.amount).toLocaleString()}</span>
+                      <span className="text-xs text-gray-500"> · Rs. {Math.round(i.amount).toLocaleString()}</span>
                       {i.status === "received" && <span className="text-xs text-emerald-700"> · taken back{i.item_condition === "damaged" ? " (damaged stock)" : ""}</span>}
                       {i.status === "not_returned" && <span className="text-xs text-red-600"> · not taken back{i.verdict === "not_received" ? " — missing from the parcel" : i.verdict === "not_per_policy" ? " — not per policy" : ""}</span>}
                     </li>
@@ -534,7 +534,7 @@ export default function SaleDetailPage() {
                   </p>
                 )}
                 {p.approval_status === "approved" && (
-                  <p className="mt-0.5 text-xs text-gray-400">{decidedLine(p.auto_approved === 1, "approved", p.approved_by_name, p.approved_at)}</p>
+                  <p className="mt-0.5 text-xs text-gray-500">{decidedLine(p.auto_approved === 1, "approved", p.approved_by_name, p.approved_at)}</p>
                 )}
                 {p.stage === "rejected" && (
                   <p className="mt-0.5 text-xs text-red-600">
@@ -543,12 +543,12 @@ export default function SaleDetailPage() {
                 )}
                 {p.report_status === "approved" && p.pickup_charge > 0 && <p className="mt-0.5 text-xs text-gray-500">{shareSummary(p)}</p>}
                 {p.report_status === "approved" && (
-                  <p className="mt-0.5 text-xs text-gray-400">
+                  <p className="mt-0.5 text-xs text-gray-500">
                     {p.report_auto_approved === 1 ? `Inspection report — ${AUTO_APPROVED}` : `Inspection report approved by ${p.report_decided_by_name ?? "an admin"}`}
                   </p>
                 )}
                 {p.stage === "completed" && p.refunded_at && (
-                  <p className="mt-1 flex items-center gap-2 text-xs text-gray-400">
+                  <p className="mt-1 flex items-center gap-2 text-xs text-gray-500">
                     <span>
                       Refund of Rs. {Math.round(p.refund_due).toLocaleString()} paid by {p.refund_method === "bank_transfer" ? `bank transfer${p.refund_account_label ? ` (${p.refund_account_label})` : ""}` : "cash"} on{" "}
                       {formatDate(p.refunded_at)}
@@ -583,15 +583,15 @@ export default function SaleDetailPage() {
           <Card className="mb-4">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
               <div>
-                <p className="text-xs text-gray-400">Status</p>
+                <p className="text-xs text-gray-500">Status</p>
                 <p className="text-gray-900 font-medium capitalize">{isQuotation ? "Payment request" : saleStatusLabel({ payment_status: sale.payment_status, is_voided: sale.is_voided, exchange_in_status: sale.exchange?.status ?? null })}</p>
               </div>
               <div>
-                <p className="text-xs text-gray-400">Payment</p>
+                <p className="text-xs text-gray-500">Payment</p>
                 <p className="text-gray-900 font-medium capitalize">{isQuotation ? "Not yet paid" : salePaymentLabel(sale)}</p>
               </div>
               <div>
-                <p className="text-xs text-gray-400">Bill to</p>
+                <p className="text-xs text-gray-500">Bill to</p>
                 <p className="text-gray-900 font-medium">
                   {sale.customer_id && sale.customer_name ? (
                     <RefLink to={`/customers/${sale.customer_id}`}>{sale.customer_name}</RefLink>
@@ -602,7 +602,7 @@ export default function SaleDetailPage() {
                 </p>
               </div>
               <div>
-                <p className="text-xs text-gray-400">Total</p>
+                <p className="text-xs text-gray-500">Total</p>
                 <p className="text-gray-900 font-medium">Rs. {sale.total.toLocaleString()}</p>
               </div>
             </div>
@@ -670,7 +670,7 @@ export default function SaleDetailPage() {
           <DeliveryChargeSummary sale={sale} className="justify-end mt-2" />
         </>
       ) : (
-        !error && <p className="text-sm text-gray-400 flex items-center gap-2"><Receipt size={14} /> Invoice not found.</p>
+        !error && <p className="text-sm text-gray-500 flex items-center gap-2"><Receipt size={14} /> Invoice not found.</p>
       )}
     </div>
   );

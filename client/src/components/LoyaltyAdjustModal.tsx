@@ -98,7 +98,7 @@ export default function LoyaltyAdjustModal({
 
       {tab === "points" ? (
         <>
-          <p className="text-xs text-gray-400 mb-3">
+          <p className="text-xs text-gray-500 mb-3">
             Takes points away, or gives some back to fix a mistake. It's added to their points history with your reason — nothing earlier is edited.
           </p>
           <div className="flex gap-2 mb-3">
@@ -127,7 +127,7 @@ export default function LoyaltyAdjustModal({
         </>
       ) : (
         <>
-          <p className="text-xs text-gray-400 mb-3">
+          <p className="text-xs text-gray-500 mb-3">
             For wholesale buyers: their new sales earn no points, and POS ticks Wholesale for them. Points they already have are untouched.
           </p>
           {blocked ? (

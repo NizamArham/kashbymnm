@@ -54,33 +54,33 @@ export default function ProductDetailPage() {
           <Card>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
               <div>
-                <p className="text-xs text-gray-400">Selling price</p>
+                <p className="text-xs text-gray-500">Selling price</p>
                 <p className="text-gray-900 font-medium">Rs. {product.selling_price.toLocaleString()}</p>
               </div>
               {product.cost_price !== undefined && (
                 <div>
-                  <p className="text-xs text-gray-400">Cost price</p>
+                  <p className="text-xs text-gray-500">Cost price</p>
                   <p className="text-gray-900 font-medium">Rs. {product.cost_price.toLocaleString()}</p>
                 </div>
               )}
               <div>
-                <p className="text-xs text-gray-400">Available stock</p>
+                <p className="text-xs text-gray-500">Available stock</p>
                 <p className="text-gray-900 font-medium">{product.qty}</p>
               </div>
               <div>
-                <p className="text-xs text-gray-400">Type</p>
+                <p className="text-xs text-gray-500">Type</p>
                 <p className="text-gray-900 font-medium">{product.product_type}</p>
               </div>
               {product.supplier_name && (
                 <div>
-                  <p className="text-xs text-gray-400">Supplier</p>
+                  <p className="text-xs text-gray-500">Supplier</p>
                   <p className="text-gray-900 font-medium">
                     {product.supplier_name} {product.supplier_code ? `(${product.supplier_code})` : ""}
                   </p>
                 </div>
               )}
               <div>
-                <p className="text-xs text-gray-400">Returns</p>
+                <p className="text-xs text-gray-500">Returns</p>
                 <p className="text-gray-900 font-medium">{product.allow_returns ? "Allowed" : "Final sale"}</p>
               </div>
             </div>
@@ -88,7 +88,7 @@ export default function ProductDetailPage() {
         </>
       ) : (
         !error && (
-          <p className="text-sm text-gray-400 flex items-center gap-2">
+          <p className="text-sm text-gray-500 flex items-center gap-2">
             <Package size={14} /> Product not found.
           </p>
         )

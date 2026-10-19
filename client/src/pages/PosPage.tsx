@@ -85,7 +85,7 @@ function PosTick({
 }) {
   return (
     <div className="flex items-center">
-      <label className={`flex items-center gap-2 text-sm ${disabled ? "text-gray-400" : "text-gray-700 cursor-pointer"}`}>
+      <label className={`flex items-center gap-2 text-sm ${disabled ? "text-gray-500" : "text-gray-700 cursor-pointer"}`}>
         <input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} className="rounded" />
         {label}
       </label>
@@ -360,7 +360,7 @@ export default function PosPage() {
   );
   const wholesaleNote =
     loyaltyBlocked && selectedCustomer ? (
-      <p className="text-xs text-gray-400 -mt-2">
+      <p className="text-xs text-gray-500 -mt-2">
         {selectedCustomer.name} doesn't earn points{selectedCustomer.loyalty_block_reason ? ` — ${selectedCustomer.loyalty_block_reason}` : ""}.
       </p>
     ) : null;
@@ -1334,7 +1334,7 @@ export default function PosPage() {
                     <MoneyInput value={discountValue} onChange={setDiscountValue} placeholder="0" />
                   </div>
                   {manualDiscountAmount > 0 && (
-                    <p className="text-xs text-gray-400 mt-1">
+                    <p className="text-xs text-gray-500 mt-1">
                       Discount applied: Rs. {manualDiscountAmount.toLocaleString()} off
                     </p>
                   )}
@@ -1438,7 +1438,7 @@ export default function PosPage() {
                                 >
                                   <div className="min-w-0">
                                     <p className="text-sm text-gray-900 truncate">{c.name}</p>
-                                    <p className="text-xs text-gray-400">{c.phone ?? c.customer_code}</p>
+                                    <p className="text-xs text-gray-500">{c.phone ?? c.customer_code}</p>
                                   </div>
                                   <span className="text-xs text-amber-600 flex-shrink-0">{c.loyalty_points} pts</span>
                                 </button>
@@ -1453,7 +1453,7 @@ export default function PosPage() {
                             </>
                           ) : (
                             <div className="px-3.5 py-3">
-                              <p className="text-xs text-gray-400 mb-2">No matching customers.</p>
+                              <p className="text-xs text-gray-500 mb-2">No matching customers.</p>
                               <button
                                 onClick={openAddCustomer}
                                 className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-black text-white rounded-xl text-sm hover:bg-gray-800 transition"
@@ -1651,7 +1651,7 @@ export default function PosPage() {
               {productSearchOpen && productQuery.trim() && (
                 <div className="absolute z-20 mt-1.5 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-80 overflow-y-auto">
                   {productResults.length === 0 ? (
-                    <p className="text-xs text-gray-400 px-3.5 py-3">No available items match "{productQuery}".</p>
+                    <p className="text-xs text-gray-500 px-3.5 py-3">No available items match "{productQuery}".</p>
                   ) : (
                     productResults.slice(0, 10).map((u) => (
                       <button
@@ -1661,7 +1661,7 @@ export default function PosPage() {
                       >
                         <div className="min-w-0">
                           <p className="text-sm text-gray-900 truncate">{u.product_title}</p>
-                          <p className="text-xs text-gray-400">
+                          <p className="text-xs text-gray-500">
                             {u.color ?? "—"} / {u.size ?? "—"} · {u.sku}
                             {u.barcode ? ` · ${u.barcode}` : ""}
                           </p>
@@ -1737,10 +1737,10 @@ export default function PosPage() {
                       }`}
                     >
                       <div className="col-span-9 lg:col-span-4 min-w-0 order-1 lg:order-none">
-                        <p className={`font-medium text-sm truncate ${hasStaleUnit ? "text-gray-400 line-through" : "text-gray-900"}`}>
+                        <p className={`font-medium text-sm truncate ${hasStaleUnit ? "text-gray-500 line-through" : "text-gray-900"}`}>
                           {sample.product_id ? <RefLink to={`/products/${sample.product_id}`}>{sample.product_title}</RefLink> : sample.product_title}
                         </p>
-                        <p className={`text-xs mt-0.5 truncate ${hasStaleUnit ? "text-gray-400 line-through" : "text-gray-500"}`}>
+                        <p className={`text-xs mt-0.5 truncate ${hasStaleUnit ? "text-gray-500 line-through" : "text-gray-500"}`}>
                           {sample.color ?? "—"} / {sample.size ?? "—"} | SKU: {sample.sku}
                         </p>
                         {hasStaleUnit && (
@@ -1781,7 +1781,7 @@ export default function PosPage() {
                           <div className="flex items-center justify-between">
                             <div>
                               <p className="text-gray-900 font-semibold text-sm">Rs. {line.unit_price.toLocaleString()}</p>
-                              {isDiscounted && <p className="text-xs text-gray-400 line-through">Rs. {originalPrice.toLocaleString()}</p>}
+                              {isDiscounted && <p className="text-xs text-gray-500 line-through">Rs. {originalPrice.toLocaleString()}</p>}
                             </div>
                             <button onClick={() => startEditPrice(line)} className="text-gray-400 hover:text-gray-600 ml-1 flex-shrink-0">
                               <Edit2 size={12} />
@@ -1829,7 +1829,7 @@ export default function PosPage() {
                     {customerBlock}
                     {deliveryBlock}
                     <div className="space-y-3 border-t border-gray-100 pt-3">
-                      <p className="text-xs text-gray-400">Optional</p>
+                      <p className="text-xs text-gray-500">Optional</p>
                       {discountBlock}
                       {couponBlock}
                     </div>
@@ -1977,7 +1977,7 @@ export default function PosPage() {
                       {wholesaleTick}
                     </div>
                     {!selectedCustomer && (
-                      <p className="text-xs text-gray-400 -mt-2">Select a customer first — credit isn't offered to walk-ins.</p>
+                      <p className="text-xs text-gray-500 -mt-2">Select a customer first — credit isn't offered to walk-ins.</p>
                     )}
                     {wholesaleNote}
 
@@ -1986,7 +1986,7 @@ export default function PosPage() {
                         <FormGroup>
                           <Label>Amount paid now (Rs.) — 0 if fully on credit</Label>
                           <MoneyInput value={creditAmountPaid} onChange={setCreditAmountPaid} />
-                          <p className="text-xs text-gray-400 mt-1">
+                          <p className="text-xs text-gray-500 mt-1">
                             Remaining balance of Rs. {Math.max(0, total - (parseFloat(creditAmountPaid) || 0)).toLocaleString()} will show as owed
                             on {selectedCustomer ? selectedCustomer.name : "this customer's"} record.
                           </p>
@@ -2081,7 +2081,7 @@ export default function PosPage() {
                               )}
                             </div>
                             <div className="relative">
-                              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">Rs.</span>
+                              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-500">Rs.</span>
                               <MoneyInput
                                 bare
                                 id="pos-cash-received"
@@ -2258,7 +2258,7 @@ export default function PosPage() {
                         <p className="text-xs text-gray-500 mt-0.5">
                           {u.color ?? "—"} / {u.size ?? "—"}
                         </p>
-                        <p className="text-xs text-gray-400 mt-0.5">SKU: {u.sku}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">SKU: {u.sku}</p>
                       </div>
                       <div className="text-right ml-2 flex-shrink-0">
                         <p className="font-bold text-gray-900 text-sm">Rs. {(u.selling_price ?? 0).toLocaleString()}</p>
@@ -2322,7 +2322,7 @@ export default function PosPage() {
                       <p className="text-xs text-gray-500 mt-0.5">
                         {u.color ?? "—"} / {u.size ?? "—"}
                       </p>
-                      <p className="text-xs text-gray-400 mt-0.5">SKU: {u.sku}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">SKU: {u.sku}</p>
                     </div>
                     <div className="text-right flex-shrink-0">
                       <p className="font-bold text-gray-900 text-sm">Rs. {(u.selling_price ?? 0).toLocaleString()}</p>
@@ -2398,7 +2398,7 @@ export default function PosPage() {
                     </h4>
                     <div className="mb-4 pb-4 border-b border-gray-200">
                       <p className="text-base font-semibold text-gray-900">{newCustomerName.trim() || "New customer"}</p>
-                      <p className="text-xs text-gray-400 mt-1">Preview updates as you type</p>
+                      <p className="text-xs text-gray-500 mt-1">Preview updates as you type</p>
                     </div>
                     <div className="space-y-3 text-sm">
                       <div className="flex items-center gap-2">
@@ -2514,7 +2514,7 @@ export default function PosPage() {
         >
 <div className="space-y-4">
               <div>
-                <p className="text-xs text-gray-400 mb-1.5">
+                <p className="text-xs text-gray-500 mb-1.5">
                   {saleType === "online" ? "Online order" : "In-store sale"} · {totalCartUnits} item{totalCartUnits !== 1 ? "s" : ""}
                 </p>
                 <div className="space-y-1.5">
@@ -2660,7 +2660,7 @@ export default function PosPage() {
                 {selectedCustomer?.name} paid Rs. {paidAmount.toLocaleString()}, which is Rs.{" "}
                 {(paidAmount - remainingAfterCredit).toLocaleString()} more than the amount due.
               </p>
-              <p className="text-xs text-gray-400 mb-4">What should happen to the extra?</p>
+              <p className="text-xs text-gray-500 mb-4">What should happen to the extra?</p>
               <div className="flex flex-col gap-2">
                 <button
                   onClick={() => {
@@ -2671,7 +2671,7 @@ export default function PosPage() {
                   className="border border-gray-200 rounded-xl px-4 py-3 text-sm text-left hover:border-gray-400 transition"
                 >
                   <span className="font-medium text-gray-900">Give change</span>
-                  <div className="text-xs text-gray-400 mt-0.5">Hand back Rs. {(paidAmount - remainingAfterCredit).toLocaleString()} in cash</div>
+                  <div className="text-xs text-gray-500 mt-0.5">Hand back Rs. {(paidAmount - remainingAfterCredit).toLocaleString()} in cash</div>
                 </button>
                 <button
                   onClick={() => {
@@ -2682,7 +2682,7 @@ export default function PosPage() {
                   className="border border-gray-200 rounded-xl px-4 py-3 text-sm text-left hover:border-gray-400 transition"
                 >
                   <span className="font-medium text-gray-900">Keep as store credit</span>
-                  <div className="text-xs text-gray-400 mt-0.5">
+                  <div className="text-xs text-gray-500 mt-0.5">
                     Adds Rs. {(paidAmount - remainingAfterCredit).toLocaleString()} to {selectedCustomer?.name}'s account for later
                   </div>
                 </button>
@@ -2705,7 +2705,7 @@ export default function PosPage() {
             </>
           }
         >
-          <p className="text-xs text-gray-400 mb-4">
+          <p className="text-xs text-gray-500 mb-4">
             Saves this cart as a payment request, with nothing charged yet. Print or send it to the customer — once they have paid or confirmed, pull it up again and turn it into a real sale.
           </p>
           <label className="mb-4 flex cursor-pointer items-start gap-2.5 rounded-xl border border-gray-200 px-3.5 py-3 text-sm text-gray-700">

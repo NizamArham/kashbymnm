@@ -61,7 +61,7 @@ export function PageHeader({ title, subtitle, action, tabs, compact = false }: {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">{title}</h1>
-          {subtitle && <p className="text-sm text-gray-400 mt-0.5">{subtitle}</p>}
+          {subtitle && <p className="text-sm text-gray-500 mt-0.5">{subtitle}</p>}
         </div>
         {action}
       </div>
@@ -93,12 +93,12 @@ export function StatCard({ label, value, deltaPct }: { label: string; value: str
   const isDown = showDelta && deltaPct! < -0.05;
   return (
     <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm overflow-hidden">
-      <div className="text-xs text-gray-400 mb-1">{label}</div>
+      <div className="text-xs text-gray-500 mb-1">{label}</div>
       <div className="text-2xl font-semibold text-gray-900">{value}</div>
       {showDelta && (
         <div
           className={`mt-1.5 flex items-center gap-1 text-xs font-medium whitespace-nowrap ${
-            isUp ? "text-green-600" : isDown ? "text-red-500" : "text-gray-400"
+            isUp ? "text-green-600" : isDown ? "text-red-500" : "text-gray-500"
           }`}
         >
           {isUp ? <ArrowUp size={12} className="flex-shrink-0" /> : isDown ? <ArrowDown size={12} className="flex-shrink-0" /> : <Minus size={12} className="flex-shrink-0" />}
@@ -380,7 +380,7 @@ export function Dropdown({
                   {query.trim() ? `${createNewLabel} "${query.trim()}"` : createNewLabel}
                 </button>
               ) : (
-                <div className="px-3 py-2.5 text-sm text-gray-400">No matches</div>
+                <div className="px-3 py-2.5 text-sm text-gray-500">No matches</div>
               )
             ) : (
               filteredOptions.map((opt) => {
@@ -400,7 +400,7 @@ export function Dropdown({
                   >
                     <span className="truncate">
                       {opt.label}
-                      {opt.sublabel && <span className="text-gray-400 ml-1.5 text-xs font-normal">{opt.sublabel}</span>}
+                      {opt.sublabel && <span className="text-gray-500 ml-1.5 text-xs font-normal">{opt.sublabel}</span>}
                     </span>
                     {isSelected && <Check size={14} className="flex-shrink-0 text-gray-900" />}
                   </button>
@@ -545,7 +545,7 @@ export function HelpHint({ text, className = "" }: { text: string; className?: s
         }}
         onMouseEnter={() => setOpen(true)}
         onMouseLeave={() => setOpen(false)}
-        className="w-3.5 h-3.5 flex items-center justify-center rounded-full bg-gray-200 text-gray-500 text-[9px] font-bold leading-none hover:bg-gray-300 hover:text-gray-700 transition-colors"
+        className="w-4 h-4 flex items-center justify-center rounded-full bg-gray-200 text-gray-600 text-xs font-bold leading-none hover:bg-gray-300 hover:text-gray-800 transition-colors"
         aria-label="More info"
       >
         ?
@@ -636,7 +636,7 @@ export function Modal({
         <div className="flex flex-shrink-0 items-start justify-between gap-4 border-b border-gray-100 px-6 py-4">
           <div className="min-w-0">
             <h2 className="text-base font-semibold text-gray-900">{title}</h2>
-            {subtitle && <p className="mt-0.5 text-xs text-gray-400">{subtitle}</p>}
+            {subtitle && <p className="mt-0.5 text-xs text-gray-500">{subtitle}</p>}
           </div>
           <button type="button" onClick={onClose} aria-label="Close" className="-mr-1 flex-shrink-0 rounded-lg p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600">
             <X size={18} />
@@ -664,7 +664,7 @@ export function SuccessText({ children }: { children: ReactNode }) {
 }
 
 export function HelperText({ children }: { children: ReactNode }) {
-  return <p className="text-xs text-gray-400 mt-1">{children}</p>;
+  return <p className="text-xs text-gray-500 mt-1">{children}</p>;
 }
 
 // A way forward from an empty page: what to open, add or widen. "primary" is the thing to create (a black button); the others
@@ -685,7 +685,7 @@ export function EmptyState({ icon: Icon, title, subtitle, actions, bare }: { ico
     <div className={bare ? "text-center py-10 px-4" : "text-center py-16 bg-white border border-gray-200 rounded-2xl px-4"}>
       {Icon && <Icon size={48} className="text-gray-300 mx-auto mb-3" />}
       <h3 className="text-base font-medium text-gray-700">{title}</h3>
-      {subtitle && <p className="text-sm text-gray-400 mt-1">{subtitle}</p>}
+      {subtitle && <p className="text-sm text-gray-500 mt-1">{subtitle}</p>}
       {shown.length > 0 && (
         <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
           {shown.map((a) => (
@@ -739,7 +739,7 @@ export function Table({ children, className = "" }: { children: ReactNode; class
 export function Th({ children, className = "", align }: { children?: ReactNode; className?: string; align?: "right" }) {
   return (
     <th
-      className={`${align === "right" ? "text-right" : "text-left"} sticky top-[var(--sticky-top,0px)] z-[5] bg-white px-3 py-2.5 text-xs font-medium text-gray-400 shadow-[inset_0_-1px_0_0_#f3f4f6] ${className}`}
+      className={`${align === "right" ? "text-right" : "text-left"} sticky top-[var(--sticky-top,0px)] z-[5] bg-white px-3 py-2.5 text-xs font-medium text-gray-500 shadow-[inset_0_-1px_0_0_#f3f4f6] ${className}`}
     >
       {children}
     </th>
@@ -944,7 +944,7 @@ export function ActionMenu({
             {items.map((item, i) => (
               <Fragment key={item.label}>
                 {item.group && item.group !== items[i - 1]?.group && (
-                  <p className={`px-3.5 pb-1 pt-2 text-xs text-gray-400 ${i > 0 ? "mt-1 border-t border-gray-100" : ""}`}>{item.group}</p>
+                  <p className={`px-3.5 pb-1 pt-2 text-xs text-gray-500 ${i > 0 ? "mt-1 border-t border-gray-100" : ""}`}>{item.group}</p>
                 )}
                 <button
                   type="button"
@@ -1001,7 +1001,7 @@ export function RowCardStats({ children }: { children: ReactNode }) {
 export function RowCardStat({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div>
-      <p className="text-[10px] text-gray-400 uppercase tracking-wide">{label}</p>
+      <p className="text-xs text-gray-500 uppercase tracking-wide">{label}</p>
       <p className="text-sm font-semibold text-gray-900 mt-0.5">{value}</p>
     </div>
   );
@@ -1412,7 +1412,7 @@ export function DateRangePicker({
 
           <div className="grid grid-cols-7 gap-1 mb-1">
             {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
-              <div key={i} className="text-center text-[10px] font-medium text-gray-400 py-1">
+              <div key={i} className="text-center text-xs font-medium text-gray-500 py-1">
                 {d}
               </div>
             ))}
@@ -1596,7 +1596,7 @@ export function DatePicker({
 
             <div className="grid grid-cols-7 gap-1 mb-1">
               {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
-                <div key={i} className="text-center text-[10px] font-medium text-gray-400 py-1">
+                <div key={i} className="text-center text-xs font-medium text-gray-500 py-1">
                   {d}
                 </div>
               ))}

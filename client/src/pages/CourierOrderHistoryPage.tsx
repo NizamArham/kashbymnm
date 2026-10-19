@@ -156,7 +156,7 @@ export default function CourierOrderHistoryPage() {
                   setOrderDateStart(addDaysIso(todayIso(), -6));
                   setOrderDateEnd(todayIso());
                 }}
-                className="text-xs text-gray-400 hover:text-gray-700 underline"
+                className="text-xs text-gray-500 hover:text-gray-700 underline"
               >
                 Reset to last 7 days
               </button>
@@ -165,7 +165,7 @@ export default function CourierOrderHistoryPage() {
                   setOrderDateStart(null);
                   setOrderDateEnd(null);
                 }}
-                className="text-xs text-gray-400 hover:text-gray-700 underline"
+                className="text-xs text-gray-500 hover:text-gray-700 underline"
               >
                 Show everything
               </button>
@@ -235,7 +235,7 @@ export default function CourierOrderHistoryPage() {
                     <span className="font-medium">
                       <RefLink to={`/sales/${order.sale_id}`}>{order.invoice}</RefLink>
                     </span>
-                    <span className="block text-xs text-gray-400">{order.customer_name ?? "Walk-in"}</span>
+                    <span className="block text-xs text-gray-500">{order.customer_name ?? "Walk-in"}</span>
                   </Td>
                   <Td>{labelFor(order.courier_partner)}</Td>
                   <Td>
@@ -264,7 +264,7 @@ export default function CourierOrderHistoryPage() {
                         +{money(order.return_charge)} return
                       </button>
                     )}
-                    <div className="mt-0.5 flex items-center justify-end gap-1.5 text-[11px] text-gray-400">
+                    <div className="mt-0.5 flex items-center justify-end gap-1.5 text-xs text-gray-500">
                       {order.charge_confirmed ? (
                         <span className="inline-flex items-center gap-0.5 text-gray-500">
                           <Check size={12} />

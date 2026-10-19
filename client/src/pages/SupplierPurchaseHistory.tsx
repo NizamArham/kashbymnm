@@ -95,7 +95,7 @@ export default function SupplierPurchaseHistory({ supplierId }: { supplierId: nu
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="font-medium leading-snug text-gray-900">{p.purchase_code}</p>
-                <p className="mt-0.5 text-xs text-gray-400">
+                <p className="mt-0.5 text-xs text-gray-500">
                   {formatDate(p.purchase_date)}
                   {p.description ? ` · ${p.description}` : ""}
                 </p>

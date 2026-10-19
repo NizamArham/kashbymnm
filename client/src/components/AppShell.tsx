@@ -340,7 +340,7 @@ export default function AppShell() {
                     {item.id === "returns" && waitingApprovals > 0 && (
                       <span
                         title={`${waitingApprovals} waiting for approval`}
-                        className={`ml-auto rounded-full px-2 py-0.5 text-[11px] font-medium leading-none ${active ? "bg-black text-white" : "bg-white text-black"}`}
+                        className={`ml-auto rounded-full px-2 py-0.5 text-xs font-medium leading-none ${active ? "bg-black text-white" : "bg-white text-black"}`}
                       >
                         {waitingApprovals}
                       </span>

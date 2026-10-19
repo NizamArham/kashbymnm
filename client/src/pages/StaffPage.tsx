@@ -359,31 +359,31 @@ export default function StaffPage() {
                             ) : (
                               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                                 <div>
-                                  <p className="text-xs text-gray-400">Joined</p>
+                                  <p className="text-xs text-gray-500">Joined</p>
                                   <p className="text-gray-900">{formatDate(s.joined_date)}</p>
                                 </div>
                                 <div>
-                                  <p className="text-xs text-gray-400">NIC</p>
+                                  <p className="text-xs text-gray-500">NIC</p>
                                   <p className="text-gray-900">{s.nic ?? "—"}</p>
                                 </div>
                                 <div>
-                                  <p className="text-xs text-gray-400">Phone</p>
+                                  <p className="text-xs text-gray-500">Phone</p>
                                   <p className="text-gray-900">{s.phone ?? "—"}</p>
                                 </div>
                                 <div>
-                                  <p className="text-xs text-gray-400">Reports to</p>
+                                  <p className="text-xs text-gray-500">Reports to</p>
                                   <p className="text-gray-900">{s.reports_to_name ?? "—"}</p>
                                 </div>
                                 <div className="col-span-2">
-                                  <p className="text-xs text-gray-400">Address</p>
+                                  <p className="text-xs text-gray-500">Address</p>
                                   <p className="text-gray-900">{s.address ?? "—"}</p>
                                 </div>
                                 <div>
-                                  <p className="text-xs text-gray-400">Salary</p>
+                                  <p className="text-xs text-gray-500">Salary</p>
                                   <p className="text-gray-900">{s.salary != null ? `Rs. ${s.salary.toLocaleString()}` : "—"}</p>
                                 </div>
                                 <div>
-                                  <p className="text-xs text-gray-400">Bank</p>
+                                  <p className="text-xs text-gray-500">Bank</p>
                                   <p className="text-gray-900">{s.bank_name ? `${s.bank_name} (${s.bank_account_no ?? "—"})` : "—"}</p>
                                 </div>
                               </div>

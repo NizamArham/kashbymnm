@@ -98,7 +98,7 @@ export function RevenueChart({ data, height = 220 }: { data: RevenuePoint[]; hei
           return (
             <g key={i}>
               <line x1={padLeft} y1={y} x2={width - padRight} y2={y} stroke={value === 0 && minValue < 0 ? "#D1D5DB" : "#F1F1F1"} strokeWidth={1} />
-              <text x={padLeft - 8} y={y + 3} textAnchor="end" fontSize="10" fill="#9CA3AF">
+              <text x={padLeft - 8} y={y + 4} textAnchor="end" fontSize="12" fill="#6B7280">
                 {formatCompact(value)}
               </text>
             </g>
@@ -110,7 +110,7 @@ export function RevenueChart({ data, height = 220 }: { data: RevenuePoint[]; hei
           const showEvery = points.length > 14 ? Math.ceil(points.length / 8) : 1;
           if (i % showEvery !== 0 && i !== points.length - 1) return null;
           return (
-            <text key={i} x={p.x} y={height - 8} textAnchor="middle" fontSize="10" fill="#9CA3AF">
+            <text key={i} x={p.x} y={height - 8} textAnchor="middle" fontSize="12" fill="#6B7280">
               {p.label}
             </text>
           );
@@ -144,7 +144,7 @@ export function RevenueChart({ data, height = 220 }: { data: RevenuePoint[]; hei
           }}
         >
           Rs. {hovered.value.toLocaleString()}
-          <span className="block text-[10px] text-gray-400 font-normal">{hovered.label}</span>
+          <span className="block text-xs text-gray-500 font-normal">{hovered.label}</span>
         </div>
       )}
     </div>
@@ -239,7 +239,7 @@ export function RevenueProfitChart({ data, height = 260 }: { data: RevenueProfit
             return (
               <g key={i}>
                 <line x1={padLeft} y1={y} x2={width - padRight} y2={y} stroke={value === 0 && minValue < 0 ? "#D1D5DB" : "#F1F1F1"} strokeWidth={1} />
-                <text x={padLeft - 8} y={y + 3} textAnchor="end" fontSize="10" fill="#9CA3AF">
+                <text x={padLeft - 8} y={y + 4} textAnchor="end" fontSize="12" fill="#6B7280">
                   {formatCompact(value)}
                 </text>
               </g>
@@ -250,7 +250,7 @@ export function RevenueProfitChart({ data, height = 260 }: { data: RevenueProfit
             const showEvery = points.length > 14 ? Math.ceil(points.length / 8) : 1;
             if (i % showEvery !== 0 && i !== points.length - 1) return null;
             return (
-              <text key={i} x={p.x} y={height - 8} textAnchor="middle" fontSize="10" fill="#9CA3AF">
+              <text key={i} x={p.x} y={height - 8} textAnchor="middle" fontSize="12" fill="#6B7280">
                 {p.label}
               </text>
             );
@@ -287,7 +287,7 @@ export function RevenueProfitChart({ data, height = 260 }: { data: RevenueProfit
             <span style={{ color: "#34D399" }}>Profit Rs. {hovered.profit.toLocaleString()}</span>
             <span className="mx-1 text-gray-500">·</span>
             <span>Revenue Rs. {hovered.revenue.toLocaleString()}</span>
-            <span className="block text-[10px] text-gray-400 font-normal">{hovered.label}</span>
+            <span className="block text-xs text-gray-500 font-normal">{hovered.label}</span>
           </div>
         )}
       </div>

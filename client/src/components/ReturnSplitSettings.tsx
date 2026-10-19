@@ -59,7 +59,7 @@ export default function ReturnSplitSettings() {
           <FormGroup>
             <Label>The customer's choice — wrong size or colour, changed their mind</Label>
             <Dropdown value={customerChoice} onChange={setCustomerChoice} options={OPTIONS} disabled={!isAdmin} />
-            <p className="mt-1 text-xs text-gray-400">Half and half is a fair goodwill choice if you'd rather share it.</p>
+            <p className="mt-1 text-xs text-gray-500">Half and half is a fair goodwill choice if you'd rather share it.</p>
           </FormGroup>
           {error && <ErrorText>{error}</ErrorText>}
           {saved && <SuccessText>Saved.</SuccessText>}
@@ -68,7 +68,7 @@ export default function ReturnSplitSettings() {
               {saving ? "Saving…" : "Save"}
             </Button>
           ) : (
-            <p className="text-xs text-gray-400">Only an admin can change these.</p>
+            <p className="text-xs text-gray-500">Only an admin can change these.</p>
           )}
         </>
       )}

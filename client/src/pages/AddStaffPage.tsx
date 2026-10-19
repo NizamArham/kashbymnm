@@ -109,7 +109,7 @@ export default function AddStaffPage() {
 
           <Card className="h-fit lg:sticky lg:top-6">
             <h2 className="text-base font-semibold text-gray-900 mb-4 flex items-center gap-2"><UserRound size={18} className="text-gray-600" /> Staff Preview</h2>
-            <div className="mb-4 pb-4 border-b border-gray-100"><p className="text-lg font-semibold text-gray-900">{newName.trim() || "New staff member"}</p><p className="text-xs text-gray-400 mt-1">Preview updates as you type</p></div>
+            <div className="mb-4 pb-4 border-b border-gray-100"><p className="text-lg font-semibold text-gray-900">{newName.trim() || "New staff member"}</p><p className="text-xs text-gray-500 mt-1">Preview updates as you type</p></div>
             <div className="space-y-3 text-sm">
               <div className="flex items-center gap-2"><UserRound size={14} className="text-gray-400" /><span>@{newUsername.trim() || "username"}</span></div>
               <div className="flex items-center gap-2"><ShieldCheck size={14} className="text-gray-400" /><span className="capitalize">{newRole} account</span></div>
