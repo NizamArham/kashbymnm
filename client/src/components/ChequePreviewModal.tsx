@@ -74,11 +74,12 @@ function CrossingMark() {
 // The bank's verdict, stamped onto the cheque like a plain "inspected by" office stamp: one thin ring, the verdict curved round the top in
 // light capitals, and the date set in two short centred lines inside (day and month, then the year). Nothing else — no tick, no box, no
 // ornament. Tilted a little off level like a hand-pressed stamp. Drawn as clean solid vectors with sharp edges (no blur, no filter), in soft
-// black ink to suit the plain black-and-white cheque, printed behind the cheque's own text. The only wear is a slightly lighter side.
+// black ink when the cheque cleared (to suit the plain black-and-white cheque) and a muted red when it bounced, printed behind the cheque's
+// own text. The only wear is a slightly lighter side.
 function ChequeSeal({ status, settledAt, className = "" }: { status: string; settledAt?: string | null; chequeNumber?: string; className?: string }) {
   const passed = status === "cleared";
   const uid = useId().replace(/:/g, "");
-  const ink = "#1c1c1c";
+  const ink = passed ? "#1c1c1c" : "#ab4b46";
   const sans = '"Helvetica Neue", Helvetica, Arial, sans-serif';
   // "15 OCT" over "2026"; with no date on record, the wording stands in
   const words = settledAt ? formatDateDisplay(settledAt).toUpperCase().split(" ") : [];
@@ -218,7 +219,7 @@ export default function ChequePreviewModal({
                 />
 
                 {isCrossed && <CrossingMark />}
-                {stamped && <ChequeSeal status={cheque.status} settledAt={cheque.settled_at} chequeNumber={cheque.cheque_number} className="left-[57%] top-[63%] w-[17%] -translate-x-1/2 -translate-y-1/2" />}
+                {stamped && <ChequeSeal status={cheque.status} settledAt={cheque.settled_at} chequeNumber={cheque.cheque_number} className="left-[66%] top-[63%] w-[17%] -translate-x-1/2 -translate-y-1/2" />}
 
                 <div className="relative flex min-h-0 flex-1 flex-col">
                 <div
@@ -320,7 +321,7 @@ export default function ChequePreviewModal({
                   }}
                 />
 
-                {stamped && <ChequeSeal status={cheque.status} settledAt={cheque.settled_at} chequeNumber={cheque.cheque_number} className="left-[57%] top-[63%] w-[17%] -translate-x-1/2 -translate-y-1/2" />}
+                {stamped && <ChequeSeal status={cheque.status} settledAt={cheque.settled_at} chequeNumber={cheque.cheque_number} className="left-[66%] top-[63%] w-[17%] -translate-x-1/2 -translate-y-1/2" />}
                 <div className="relative flex min-h-0 flex-1 flex-col">
                 <p className="relative text-[10px] uppercase tracking-wider text-gray-400 mb-2">Endorsement history</p>
 
