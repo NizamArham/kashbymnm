@@ -71,27 +71,11 @@ function CrossingMark() {
   );
 }
 
-// The bank's verdict, stamped onto the cheque like a small round seal: a fine scalloped edge (the wavy rim of a notary or post-office
-// seal) with a hairline ring inside it, a tick (passed) or cross (bounced) in the middle, the one-word verdict curved over the top and the
-// date curved under the bottom. Thin lines and a light weight so it stays quiet; drawn as clean solid vectors with sharp edges (no blur,
-// no filter), in muted dusty blue when it passed and dusty red when it bounced, so it sits in the plain black-and-white cheque, behind
-// the printed text. The only wear is a slightly lighter side, and it sits a few degrees off level the way a hand-pressed stamp does.
-
-// The wavy rim: 40 shallow bumps round a circle, each one a small arc, in the seal's 160-unit square.
-const SCALLOP = (() => {
-  const n = 40;
-  const r = 71;
-  const half = r * Math.sin(Math.PI / n);
-  const bump = (half * 1.25).toFixed(2);
-  const at = (k: number) => {
-    const a = (k / n) * Math.PI * 2 - Math.PI / 2;
-    return `${(80 + r * Math.cos(a)).toFixed(2)},${(80 + r * Math.sin(a)).toFixed(2)}`;
-  };
-  let d = `M${at(0)}`;
-  for (let k = 1; k <= n; k++) d += ` A${bump},${bump} 0 0,1 ${at(k)}`;
-  return d + "Z";
-})();
-
+// The bank's verdict, stamped onto the cheque as four corner marks: no outline, just thin brackets framing the verdict like a viewfinder,
+// a small tick (passed) or cross (bounced) above the word, and the date in fine type underneath. Thin lines and a medium weight so it
+// stays quiet; drawn as clean solid vectors with sharp edges (no blur, no filter), in muted dusty blue when it passed and dusty red when it
+// bounced, so it sits in the plain black-and-white cheque, behind the printed text. The only wear is a slightly lighter side, and it sits
+// a few degrees off level the way a hand-pressed stamp does.
 function ChequeSeal({ status, settledAt, className = "" }: { status: string; settledAt?: string | null; chequeNumber?: string; className?: string }) {
   const passed = status === "cleared";
   const uid = useId().replace(/:/g, "");
@@ -100,45 +84,34 @@ function ChequeSeal({ status, settledAt, className = "" }: { status: string; set
   const mono = 'ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace';
   const sans = '"Helvetica Neue", Helvetica, Arial, sans-serif';
   return (
-    <svg viewBox="0 0 160 160" className={`pointer-events-none absolute aspect-square -rotate-[6deg] ${className}`} style={{ color: ink, mixBlendMode: "multiply" }} aria-hidden="true">
+    <svg viewBox="0 0 190 92" className={`pointer-events-none absolute aspect-[190/92] -rotate-[3deg] ${className}`} style={{ color: ink, mixBlendMode: "multiply" }} aria-hidden="true">
       <defs>
-        {/* over the top, left to right … */}
-        <path id={`top-${uid}`} d="M31,80 a49,49 0 0,1 98,0" />
-        {/* … and under the bottom, left to right, so it also reads upright */}
-        <path id={`bot-${uid}`} d="M22,80 a58,58 0 0,0 116,0" />
         <linearGradient id={`press-${uid}`} x1="0" y1="0" x2="1" y2="1">
           <stop offset="0" stopColor="#fff" />
           <stop offset="1" stopColor="#c4c4c4" />
         </linearGradient>
-        <mask id={`wear-${uid}`} maskUnits="userSpaceOnUse" x="0" y="0" width="160" height="160">
-          <rect width="160" height="160" fill={`url(#press-${uid})`} />
+        <mask id={`wear-${uid}`} maskUnits="userSpaceOnUse" x="0" y="0" width="190" height="92">
+          <rect width="190" height="92" fill={`url(#press-${uid})`} />
         </mask>
       </defs>
       <g mask={`url(#wear-${uid})`} opacity="0.92" fill="currentColor" stroke="none" textRendering="geometricPrecision" shapeRendering="geometricPrecision">
-        {/* the scalloped rim, and a hairline ring just inside it */}
-        <path d={SCALLOP} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
-        <circle cx="80" cy="80" r="65" fill="none" stroke="currentColor" strokeWidth="0.8" />
+        {/* the four corners */}
+        <path d="M3,22 V3 H22 M168,3 H187 V22 M187,70 V89 H168 M22,89 H3 V70" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="square" strokeLinejoin="miter" />
 
-        {/* the mark in the middle */}
-        <g fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.4">
-          {passed ? <path d="M62,82 L74,94 L98,65" /> : <path d="M64,64 L96,96 M96,64 L64,96" />}
+        {/* the mark above the word */}
+        <g fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.8">
+          {passed ? <path d="M86,29 L93,36 L105,21" /> : <path d="M87,22 L102,37 M102,22 L87,37" />}
         </g>
 
-        <text fontFamily={sans} fontSize="12.5" fontWeight="600" letterSpacing="3.6">
-          <textPath href={`#top-${uid}`} startOffset="50%" textAnchor="middle">
-            {passed ? "CLEARED" : "BOUNCED"}
-          </textPath>
+        {/* the verdict fills the same width whatever face the device has */}
+        <text x="25" y="62" fontFamily={sans} fontSize="22" fontWeight="600" textLength="140" lengthAdjust="spacing">
+          {passed ? "CLEARED" : "BOUNCED"}
         </text>
         {date && (
-          <text fontFamily={mono} fontSize="9" fontWeight="600" letterSpacing="2">
-            <textPath href={`#bot-${uid}`} startOffset="50%" textAnchor="middle">
-              {date}
-            </textPath>
+          <text x="95" y="79" textAnchor="middle" fontFamily={mono} fontSize="9.4" fontWeight="600" textLength={Math.min(date.length * 6.8, 96)} lengthAdjust="spacing">
+            {date}
           </text>
         )}
-        {/* a dot each side, where the two curved lines meet */}
-        <circle cx="26.5" cy="80" r="1.6" />
-        <circle cx="133.5" cy="80" r="1.6" />
       </g>
     </svg>
   );
@@ -247,7 +220,7 @@ export default function ChequePreviewModal({
                 />
 
                 {isCrossed && <CrossingMark />}
-                {stamped && <ChequeSeal status={cheque.status} settledAt={cheque.settled_at} chequeNumber={cheque.cheque_number} className="left-[58%] top-[56%] w-[21%] -translate-x-1/2 -translate-y-1/2" />}
+                {stamped && <ChequeSeal status={cheque.status} settledAt={cheque.settled_at} chequeNumber={cheque.cheque_number} className="left-[55%] top-[56%] w-[26%] -translate-x-1/2 -translate-y-1/2" />}
 
                 <div className="relative flex min-h-0 flex-1 flex-col">
                 <div
@@ -349,7 +322,7 @@ export default function ChequePreviewModal({
                   }}
                 />
 
-                {stamped && <ChequeSeal status={cheque.status} settledAt={cheque.settled_at} chequeNumber={cheque.cheque_number} className="right-[18%] top-[47%] w-[24%] -translate-y-1/2" />}
+                {stamped && <ChequeSeal status={cheque.status} settledAt={cheque.settled_at} chequeNumber={cheque.cheque_number} className="right-[17%] top-[47%] w-[26%] -translate-y-1/2" />}
                 <div className="relative flex min-h-0 flex-1 flex-col">
                 <p className="relative text-[10px] uppercase tracking-wider text-gray-400 mb-2">Endorsement history</p>
 
