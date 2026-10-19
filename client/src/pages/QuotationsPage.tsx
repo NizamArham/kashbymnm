@@ -106,17 +106,20 @@ export default function QuotationsPage() {
   // The one thing you do with a payment request is turn it into the sale (an exchange request is opened on its own page instead, where the
   // order is made once it's approved). Printing and cancelling are tucked into the menu beside it.
   function rowActions(q: Sale) {
+    // An exchange request's button says where it stands (so it never repeats the "open" status badge beside it): waiting for an
+    // admin's yes, declined, or approved and ready to be made into the order.
+    const exchangeStep = q.exchange_draft ? (q.approval_status === "pending" ? "Review" : q.approval_status === "declined" ? "View" : "Create order") : null;
     return (
       <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
         <Button
           variant="primary"
           size="sm"
           onClick={() => openInPos(q)}
-          title={q.exchange_draft ? "Open this exchange request" : "Edit it, or turn it into the sale, in POS"}
+          title={exchangeStep ? "Opens the exchange request on its own page" : "Edit it, or turn it into the sale, in POS"}
           className="inline-flex items-center gap-1.5 whitespace-nowrap"
         >
           {!q.exchange_draft && <ShoppingCart size={13} />}
-          {q.exchange_draft ? "Open" : "Make sale"}
+          {exchangeStep ?? "Make sale"}
         </Button>
         <ActionMenu
           items={[
