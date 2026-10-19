@@ -131,17 +131,16 @@ export default function QuotationsPage() {
     );
   }
 
+  // The Status column only flags what needs a look — one badge at most, the most important: an exchange waiting for approval, a declined
+  // one, or a request past its pay-by time. A normal open request has nothing to flag, so its cell is empty. (Whether it's an exchange is in
+  // the Type column, and whether its pieces are held is under Pay by.)
   function statusBadge(sale: Sale) {
-    return (
-      <span className="inline-flex items-center gap-1">
-        {sale.exchange_draft && <Badge label="exchange" tone="neutral" />}
-        {sale.exchange_draft && sale.approval_status === "pending" && <Badge label="needs approval" tone="warning" />}
-        {sale.exchange_draft && sale.approval_status === "declined" && <Badge label="declined" tone="danger" />}
-        {sale.hold_until && <Badge label="pieces held" tone="success" />}
-        {isExpired(sale) ? <Badge label="expired" tone="warning" /> : <Badge label="open" tone="neutral" />}
-      </span>
-    );
+    if (sale.exchange_draft && sale.approval_status === "declined") return <Badge label="declined" tone="danger" />;
+    if (sale.exchange_draft && sale.approval_status === "pending") return <Badge label="needs approval" tone="warning" />;
+    if (isExpired(sale)) return <Badge label="expired" tone="warning" />;
+    return null;
   }
+  const typeLabel = (sale: Sale) => (sale.exchange_draft ? "Exchange" : sale.sale_type === "online" ? "Online" : "In-Store");
 
   return (
     <div>
@@ -182,9 +181,12 @@ export default function QuotationsPage() {
                     <Td>{q.invoice}</Td>
                     <Td>{q.date.slice(0, 16).replace("T", " ")}</Td>
                     <Td>{q.customer_name ?? "Walk-in"}</Td>
-                    <Td>{q.sale_type === "online" ? "Online" : "In-Store"}</Td>
+                    <Td>{typeLabel(q)}</Td>
                     <Td>Rs. {q.total.toLocaleString()}</Td>
-                    <Td>{q.quotation_valid_until ? q.quotation_valid_until.slice(0, 16).replace("T", " ") : "—"}</Td>
+                    <Td>
+                      {q.quotation_valid_until ? q.quotation_valid_until.slice(0, 16).replace("T", " ") : "—"}
+                      {q.hold_until && <span className="block text-xs text-gray-400">pieces held</span>}
+                    </Td>
                     <Td>{statusBadge(q)}</Td>
                     <Td>{rowActions(q)}</Td>
                   </tr>
@@ -202,14 +204,14 @@ export default function QuotationsPage() {
                     <p className="font-medium text-gray-900 leading-snug">{q.invoice}</p>
                     <p className="text-xs text-gray-400 mt-0.5">{q.date.slice(0, 16).replace("T", " ")}</p>
                     <p className="text-xs text-gray-500 mt-1">
-                      {q.customer_name ?? "Walk-in"} · {q.sale_type === "online" ? "Online" : "In-Store"}
+                      {q.customer_name ?? "Walk-in"} · {typeLabel(q)}
                     </p>
                   </div>
                   <div className="flex-shrink-0">{statusBadge(q)}</div>
                 </div>
                 <RowCardStats>
                   <RowCardStat label="Total" value={`Rs. ${q.total.toLocaleString()}`} />
-                  <RowCardStat label="Pay by" value={q.quotation_valid_until ? q.quotation_valid_until.slice(0, 10) : "—"} />
+                  <RowCardStat label="Pay by" value={`${q.quotation_valid_until ? q.quotation_valid_until.slice(0, 10) : "—"}${q.hold_until ? " · pieces held" : ""}`} />
                 </RowCardStats>
                 <div className="mt-3 flex justify-end border-t border-gray-100 pt-3">{rowActions(q)}</div>
               </RowCard>
