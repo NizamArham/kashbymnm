@@ -90,11 +90,15 @@ export default function CourierReconciliationPage() {
         subtitle="Track COD collected, courier charges, weekly settlements, and carry-forward balances."
         action={
           <div className="flex items-center gap-2">
-            <Button onClick={() => navigate("/couriers/history")} className="inline-flex items-center gap-1.5">
+            <Button onClick={() => navigate("/couriers/history")} className="inline-flex items-center gap-1.5 whitespace-nowrap">
               <History size={14} />
               Order history
             </Button>
-            <Button variant="primary" onClick={() => setRecording({})} className="inline-flex items-center gap-1.5">
+            <Button onClick={() => navigate("/couriers/payments")} className="inline-flex items-center gap-1.5 whitespace-nowrap" title="Every settlement and balance correction">
+              <FileText size={14} />
+              Payments
+            </Button>
+            <Button variant="primary" onClick={() => setRecording({})} className="inline-flex items-center gap-1.5 whitespace-nowrap">
               <Plus size={14} />
               Record settlement
             </Button>
@@ -127,6 +131,30 @@ export default function CourierReconciliationPage() {
                 </div>
               )}
             </dl>
+            {(() => {
+              const lastPaid = data.settlements.find((st) => st.courier_partner === item.courier_partner);
+              const lastFix = data.adjustments.find((a) => a.courier_partner === item.courier_partner);
+              if (!lastPaid && !lastFix) return null;
+              return (
+                <div className="mt-2.5 space-y-0.5 border-t border-gray-100 pt-2.5 text-xs text-gray-500">
+                  {lastPaid && (
+                    <p title={`For ${formatDate(lastPaid.week_start)} to ${formatDate(lastPaid.week_end)}`}>
+                      Last paid <span className="font-medium tabular-nums text-gray-800">{money(lastPaid.amount_received)}</span> · {formatDate(lastPaid.received_date)}
+                    </p>
+                  )}
+                  {lastFix && (
+                    <p className="flex items-center justify-between gap-2">
+                      <span className="min-w-0 truncate" title={lastFix.reason}>
+                        Last correction <span className="font-medium tabular-nums text-gray-800">{signed(lastFix.amount)}</span> · {formatDate(lastFix.created_at)}
+                      </span>
+                      <button onClick={() => undoAdjustment(lastFix.id)} className="flex-shrink-0 text-gray-400 hover:text-red-600" title="Undo this correction" aria-label="Undo this correction">
+                        <Trash2 size={12} />
+                      </button>
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
             {item.estimated_orders > 0 && (
               <button
                 type="button"
@@ -158,204 +186,141 @@ export default function CourierReconciliationPage() {
 
       {error && <ErrorText>{error}</ErrorText>}
 
-      {/* minmax(0, …) so neither column can grow past its share because of what's inside it — a wide table or a form row
-          used to push the other column off the screen. */}
-      <div className="grid grid-cols-1 min-[1400px]:grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)] gap-5">
-        <Card className="p-0 overflow-clip min-w-0">
-          <div className="p-4 border-b border-gray-100 flex items-center justify-between gap-3 flex-wrap">
-            <h2 className="font-semibold text-gray-900">
-              Courier orders
-              <HelpHint text="Each charge starts as the tariff's estimate for the weight entered at dispatch. Tap a charge to enter what the courier really billed (and the real weight), or confirm the estimate if it was right. 'Needs checking' lists every delivered or returned order that is still an estimate. For older orders or a downloadable report per courier, use Order history." />
-            </h2>
-            <div className="flex items-center gap-3">
-              <TabToggle<View>
-                value={view}
-                onChange={setView}
-                options={[
-                  { value: "week", label: "This week" },
-                  { value: "check", label: `Needs checking (${needsChecking.length})` },
-                ]}
-              />
-              <button onClick={() => navigate("/couriers/history")} className="text-xs text-gray-500 hover:text-gray-800 underline">
-                View full history
-              </button>
-            </div>
-          </div>
-
-          {view === "check" && needsChecking.length > 0 && (
-            <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between gap-3 flex-wrap">
-              <p className="text-xs text-gray-600 max-w-md">
-                These charges are still the system's estimate. Open one to enter what the courier really billed — or confirm them all if the courier's bill matches.
-              </p>
-              <Button
-                size="sm"
-                onClick={async () => {
-                  if (await confirmDialog({ title: `Mark all ${needsChecking.length} charges as correct?`, confirmLabel: "Mark all correct" })) confirmCharges(needsChecking);
-                }}
-                className="inline-flex items-center gap-1.5"
-              >
-                <Check size={14} />
-                Confirm all {needsChecking.length}
-              </Button>
-            </div>
-          )}
-
-          {shownOrders.length === 0 ? (
-            <EmptyState
-              bare
-              title={view === "check" ? "Every charge has been checked" : "No courier orders in the last 7 days"}
-              actions={[view === "check" ? { label: "See this week's orders", onClick: () => setView("week") } : { label: "View full history", onClick: () => navigate("/couriers/history") }]}
+      <Card className="p-0 overflow-clip min-w-0">
+        <div className="p-4 border-b border-gray-100 flex items-center justify-between gap-3 flex-wrap">
+          <h2 className="font-semibold text-gray-900">
+            Courier orders
+            <HelpHint text="Each charge starts as the tariff's estimate for the weight entered at dispatch. Tap a charge to enter what the courier really billed (and the real weight), or confirm the estimate if it was right. 'Needs checking' lists every delivered or returned order that is still an estimate. For older orders or a downloadable report per courier, use Order history." />
+          </h2>
+          <div className="flex items-center gap-3">
+            <TabToggle<View>
+              value={view}
+              onChange={setView}
+              options={[
+                { value: "week", label: "This week" },
+                { value: "check", label: `Needs checking (${needsChecking.length})` },
+              ]}
             />
-          ) : (
-            <Table className="[&_th]:px-2 [&_td]:px-2">
-              <thead>
-                <tr>
-                  <Th>Order</Th>
-                  <Th>Courier</Th>
-                  <Th>Status</Th>
-                  <Th align="right">COD</Th>
-                  {/* Every row in "Needs checking" is still an estimate, so the column says so once, here, instead of a badge on each row. */}
-                  <Th align="right">{view === "check" ? "Estimate charge" : "Charge"}</Th>
-                  <Th align="right">Net</Th>
-                  <Th>{null}</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {shownOrders.map((order) => {
-                  const totalCharge = order.courier_charge + order.return_charge;
-                  const weight = order.actual_weight_kg ?? order.package_weight_kg;
-                  return (
-                    <tr key={order.id}>
-                      <Td>
-                        <span className="font-medium">
-                          <RefLink to={`/sales/${order.sale_id}`}>{order.invoice}</RefLink>
-                        </span>
-                        <span className="block text-xs text-gray-400">{order.customer_name ?? "Walk-in"}</span>
-                      </Td>
-                      <Td>{partnerLabel(order.courier_partner)}</Td>
-                      <Td>
-                        <span className="inline-flex items-center gap-1 text-xs capitalize">
-                          <Check size={12} className={order.delivery_status === "delivered" ? "text-gray-900" : "text-gray-300"} />
-                          {order.delivery_status}
-                        </span>
-                      </Td>
-                      <Td align="right">
-                        {order.delivery_status === "delivered" ? money(order.cod_amount) : <span className="line-through text-gray-400">{money(order.cod_amount)}</span>}
-                      </Td>
-                      <Td align="right">
-                        <button
-                          onClick={() => setEditingOrder(order)}
-                          className="text-gray-900 hover:text-black underline decoration-dotted tabular-nums"
-                          title="Enter what the courier really charged"
-                        >
-                          {money(totalCharge)}
-                        </button>
-                        <div className="mt-0.5 flex items-center justify-end gap-1.5 text-[11px] text-gray-400">
-                          {order.charge_confirmed ? (
-                            <span className="inline-flex items-center gap-0.5 text-gray-500">
-                              <Check size={12} />
-                              confirmed
-                            </span>
-                          ) : null}
-                          {weight ? <span>{weight} kg</span> : null}
-                        </div>
-                        {order.charge_confirmed === 1 && order.estimated_charge !== null && order.estimated_charge !== order.courier_charge && (
-                          <div className="text-[11px] text-gray-400">estimate was {money(order.estimated_charge)}</div>
-                        )}
-                      </Td>
-                      <Td align="right" className="font-semibold">{money((order.delivery_status === "delivered" ? order.cod_amount : 0) - totalCharge)}</Td>
-                      <Td className="text-right">
-                        {/* Plain icons, no border — the same look as the edit pencil in the Cash Book. */}
-                        <div className="inline-flex items-center justify-end gap-3">
-                          {countsTowardBalance(order) && !order.charge_confirmed && (
-                            <button
-                              type="button"
-                              onClick={() => confirmCharges([order])}
-                              className="text-gray-400 hover:text-gray-800 transition"
-                              title="The estimate is right"
-                              aria-label="The estimate is right"
-                            >
-                              <Check size={14} />
-                            </button>
-                          )}
+            <button onClick={() => navigate("/couriers/history")} className="text-xs text-gray-500 hover:text-gray-800 underline">
+              View full history
+            </button>
+          </div>
+        </div>
+
+        {view === "check" && needsChecking.length > 0 && (
+          <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between gap-3 flex-wrap">
+            <p className="text-xs text-gray-600 max-w-md">
+              These charges are still the system's estimate. Open one to enter what the courier really billed — or confirm them all if the courier's bill matches.
+            </p>
+            <Button
+              size="sm"
+              onClick={async () => {
+                if (await confirmDialog({ title: `Mark all ${needsChecking.length} charges as correct?`, confirmLabel: "Mark all correct" })) confirmCharges(needsChecking);
+              }}
+              className="inline-flex items-center gap-1.5"
+            >
+              <Check size={14} />
+              Confirm all {needsChecking.length}
+            </Button>
+          </div>
+        )}
+
+        {shownOrders.length === 0 ? (
+          <EmptyState
+            bare
+            title={view === "check" ? "Every charge has been checked" : "No courier orders in the last 7 days"}
+            actions={[view === "check" ? { label: "See this week's orders", onClick: () => setView("week") } : { label: "View full history", onClick: () => navigate("/couriers/history") }]}
+          />
+        ) : (
+          <Table className="[&_th]:px-2 [&_td]:px-2">
+            <thead>
+              <tr>
+                <Th>Order</Th>
+                <Th>Courier</Th>
+                <Th>Status</Th>
+                <Th align="right">COD</Th>
+                {/* Every row in "Needs checking" is still an estimate, so the column says so once, here, instead of a badge on each row. */}
+                <Th align="right">{view === "check" ? "Estimate charge" : "Charge"}</Th>
+                <Th align="right">Net</Th>
+                <Th>{null}</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {shownOrders.map((order) => {
+                const totalCharge = order.courier_charge + order.return_charge;
+                const weight = order.actual_weight_kg ?? order.package_weight_kg;
+                return (
+                  <tr key={order.id}>
+                    <Td>
+                      <span className="font-medium">
+                        <RefLink to={`/sales/${order.sale_id}`}>{order.invoice}</RefLink>
+                      </span>
+                      <span className="block text-xs text-gray-400">{order.customer_name ?? "Walk-in"}</span>
+                    </Td>
+                    <Td>{partnerLabel(order.courier_partner)}</Td>
+                    <Td>
+                      <span className="inline-flex items-center gap-1 text-xs capitalize">
+                        <Check size={12} className={order.delivery_status === "delivered" ? "text-gray-900" : "text-gray-300"} />
+                        {order.delivery_status}
+                      </span>
+                    </Td>
+                    <Td align="right">
+                      {order.delivery_status === "delivered" ? money(order.cod_amount) : <span className="line-through text-gray-400">{money(order.cod_amount)}</span>}
+                    </Td>
+                    <Td align="right">
+                      <button
+                        onClick={() => setEditingOrder(order)}
+                        className="text-gray-900 hover:text-black underline decoration-dotted tabular-nums"
+                        title="Enter what the courier really charged"
+                      >
+                        {money(totalCharge)}
+                      </button>
+                      <div className="mt-0.5 flex items-center justify-end gap-1.5 text-[11px] text-gray-400">
+                        {order.charge_confirmed ? (
+                          <span className="inline-flex items-center gap-0.5 text-gray-500">
+                            <Check size={12} />
+                            confirmed
+                          </span>
+                        ) : null}
+                        {weight ? <span>{weight} kg</span> : null}
+                      </div>
+                      {order.charge_confirmed === 1 && order.estimated_charge !== null && order.estimated_charge !== order.courier_charge && (
+                        <div className="text-[11px] text-gray-400">estimate was {money(order.estimated_charge)}</div>
+                      )}
+                    </Td>
+                    <Td align="right" className="font-semibold">{money((order.delivery_status === "delivered" ? order.cod_amount : 0) - totalCharge)}</Td>
+                    <Td className="text-right">
+                      {/* Plain icons, no border — the same look as the edit pencil in the Cash Book. */}
+                      <div className="inline-flex items-center justify-end gap-3">
+                        {countsTowardBalance(order) && !order.charge_confirmed && (
                           <button
                             type="button"
-                            onClick={() => setEditingOrder(order)}
+                            onClick={() => confirmCharges([order])}
                             className="text-gray-400 hover:text-gray-800 transition"
-                            title="Enter the real charge / weight"
-                            aria-label="Enter the real charge / weight"
+                            title="The estimate is right"
+                            aria-label="The estimate is right"
                           >
-                            <Pencil size={14} />
+                            <Check size={14} />
                           </button>
-                        </div>
-                      </Td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </Table>
-          )}
-        </Card>
-
-        {/* What was recorded last — the form itself is the Record settlement dialog. */}
-        <Card className="min-w-0 max-w-2xl min-[1400px]:max-w-none">
-          <div>
-            <div className="flex items-center justify-between gap-3 mb-2">
-              <h3 className="text-sm font-semibold text-gray-900">
-                <FileText size={14} className="inline mr-1" /> Last settlement
-              </h3>
-              <button onClick={() => navigate("/couriers/payments")} className="text-xs text-gray-500 hover:text-gray-900 underline decoration-dotted">
-                View all
-              </button>
-            </div>
-            {data.settlements.slice(0, 1).map((settlement) => (
-              <div key={settlement.id} className="flex justify-between py-2 text-xs border-b border-gray-50">
-                <span>
-                  {partnerLabel(settlement.courier_partner)}
-                  <span className="block text-gray-400">
-                    {formatDate(settlement.week_start)} to {formatDate(settlement.week_end)}
-                  </span>
-                </span>
-                <span className="font-medium">{money(settlement.amount_received)}</span>
-              </div>
-            ))}
-            {data.settlements.length === 0 && (
-              <EmptyState bare title="No settlements recorded yet" actions={[{ label: "Record a settlement", primary: true, onClick: () => setRecording({}) }]} />
-            )}
-          </div>
-
-          {data.adjustments.length > 0 && (
-            <div className="mt-5 pt-4 border-t border-gray-100">
-              <div className="flex items-center justify-between gap-3 mb-2">
-                <h3 className="text-sm font-semibold text-gray-900">Last balance correction</h3>
-                <button onClick={() => navigate("/couriers/payments?show=corrections")} className="text-xs text-gray-500 hover:text-gray-900 underline decoration-dotted">
-                  View all
-                </button>
-              </div>
-              {data.adjustments.slice(0, 1).map((adjustment) => (
-                <div key={adjustment.id} className="flex items-start justify-between gap-3 py-2 text-xs border-b border-gray-50">
-                  <span className="min-w-0">
-                    {partnerLabel(adjustment.courier_partner)}
-                    <span className="block text-gray-500 truncate" title={adjustment.reason}>
-                      {adjustment.reason}
-                    </span>
-                    <span className="block text-gray-400">
-                      {formatDate(adjustment.created_at)}
-                      {adjustment.staff_name ? ` · ${adjustment.staff_name}` : ""}
-                    </span>
-                  </span>
-                  <span className="flex items-center gap-2 flex-shrink-0">
-                    <span className="font-medium tabular-nums">{signed(adjustment.amount)}</span>
-                    <button onClick={() => undoAdjustment(adjustment.id)} className="text-gray-400 hover:text-red-600" title="Undo this correction" aria-label="Undo this correction">
-                      <Trash2 size={12} />
-                    </button>
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-      </div>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setEditingOrder(order)}
+                          className="text-gray-400 hover:text-gray-800 transition"
+                          title="Enter the real charge / weight"
+                          aria-label="Enter the real charge / weight"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                      </div>
+                    </Td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </Table>
+        )}
+      </Card>
 
       {editingOrder && <CourierChargeModal order={editingOrder} onClose={() => setEditingOrder(null)} onSaved={load} />}
       {correcting && <CourierBalanceModal courier={correcting} onClose={() => setCorrecting(null)} onSaved={load} />}

@@ -97,7 +97,7 @@ export default function CourierSettlementModal({
             <Button type="button" onClick={onClose}>
               Cancel
             </Button>
-            <Button type="submit" variant="primary" disabled={saving}>
+            <Button type="submit" variant="primary" disabled={saving} className="whitespace-nowrap">
               {saving ? "Saving..." : "Record settlement"}
             </Button>
           </>

@@ -65,8 +65,7 @@ export function PageHeader({ title, subtitle, action }: { title: string; subtitl
 
 // flatOnPhone: a card that is only a card on a wide screen. On a phone its contents are cards themselves (a list of row
 // cards), so wrapping them in another bordered box would be a card inside a card; there the wrapper drops its box.
-// (Tailwind's max-lg: isn't available here because of the custom "short" screen, hence the lg: form. A caller's padding
-// override for the wide layout must then be lg:p-0, not p-0.)
+// (Written with lg: classes rather than max-lg: ones, so a caller's padding override for the wide layout is lg:p-0, not p-0.)
 export function Card({ children, className = "", flatOnPhone = false }: { children: ReactNode; className?: string; flatOnPhone?: boolean }) {
   const box = flatOnPhone ? "lg:bg-white lg:border lg:border-gray-200 lg:rounded-2xl lg:p-5 lg:shadow-sm" : "bg-white border border-gray-200 rounded-2xl p-5 shadow-sm";
   return <div className={`${box} ${className}`}>{children}</div>;
