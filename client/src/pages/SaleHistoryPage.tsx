@@ -148,6 +148,22 @@ function CustomerName({ sale }: { sale: Sale }) {
   return <>{sale.deleted_customer_snapshot ? `[Deleted: ${sale.deleted_customer_snapshot}]` : "Walk-in"}</>;
 }
 
+// The dates a preset period stands for (what the date button shows while no custom range is picked); "All time" has none.
+function presetRange(period: Period): { start: string; end: string } | string {
+  const today = toISODate(new Date());
+  if (period === "today") return { start: today, end: today };
+  if (period === "week") {
+    const weekAgo = new Date();
+    weekAgo.setDate(weekAgo.getDate() - 6);
+    return { start: toISODate(weekAgo), end: today };
+  }
+  if (period === "month") {
+    const now = new Date();
+    return { start: toISODate(new Date(now.getFullYear(), now.getMonth(), 1)), end: today };
+  }
+  return "All time";
+}
+
 export default function SaleHistoryPage() {
   const { confirm: confirmDialog } = useConfirm();
   const { askReason } = useConfirm();
@@ -815,6 +831,7 @@ export default function SaleHistoryPage() {
             <DateRangePicker
               startDate={startDate}
               endDate={endDate}
+              idle={presetRange(period)}
               onChange={async (s, e) => {
                 // a range that reaches back past the week a cashier may browse asks for an admin's password first
                 if (!isAdmin && s && s < toISODate(new Date(Date.now() - (CASHIER_WEEK_DAYS - 1) * 86400000)) && !(await unlockOlderSales())) return;

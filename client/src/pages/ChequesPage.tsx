@@ -490,6 +490,7 @@ export default function ChequesPage() {
         <DateRangePicker
           startDate={periodStart}
           endDate={periodEnd}
+          idle="All dates"
           onChange={(s, e) => {
             setPeriodStart(s);
             setPeriodEnd(e);

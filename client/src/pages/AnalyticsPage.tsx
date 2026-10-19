@@ -247,6 +247,7 @@ export default function AnalyticsPage() {
             <DateRangePicker
               startDate={startDate}
               endDate={endDate}
+              idle={{ start: rangeStart, end: rangeEnd }}
               onChange={(s, e) => {
                 setStartDate(s);
                 setEndDate(e);

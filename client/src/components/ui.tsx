@@ -1164,18 +1164,23 @@ export function DateRangePicker({
   startDate,
   endDate,
   onChange,
+  idle,
 }: {
   startDate: string | null; // "YYYY-MM-DD" or null
   endDate: string | null;
   onChange: (start: string | null, end: string | null) => void;
+  // What the page is showing while no range has been picked here — a preset such as "This month" (its dates, as { start, end }) or
+  // "All time" (as text). Shown like a chosen range, in normal text, so the button never looks switched off.
+  idle?: { start: string; end: string } | string;
 }) {
+  const idleRange = idle && typeof idle === "object" ? idle : null;
   const [open, setOpen] = useState(false);
   const [viewMonth, setViewMonth] = useState(() => {
     const base = startDate ? new Date(startDate) : new Date();
     return new Date(base.getFullYear(), base.getMonth(), 1);
   });
-  const [pendingStart, setPendingStart] = useState<string | null>(startDate);
-  const [pendingEnd, setPendingEnd] = useState<string | null>(endDate);
+  const [pendingStart, setPendingStart] = useState<string | null>(startDate ?? idleRange?.start ?? null);
+  const [pendingEnd, setPendingEnd] = useState<string | null>(endDate ?? idleRange?.end ?? null);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1187,9 +1192,10 @@ export function DateRangePicker({
   }, []);
 
   useEffect(() => {
-    setPendingStart(startDate);
-    setPendingEnd(endDate);
-  }, [startDate, endDate, open]);
+    setPendingStart(startDate ?? idleRange?.start ?? null);
+    setPendingEnd(endDate ?? idleRange?.end ?? null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startDate, endDate, open, idleRange?.start, idleRange?.end]);
 
   function toISO(d: Date): string {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -1238,12 +1244,11 @@ export function DateRangePicker({
   const firstWeekday = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), 1).getDay();
   const monthLabel = viewMonth.toLocaleDateString(undefined, { month: "long", year: "numeric" });
 
-  const displayLabel =
-    startDate && endDate
-      ? startDate === endDate
-        ? formatDisplay(startDate)
-        : `${formatDisplay(startDate)} – ${formatDisplay(endDate)}`
-      : "Select date range";
+  const showRange = (start: string, end: string) => (start === end ? formatDisplay(start) : `${formatDisplay(start)} – ${formatDisplay(end)}`);
+  const hasRange = !!(startDate && endDate);
+  const displayLabel = hasRange ? showRange(startDate!, endDate!) : idleRange ? showRange(idleRange.start, idleRange.end) : typeof idle === "string" ? idle : "Select date range";
+  // Only a bare "Select date range" is a placeholder; anything the page is actually showing reads as normal text.
+  const isPlaceholder = !hasRange && !idle;
 
   return (
     <div className="relative inline-block" ref={ref}>
@@ -1253,7 +1258,7 @@ export function DateRangePicker({
         className="flex items-center gap-2 px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-sm hover:border-gray-300 transition-all"
       >
         <CalendarDays size={14} className="text-gray-400" />
-        <span className={startDate ? "text-gray-900" : "text-gray-400"}>{displayLabel}</span>
+        <span className={isPlaceholder ? "text-gray-600" : "text-gray-900"}>{displayLabel}</span>
       </button>
 
       {open && (
