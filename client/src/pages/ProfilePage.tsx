@@ -57,7 +57,8 @@ export default function ProfilePage() {
     <div>
       <PageHeader
         title="My profile"
-        action={
+        subtitle="Your details, your attendance and what you've done in the system."
+        tabs={
           <TabToggle
             value={activeTab}
             onChange={setActiveTab}

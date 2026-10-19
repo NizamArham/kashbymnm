@@ -449,17 +449,19 @@ export default function ChequesPage() {
       <PageHeader
         title="Cheques"
         subtitle="Track every cheque from receipt to clearing."
+        tabs={
+          <TabToggle
+            value={activeTab}
+            onChange={setActiveTab}
+            options={[
+              { value: "in_hand", label: "In Hand" },
+              { value: "all", label: "All Cheques" },
+              { value: "issued", label: "Written by Me" },
+            ]}
+          />
+        }
         action={
           <div className="flex items-center gap-3 flex-wrap">
-            <TabToggle
-              value={activeTab}
-              onChange={setActiveTab}
-              options={[
-                { value: "in_hand", label: "In Hand" },
-                { value: "all", label: "All Cheques" },
-                { value: "issued", label: "Written by Me" },
-              ]}
-            />
             <Button
               onClick={downloadChequesPdf}
               disabled={activeTab === "issued" ? sortedIssuedCheques.length === 0 : sortedCheques.length === 0}

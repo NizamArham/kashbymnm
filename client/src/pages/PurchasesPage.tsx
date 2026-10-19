@@ -561,21 +561,20 @@ export default function PurchasesPage() {
       <PageHeader
         title="Purchases"
         subtitle="Record incoming goods, then sort them into stock."
+        tabs={
+          <TabToggle
+            value={activeTab}
+            onChange={setActiveTab}
+            options={[
+              { value: "record", label: "Record Purchase" },
+              { value: "pending", label: `Awaiting Sorting${pending.length > 0 ? ` (${pending.length})` : ""}` },
+              { value: "history", label: "History" },
+              { value: "returns", label: "Supplier returns" },
+            ]}
+          />
+        }
       />
-
-      <TabToggle
-        value={activeTab}
-        onChange={setActiveTab}
-        options={[
-          { value: "record", label: "Record Purchase" },
-          { value: "pending", label: `Awaiting Sorting${pending.length > 0 ? ` (${pending.length})` : ""}` },
-          { value: "history", label: "History" },
-          { value: "returns", label: "Supplier returns" },
-        ]}
-      />
-      <div className="mt-5">
-        {error && <ErrorText>{error}</ErrorText>}
-      </div>
+      {error && <ErrorText>{error}</ErrorText>}
 
       {activeTab === "record" && (
         <Card className="max-w-2xl mb-5">

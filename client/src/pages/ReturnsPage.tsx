@@ -105,7 +105,7 @@ export default function ReturnsPage() {
       <PageHeader
         title="Returns"
         subtitle="Returns and exchanges wait for an admin's approval before any stock or cash moves."
-        action={
+        tabs={
           <TabToggle
             value={activeTab}
             onChange={setActiveTab}

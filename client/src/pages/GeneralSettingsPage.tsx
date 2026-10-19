@@ -183,7 +183,7 @@ export default function GeneralSettingsPage() {
       <PageHeader
         title="General settings"
         subtitle="Business details used on receipts, waybills, and invoices."
-        action={
+        tabs={
           <TabToggle
             value={tab}
             onChange={setTab}

@@ -36,6 +36,7 @@ import {
   RowCardStats,
   RowCardStat,
   MoneyInput,
+  PageHeader,
 } from "../components/ui";
 import ProductSalesModal from "../components/ProductSalesModal";
 import ProductsViewToggle from "../components/ProductsViewToggle";
@@ -1452,7 +1453,17 @@ export default function ManageProductsPage() {
 
   return (
     <div className="lg:[--sticky-top:3.5rem]">
-      {/* ================= Header — the same as Stock ================= */}
+      {/* ================= Header — the same as Stock; adding to the catalogue is Manage's own button ================= */}
+      <PageHeader
+        title="Inventory"
+        compact
+        action={
+          <Button variant="primary" onClick={() => navigate("/products/add")} className="inline-flex flex-shrink-0 items-center gap-1.5">
+            <Plus size={14} />
+            Add product
+          </Button>
+        }
+      />
       <div
         className="lg:sticky lg:top-0 z-20 pb-3 mb-5 bg-gray-50/95 backdrop-blur-sm lg:border-b lg:border-gray-200 relative"
         onMouseLeave={() => setHoveredNav(null)}
@@ -1499,12 +1510,6 @@ export default function ManageProductsPage() {
               <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
             </button>
           </div>
-
-          {/* What's special about Manage: adding to the catalogue. */}
-          <Button variant="primary" onClick={() => navigate("/products/add")} className="inline-flex flex-shrink-0 items-center gap-1.5">
-            <Plus size={14} />
-            Add product
-          </Button>
         </div>
 
         {hoveredItem && (

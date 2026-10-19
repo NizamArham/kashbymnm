@@ -57,6 +57,8 @@ function ExpiryBadge({ expiresAt }: { expiresAt: string | null }) {
 
 export default function PromotionsPage() {
   const [tab, setTab] = useState<PromoTab>("coupons");
+  // The "New …" button is in the page header; the open form belongs to whichever tab is showing.
+  const [creating, setCreating] = useState(false);
 
   return (
     <div>
@@ -64,9 +66,18 @@ export default function PromotionsPage() {
         title="Promotions"
         subtitle="Coupon codes and gift vouchers — create, edit, or retire them here."
         action={
+          <Button variant="primary" onClick={() => setCreating(true)} className="inline-flex items-center gap-1.5">
+            <Plus size={14} />
+            {tab === "coupons" ? "New coupon" : "New gift voucher"}
+          </Button>
+        }
+        tabs={
           <TabToggle
             value={tab}
-            onChange={setTab}
+            onChange={(v) => {
+              setTab(v);
+              setCreating(false);
+            }}
             options={[
               { value: "coupons", label: "Coupons" },
               { value: "vouchers", label: "Gift Vouchers" },
@@ -75,20 +86,19 @@ export default function PromotionsPage() {
         }
       />
 
-      {tab === "coupons" ? <CouponsTab /> : <VouchersTab />}
+      {tab === "coupons" ? <CouponsTab showCreate={creating} setShowCreate={setCreating} /> : <VouchersTab showCreate={creating} setShowCreate={setCreating} />}
     </div>
   );
 }
 
 // ============================================================ Coupons ====
 
-function CouponsTab() {
+function CouponsTab({ showCreate, setShowCreate }: { showCreate: boolean; setShowCreate: (v: boolean) => void }) {
   const { confirm: confirmDialog } = useConfirm();
   const toast = useToast();
   const [coupons, setCoupons] = useState<Coupon[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showCreate, setShowCreate] = useState(false);
   const [editing, setEditing] = useState<Coupon | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
@@ -135,13 +145,6 @@ function CouponsTab() {
 
   return (
     <>
-      <div className="flex justify-end mb-4">
-        <Button variant="primary" onClick={() => setShowCreate(true)} className="inline-flex items-center gap-1.5">
-          <Plus size={14} />
-          New coupon
-        </Button>
-      </div>
-
       {error && <ErrorText>{error}</ErrorText>}
 
       {loading ? (
@@ -361,13 +364,12 @@ const VOUCHER_STATUS_ORDER: Record<VoucherStatus, number> = { active: 0, pending
 // for anything else.
 const DURATION_PRESETS = [7, 30, 45, 90, 365];
 
-function VouchersTab() {
+function VouchersTab({ showCreate, setShowCreate }: { showCreate: boolean; setShowCreate: (v: boolean) => void }) {
   const { confirm: confirmDialog } = useConfirm();
   const toast = useToast();
   const [vouchers, setVouchers] = useState<GiftVoucher[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showCreate, setShowCreate] = useState(false);
   const [editing, setEditing] = useState<GiftVoucher | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
@@ -414,13 +416,6 @@ function VouchersTab() {
 
   return (
     <>
-      <div className="flex justify-end mb-4">
-        <Button variant="primary" onClick={() => setShowCreate(true)} className="inline-flex items-center gap-1.5">
-          <Plus size={14} />
-          New gift voucher
-        </Button>
-      </div>
-
       {error && <ErrorText>{error}</ErrorText>}
 
       {loading ? (

@@ -29,7 +29,7 @@ import {
 import { groupByProduct, summarizeProductVariants } from "../lib/sizeSort";
 import { createProductSearchIndex, searchProductUnits } from "../lib/productSearch";
 import { GenderNavTabs, GenderNavPanel, GenderNavItem } from "../components/GenderNav";
-import { Button, Card, Input, ErrorText, EmptyState, Modal, Table, Th, Td, Badge, inventoryStatusTone, RowCard, RowCardStats, RowCardStat, ActionMenu } from "../components/ui";
+import { Button, Card, Input, ErrorText, EmptyState, Modal, Table, Th, Td, Badge, inventoryStatusTone, RowCard, RowCardStats, RowCardStat, ActionMenu, PageHeader } from "../components/ui";
 import { downloadTabularReport, buildReportFilename, todayLongDate } from "../lib/reportPdf";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { readMemory, useRemembered, useRememberedScroll, writeMemory } from "../lib/viewMemory";
@@ -544,23 +544,17 @@ export default function InventoryCategoriesPage() {
   return (
     // The table header pins just under the pinned toolbar (see Th).
     <div className="lg:[--sticky-top:3.5rem]">
-      {/* ================= Header ================= */}
+      {/* ================= Header: the title, then the pinned toolbar of tabs and search ================= */}
+      <PageHeader title="Inventory" compact />
       <div
         className="lg:sticky lg:top-0 z-20 pb-3 mb-5 bg-gray-50/95 backdrop-blur-sm lg:border-b lg:border-gray-200 relative"
         onMouseLeave={() => setHoveredNav(null)}
       >
         <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-          {isAdmin ? (
+          {isAdmin && (
             <div className="flex-shrink-0">
               <ProductsViewToggle current="stock" />
             </div>
-          ) : (
-            <button
-              onClick={() => selectGender(ALL)}
-              className="text-2xl font-bold text-gray-900 tracking-tight hover:text-gray-600 transition-colors flex-shrink-0"
-            >
-              Stocks
-            </button>
           )}
 
           <div className="min-w-0 max-w-full overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">

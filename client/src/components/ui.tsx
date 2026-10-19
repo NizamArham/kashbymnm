@@ -52,14 +52,20 @@ export function RefLink({ to, children, className }: { to: string; children: Rea
   );
 }
 
-export function PageHeader({ title, subtitle, action }: { title: string; subtitle?: string; action?: ReactNode }) {
+// Every page opens the same way: the title (and a line saying what the page is for) on the left, the page's main button(s) on the
+// right, and — when the page has them — its tabs on a row underneath. `compact` is for a page that goes straight on to a pinned
+// toolbar and wants the title row kept slim: no gap to speak of below it.
+export function PageHeader({ title, subtitle, action, tabs, compact = false }: { title: string; subtitle?: string; action?: ReactNode; tabs?: ReactNode; compact?: boolean }) {
   return (
-    <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
-      <div>
-        <h1 className="text-2xl font-semibold text-gray-900">{title}</h1>
-        {subtitle && <p className="text-sm text-gray-400 mt-0.5">{subtitle}</p>}
+    <div className={compact ? "mb-3" : "mb-6"}>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-gray-900">{title}</h1>
+          {subtitle && <p className="text-sm text-gray-400 mt-0.5">{subtitle}</p>}
+        </div>
+        {action}
       </div>
-      {action}
+      {tabs && <div className="mt-4">{tabs}</div>}
     </div>
   );
 }
