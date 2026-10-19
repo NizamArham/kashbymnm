@@ -6,11 +6,12 @@ import { CashBookEntry } from "../lib/types";
 import { cleanMoney } from "../lib/numberInput";
 import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
 import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, EmptyState, Dropdown, DateRangePicker, HelpHint, RefLink, Modal } from "../components/ui";
+import { useToast } from "../components/Feedback";
 
-// Row geometry used to work out how many entries fit on screen: a row with
-// its date and transaction code on two lines, and the header row above them.
+// Row geometry used to work out how many entries fit on screen: a one-line row
+// (date and transaction code side by side), and the header row above them.
 const DEFAULT_PAGE_SIZE = 7;
-const TABLE_ROW_HEIGHT = 53;
+const TABLE_ROW_HEIGHT = 37;
 const TABLE_HEAD_HEIGHT = 37;
 
 const PAYMENT_METHOD_OPTIONS = [
@@ -106,6 +107,9 @@ function cleanDecimal(raw: string): string {
 
 export default function CashBookPage() {
   const initialRange = defaultDateRange();
+  const toast = useToast();
+  // "Add entry" is a button in the header that opens its form, so the table can have the whole page.
+  const [showAdd, setShowAdd] = useState(false);
 
   const [entries, setEntries] = useState<CashBookEntry[]>([]);
   const [entriesTotal, setEntriesTotal] = useState(0);
@@ -170,13 +174,16 @@ export default function CashBookPage() {
     }
   }
 
+  const entriesRequest = useRef(0);
   async function loadEntries() {
+    const mine = ++entriesRequest.current;
     setLoading(true);
     try {
       const params = new URLSearchParams({ page: String(entriesPage), pageSize: String(PAGE_SIZE) });
       if (dateStart) params.set("start", dateStart);
       if (dateEnd) params.set("end", dateEnd);
       const result = await api.get<{ rows: CashBookEntry[]; total: number }>(`/cash-book?${params.toString()}`);
+      if (mine !== entriesRequest.current) return; // a newer request has gone out since — its answer is the one to show
       setEntries(result.rows);
       setEntriesTotal(result.total);
 
@@ -185,9 +192,9 @@ export default function CashBookPage() {
         setEntriesPage(lastValidPage);
       }
     } catch (err) {
-      setError(err instanceof ApiRequestError ? err.message : "Failed to load cash book");
+      if (mine === entriesRequest.current) setError(err instanceof ApiRequestError ? err.message : "Failed to load cash book");
     } finally {
-      setLoading(false);
+      if (mine === entriesRequest.current) setLoading(false);
     }
   }
 
@@ -281,8 +288,8 @@ export default function CashBookPage() {
     }
   }
 
-  async function handleAdd(e: FormEvent) {
-    e.preventDefault();
+  async function handleAdd(e?: FormEvent) {
+    e?.preventDefault();
     setFormError(null);
     setFormSuccess(null);
     if (!amount || parseFloat(amount) <= 0) {
@@ -300,10 +307,10 @@ export default function CashBookPage() {
       });
       setAmount("");
       setNotes("");
-      setFormSuccess("Entry added.");
+      setShowAdd(false);
+      toast.success("Entry added");
       setEntriesPage(1);
       refreshAll();
-      setTimeout(() => setFormSuccess(null), 2000);
     } catch (err) {
       setFormError(err instanceof ApiRequestError ? err.message : "Failed to add entry");
     } finally {
@@ -398,16 +405,22 @@ export default function CashBookPage() {
           title="Cash book"
           subtitle="Sales, returns, purchases, supplier payments, cheques, and courier settlements are logged here automatically."
           action={
-            <Button onClick={() => setShowTransfer(true)} className="inline-flex items-center gap-1.5">
-              <ArrowLeftRight size={14} />
-              Move cash / bank
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button onClick={() => setShowTransfer(true)} className="inline-flex items-center gap-1.5">
+                <ArrowLeftRight size={14} />
+                Move cash / bank
+              </Button>
+              <Button variant="primary" onClick={() => setShowAdd(true)} className="inline-flex items-center gap-1.5">
+                <Plus size={14} />
+                Add entry
+              </Button>
+            </div>
           }
         />
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4 flex-shrink-0">
-        <div className="bg-white border border-gray-200 rounded-2xl px-4 py-3.5">
+      <div className={`grid grid-cols-2 ${unspecifiedTotal !== 0 ? "lg:grid-cols-4" : "lg:grid-cols-3"} gap-3 mb-3 flex-shrink-0`}>
+        <div className="bg-white border border-gray-200 rounded-2xl px-4 py-2.5">
           <div className="flex items-center gap-2 mb-1">
             <Landmark size={14} className="text-gray-400" />
             <p className="text-xs text-gray-500">Current balance</p>
@@ -416,7 +429,7 @@ export default function CashBookPage() {
             Rs. {currentBalance.toLocaleString()}
           </p>
         </div>
-        <div className="bg-white border border-gray-200 rounded-2xl px-4 py-3.5">
+        <div className="bg-white border border-gray-200 rounded-2xl px-4 py-2.5">
           <div className="flex items-center gap-2 mb-1">
             <Wallet size={14} className="text-gray-400" />
             <p className="text-xs text-gray-500">Cash in hand</p>
@@ -425,7 +438,7 @@ export default function CashBookPage() {
             Rs. {cashTotal.toLocaleString()}
           </p>
         </div>
-        <div className="bg-white border border-gray-200 rounded-2xl px-4 py-3.5">
+        <div className="bg-white border border-gray-200 rounded-2xl px-4 py-2.5">
           <div className="flex items-center gap-2 mb-1">
             <Building2 size={14} className="text-gray-400" />
             <p className="text-xs text-gray-500">Bank [HNB]</p>
@@ -434,8 +447,8 @@ export default function CashBookPage() {
             Rs. {bankTotal.toLocaleString()}
           </p>
         </div>
-        {unspecifiedTotal !== 0 ? (
-          <div className="bg-white border border-gray-200 rounded-2xl px-4 py-3.5">
+        {unspecifiedTotal !== 0 && (
+          <div className="bg-white border border-gray-200 rounded-2xl px-4 py-2.5">
             <div className="flex items-center gap-2 mb-1">
               <Landmark size={14} className="text-gray-400" />
               <p className="text-xs text-gray-500">Unspecified</p>
@@ -444,88 +457,15 @@ export default function CashBookPage() {
               Rs. {unspecifiedTotal.toLocaleString()}
             </p>
           </div>
-        ) : (
-          <div className="bg-white border border-dashed border-gray-200 rounded-2xl px-4 py-3.5 flex items-center justify-center">
-            <p className="text-xs text-gray-300">No unspecified entries</p>
-          </div>
         )}
       </div>
 
       {error && <ErrorText>{error}</ErrorText>}
 
-      <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] lg:grid-rows-[minmax(0,1fr)] gap-4 items-start lg:items-stretch lg:flex-1 lg:min-h-0">
-        <Card className="lg:min-h-0 lg:overflow-y-auto">
-          <div className="flex items-center gap-2 mb-4">
-            <Plus size={14} className="text-gray-400" />
-            <h2 className="text-sm font-semibold text-gray-900">Add manual entry</h2>
-            <HelpHint text="For anything with no other source — rent, utilities, misc income." />
-          </div>
-
-          <form onSubmit={handleAdd}>
-            <FormGroup>
-              <Label>Type</Label>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setType("expense")}
-                  className={`flex-1 flex items-center justify-center gap-1.5 rounded-xl border py-2 text-sm font-medium transition ${
-                    type === "expense"
-                      ? "border-red-500 bg-red-50 text-red-700"
-                      : "border-gray-200 text-gray-600 hover:border-gray-300"
-                  }`}
-                >
-                  <Minus size={14} />
-                  Debit
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setType("income")}
-                  className={`flex-1 flex items-center justify-center gap-1.5 rounded-xl border py-2 text-sm font-medium transition ${
-                    type === "income"
-                      ? "border-green-600 bg-green-50 text-green-700"
-                      : "border-gray-200 text-gray-600 hover:border-gray-300"
-                  }`}
-                >
-                  <Plus size={14} />
-                  Credit
-                </button>
-              </div>
-            </FormGroup>
-
-            <FormGroup>
-              <Label>Amount (Rs.)</Label>
-              <input
-                type="text"
-                inputMode="decimal"
-                value={formatAmountInput(amount)}
-                onChange={(e) => setAmount(cleanMoney(e.target.value))}
-                placeholder="0"
-                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-lg font-medium tabular-nums text-right placeholder:text-right text-black focus:outline-none focus:border-gray-400"
-              />
-            </FormGroup>
-
-            <FormGroup>
-              <Label>Payment method</Label>
-              <Dropdown value={paymentMethod} onChange={setPaymentMethod} options={PAYMENT_METHOD_OPTIONS} />
-            </FormGroup>
-
-            <FormGroup>
-              <Label>Notes (optional)</Label>
-              <Input value={notes} onChange={(e) => setNotes(e.target.value)} />
-            </FormGroup>
-
-            {formError && <ErrorText>{formError}</ErrorText>}
-            {formSuccess && <SuccessText>{formSuccess}</SuccessText>}
-
-            <Button type="submit" variant="primary" disabled={submitting} className="w-full mt-1">
-              {submitting ? "Adding..." : "Add entry"}
-            </Button>
-          </form>
-        </Card>
-
+      <div className="grid grid-cols-1 lg:grid-rows-[minmax(0,1fr)] gap-4 items-start lg:items-stretch lg:flex-1 lg:min-h-0">
         <div className="min-w-0 flex flex-col lg:min-h-0">
           <Card className="p-0 overflow-hidden flex flex-col lg:flex-1 lg:min-h-0">
-            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-3 flex-wrap flex-shrink-0">
+            <div className="px-4 py-2.5 border-b border-gray-100 flex items-center justify-between gap-3 flex-wrap flex-shrink-0">
               <div>
                 <h2 className="text-sm font-semibold text-gray-900">All entries</h2>
                 <p className="text-xs text-gray-400 mt-0.5">
@@ -595,13 +535,13 @@ export default function CashBookPage() {
                 <table className="w-full text-sm">
                   <thead className="sticky top-0 z-10 bg-gray-50 shadow-[inset_0_-1px_0_0_#f3f4f6]">
                     <tr className="bg-gray-50">
-                      <th className="w-[24px] px-2 py-2.5"></th>
-                      <th className="text-left px-3 py-2.5 text-xs font-medium text-gray-400">Date</th>
-                      <th className="text-left px-3 py-2.5 text-xs font-medium text-gray-400 min-w-[84px]">Type</th>
-                      <th className="text-left px-3 py-2.5 text-xs font-medium text-gray-400 min-w-[128px]">Method</th>
-                      <th className="text-right px-3 py-2.5 text-xs font-medium text-gray-400">Amount</th>
-                      <th className="text-right px-3 py-2.5 text-xs font-medium text-gray-400">Balance</th>
-                      <th className="w-[90px] px-2 py-2.5"></th>
+                      <th className="w-[24px] px-2 py-2"></th>
+                      <th className="text-left px-3 py-2 text-xs font-medium text-gray-400">Date</th>
+                      <th className="text-left px-3 py-2 text-xs font-medium text-gray-400 min-w-[84px]">Type</th>
+                      <th className="text-left px-3 py-2 text-xs font-medium text-gray-400 min-w-[128px]">Method</th>
+                      <th className="text-right px-3 py-2 text-xs font-medium text-gray-400">Amount</th>
+                      <th className="text-right px-3 py-2 text-xs font-medium text-gray-400">Balance</th>
+                      <th className="w-[90px] px-2 py-2"></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -621,14 +561,14 @@ export default function CashBookPage() {
                               else if (e.key === "Enter" && (e.target as HTMLElement).tagName === "INPUT" && !editSubmitting) saveEdit(entry.id);
                             }}
                           >
-                            <td className="px-2 py-2.5"></td>
-                            <td className="px-3 py-2.5 text-gray-500 text-xs whitespace-nowrap">
+                            <td className="px-2 py-2"></td>
+                            <td className="px-3 py-2 text-gray-500 text-xs whitespace-nowrap">
                               {entry.entry_date.slice(0, 16).replace("T", " ")}
                               {entry.transaction_code && (
-                                <span className="block text-[10px] text-gray-300 font-mono">{entry.transaction_code}</span>
+                                <span className="ml-2 text-[10px] text-gray-300 font-mono">{entry.transaction_code}</span>
                               )}
                             </td>
-                            <td className="px-3 py-2.5">
+                            <td className="px-3 py-2">
                               <InPlace
                                 original={
                                   <span className="inline-flex items-center gap-1 text-xs font-medium">
@@ -645,7 +585,7 @@ export default function CashBookPage() {
                                 />
                               </InPlace>
                             </td>
-                            <td className="px-3 py-2.5 text-xs">
+                            <td className="px-3 py-2 text-xs">
                               <InPlace original={methodLabel(entry.payment_method)}>
                                 <Dropdown
                                   value={editMethod}
@@ -656,7 +596,7 @@ export default function CashBookPage() {
                                 />
                               </InPlace>
                             </td>
-                            <td className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap">
+                            <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">
                               <InPlace
                                 original={
                                   <span className="font-medium">
@@ -673,10 +613,10 @@ export default function CashBookPage() {
                                 />
                               </InPlace>
                             </td>
-                            <td className="px-3 py-2.5 text-right text-gray-500 tabular-nums whitespace-nowrap">
+                            <td className="px-3 py-2 text-right text-gray-500 tabular-nums whitespace-nowrap">
                               Rs. {entry.running_balance.toLocaleString()}
                             </td>
-                            <td className="px-2 py-2.5">
+                            <td className="px-2 py-2">
                               {/* Two matching 28px buttons, the same height and corner
                                   radius as the dropdowns and amount box beside them. */}
                               <div className="-my-1 flex items-center justify-center gap-1.5">
@@ -715,18 +655,18 @@ export default function CashBookPage() {
                               isExpanded ? "bg-gray-50" : "hover:bg-gray-50"
                             }`}
                           >
-                            <td className="px-2 py-2.5 text-gray-400">
+                            <td className="px-2 py-2 text-gray-400">
                               {hasNotes ? (
                                 isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />
                               ) : null}
                             </td>
-                            <td className="px-3 py-2.5 text-gray-500 text-xs whitespace-nowrap">
+                            <td className="px-3 py-2 text-gray-500 text-xs whitespace-nowrap">
                               {entry.entry_date.slice(0, 16).replace("T", " ")}
                               {entry.transaction_code && (
-                                <span className="block text-[10px] text-gray-300 font-mono">{entry.transaction_code}</span>
+                                <span className="ml-2 text-[10px] text-gray-300 font-mono">{entry.transaction_code}</span>
                               )}
                             </td>
-                            <td className="px-3 py-2.5">
+                            <td className="px-3 py-2">
                               <span className={`inline-flex items-center gap-1 text-xs font-medium ${
                                 entry.type === "income" ? "text-green-600" : "text-red-500"
                               }`}>
@@ -734,18 +674,18 @@ export default function CashBookPage() {
                                 {typeLabel(entry.type)}
                               </span>
                             </td>
-                            <td className="px-3 py-2.5 text-gray-600 text-xs">
+                            <td className="px-3 py-2 text-gray-600 text-xs">
                               {methodLabel(entry.payment_method)}
                             </td>
-                            <td className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap">
+                            <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">
                               <span className={entry.type === "income" ? "text-green-700 font-medium" : "text-red-600 font-medium"}>
                                 {entry.type === "income" ? "+" : "−"} Rs. {entry.amount.toLocaleString()}
                               </span>
                             </td>
-                            <td className="px-3 py-2.5 text-right tabular-nums text-gray-500 whitespace-nowrap">
+                            <td className="px-3 py-2 text-right tabular-nums text-gray-500 whitespace-nowrap">
                               Rs. {entry.running_balance.toLocaleString()}
                             </td>
-                            <td className="px-2 py-2.5 text-center">
+                            <td className="px-2 py-2 text-center">
                               {editable && (
                                 <button
                                   onClick={(e) => startEdit(entry, e)}
@@ -816,6 +756,80 @@ export default function CashBookPage() {
         </div>
       </div>
 
+      {showAdd && (
+        <Modal
+          size="sm"
+          onClose={() => setShowAdd(false)}
+          title="Add entry"
+          subtitle="For anything with no other source — rent, utilities, misc income."
+          footer={
+            <>
+              <Button onClick={() => setShowAdd(false)}>Cancel</Button>
+              <Button variant="primary" onClick={() => handleAdd()} disabled={submitting}>
+                {submitting ? "Adding..." : "Add entry"}
+              </Button>
+            </>
+          }
+        >
+          <form onSubmit={handleAdd}>
+            <FormGroup>
+            <Label>Type</Label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setType("expense")}
+                className={`flex-1 flex items-center justify-center gap-1.5 rounded-xl border py-2 text-sm font-medium transition ${
+                  type === "expense"
+                    ? "border-red-500 bg-red-50 text-red-700"
+                    : "border-gray-200 text-gray-600 hover:border-gray-300"
+                }`}
+              >
+                <Minus size={14} />
+                Debit
+              </button>
+              <button
+                type="button"
+                onClick={() => setType("income")}
+                className={`flex-1 flex items-center justify-center gap-1.5 rounded-xl border py-2 text-sm font-medium transition ${
+                  type === "income"
+                    ? "border-green-600 bg-green-50 text-green-700"
+                    : "border-gray-200 text-gray-600 hover:border-gray-300"
+                }`}
+              >
+                <Plus size={14} />
+                Credit
+              </button>
+            </div>
+          </FormGroup>
+
+          <FormGroup>
+            <Label>Amount (Rs.)</Label>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={formatAmountInput(amount)}
+              onChange={(e) => setAmount(cleanMoney(e.target.value))}
+              placeholder="0"
+              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-lg font-medium tabular-nums text-right placeholder:text-right text-black focus:outline-none focus:border-gray-400"
+            />
+          </FormGroup>
+
+          <FormGroup>
+            <Label>Payment method</Label>
+            <Dropdown value={paymentMethod} onChange={setPaymentMethod} options={PAYMENT_METHOD_OPTIONS} />
+          </FormGroup>
+
+          <FormGroup>
+            <Label>Notes (optional)</Label>
+            <Input value={notes} onChange={(e) => setNotes(e.target.value)} />
+          </FormGroup>
+
+            {formError && <ErrorText>{formError}</ErrorText>}
+            <button type="submit" className="hidden" aria-hidden="true" tabIndex={-1} />
+          </form>
+        </Modal>
+      )}
+
       {showTransfer && (
         <Modal
           size="md"
@@ -837,7 +851,7 @@ export default function CashBookPage() {
             <button
               type="button"
               onClick={() => setTransferDirection("cash_to_bank")}
-              className={`flex-1 border rounded-xl px-3 py-2.5 text-sm text-left ${
+              className={`flex-1 border rounded-xl px-3 py-2 text-sm text-left ${
                 transferDirection === "cash_to_bank" ? "border-black bg-black text-white" : "border-gray-200 text-gray-700 hover:border-gray-400"
               }`}
             >
@@ -849,7 +863,7 @@ export default function CashBookPage() {
             <button
               type="button"
               onClick={() => setTransferDirection("bank_to_cash")}
-              className={`flex-1 border rounded-xl px-3 py-2.5 text-sm text-left ${
+              className={`flex-1 border rounded-xl px-3 py-2 text-sm text-left ${
                 transferDirection === "bank_to_cash" ? "border-black bg-black text-white" : "border-gray-200 text-gray-700 hover:border-gray-400"
               }`}
             >
