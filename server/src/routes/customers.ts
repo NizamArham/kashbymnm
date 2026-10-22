@@ -11,6 +11,7 @@ import { normalizePhone } from "../lib/phones";
 import { approveIfNeeded } from "../lib/approval";
 import { exchangeForSale } from "../lib/exchanges";
 import { maskAccount, refundEventsForCustomer, returnedEventsForCustomer } from "../lib/refunds";
+import { returnedValueForCustomer } from "../lib/returnedRevenue";
 import { refundStoreCredit, usableStoreCredit } from "../lib/storeCreditRefund";
 
 export const customersRouter = Router();
@@ -278,7 +279,8 @@ customersRouter.get(
       .prepare(`SELECT * FROM customer_bank_accounts WHERE customer_id = ? ORDER BY is_default DESC, id ASC`)
       .all(req.params.id);
 
-    res.json({ ...customer, addresses, bank_accounts: bankAccounts });
+    // What was handed back to them (refunds and store-credit exchanges), so the page can show their total after returns.
+    res.json({ ...customer, addresses, bank_accounts: bankAccounts, returned_value: returnedValueForCustomer(customer.id) });
   })
 );
 

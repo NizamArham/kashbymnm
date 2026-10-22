@@ -28,7 +28,11 @@ export interface ReturnRow {
 // given (what the customer still owes stays on their account) and nothing comes
 // off. That is why returns tied to an exchange order are left out of the plain
 // list below and counted with the exchange instead.
-export function returnsInRange(start: string, end: string): ReturnRow[] {
+export function returnsInRange(start: string, end: string, customerId?: number): ReturnRow[] {
+  // Only one customer's invoices, when asked (the customer's own page).
+  const byCustomer = customerId === undefined ? "" : "AND s.customer_id = ?";
+  const byExchangeCustomer = customerId === undefined ? "" : "AND os.customer_id = ?";
+  const extra = customerId === undefined ? [] : [customerId];
   const rows = db
     .prepare(
       `SELECT r.return_date, r.resolution, r.condition, r.refund_amount, si.unit_price,
@@ -41,9 +45,9 @@ export function returnsInRange(start: string, end: string): ReturnRow[] {
        WHERE s.is_voided = 0 AND s.status = 'completed'
          AND r.resolution IN ('refund', 'store_credit_exchange')
          AND r.id NOT IN (SELECT return_id FROM online_exchange_items WHERE return_id IS NOT NULL)
-         AND date(r.return_date) BETWEEN date(?) AND date(?)`
+         AND date(r.return_date) BETWEEN date(?) AND date(?) ${byCustomer}`
     )
-    .all(start, end) as {
+    .all(start, end, ...extra) as {
     return_date: string;
     resolution: string;
     condition: string;
@@ -81,9 +85,9 @@ export function returnsInRange(start: string, end: string): ReturnRow[] {
        WHERE ns.is_voided = 0 AND ns.status = 'completed'
          AND os.is_voided = 0 AND os.status = 'completed'
          AND oei.status IN ('awaiting', 'received')
-         AND date(ox.created_at) BETWEEN date(?) AND date(?)`
+         AND date(ox.created_at) BETWEEN date(?) AND date(?) ${byExchangeCustomer}`
     )
-    .all(start, end) as {
+    .all(start, end, ...extra) as {
     created_at: string;
     status: string;
     item_condition: string | null;
@@ -105,4 +109,11 @@ export function returnsInRange(start: string, end: string): ReturnRow[] {
   }));
 
   return [...plain, ...exchanged];
+}
+
+// Everything handed back to one customer over all time, by the same rule — the figure that comes off the total of their invoices to show
+// what they actually bought and kept.
+export function returnedValueForCustomer(customerId: number): number {
+  const total = returnsInRange("1900-01-01", "2999-12-31", customerId).reduce((sum, r) => sum + r.amount, 0);
+  return Math.round(total * 100) / 100;
 }

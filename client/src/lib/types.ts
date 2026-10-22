@@ -196,6 +196,8 @@ export interface Customer {
   on_delivery?: number;
   store_credit_balance: number;
   last_order_date: string | null;
+  // Only on the single-customer fetch: what was handed back to them (refunds, store-credit exchanges).
+  returned_value?: number;
   // Only on a cashier's search results: true when what was typed is this customer's full name, number or
   // code (their phone then shows in full — otherwise just its last three digits).
   exact_match?: boolean;

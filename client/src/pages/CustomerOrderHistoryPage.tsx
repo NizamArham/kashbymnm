@@ -157,7 +157,12 @@ export default function CustomerOrderHistoryPage({ customerId }: { customerId?: 
     ];
   }
 
-  const totalSpent = sales.reduce((sum, s) => sum + s.total, 0);
+  // "2 orders · Rs. 15,990 total · Rs. 6,490 returned": the total is what they bought and kept, so what was handed back comes off the
+  // invoices, and is shown beside it. A voided invoice is no order at all.
+  const liveSales = sales.filter((s) => !s.is_voided);
+  const returned = customer?.returned_value ?? 0;
+  const totalSpent = Math.max(0, liveSales.reduce((sum, s) => sum + s.total, 0) - returned);
+  const summaryLine = `${liveSales.length} order${liveSales.length === 1 ? "" : "s"} · Rs. ${totalSpent.toLocaleString()} total${returned > 0 ? ` · Rs. ${returned.toLocaleString()} returned` : ""}`;
 
   return (
     <div>
@@ -172,15 +177,11 @@ export default function CustomerOrderHistoryPage({ customerId }: { customerId?: 
       )}
 
       {embedded ? (
-        <p className="mb-3 text-sm text-gray-500">{customer ? `${sales.length} order${sales.length === 1 ? "" : "s"} · Rs. ${totalSpent.toLocaleString()} total` : ""}</p>
+        <p className="mb-3 text-sm text-gray-500">{customer ? summaryLine : ""}</p>
       ) : (
         <PageHeader
           title={customer ? `${customer.name}'s orders` : "Order history"}
-          subtitle={
-            customer
-              ? `${sales.length} order${sales.length === 1 ? "" : "s"} · Rs. ${totalSpent.toLocaleString()} total`
-              : undefined
-          }
+          subtitle={customer ? summaryLine : undefined}
         />
       )}
 
