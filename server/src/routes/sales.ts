@@ -1683,9 +1683,12 @@ salesRouter.put(
       // Return each physical unit to sellable stock — unless a newer sale has
       // since sold that very piece (e.g. a refused exchange parcel was put back on
       // the shelf when it came back, then sold again), which must stay sold.
+      // A borrowed piece (an "item not in stock" still open with its supplier) is not ours to shelve: it is set aside as
+      // removed, the same as when it is returned in the shop, and stays on the Not in stock list until settled.
       for (const item of items) {
         db.prepare(
-          `UPDATE inventory SET status = 'available'
+          `UPDATE inventory
+           SET status = CASE WHEN manual_pending_line_id IS NOT NULL AND manual_resolution IS NULL THEN 'removed' ELSE 'available' END
            WHERE id = ?
              AND NOT EXISTS (
                SELECT 1 FROM sale_items later JOIN sales ls ON ls.id = later.sale_id
