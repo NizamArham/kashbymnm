@@ -418,8 +418,14 @@ CREATE TABLE IF NOT EXISTS inventory (
   status TEXT NOT NULL DEFAULT 'available'
     CHECK (status IN ('available','sold','damaged','gifted','stolen','lost','removed')),
   -- Only set when status is a write-off reason (not 'available' or 'sold').
-  removal_reason TEXT CHECK (removal_reason IN ('Damaged','Gifted','Staff Use','Stolen','Lost','Other')),
+  removal_reason TEXT CHECK (removal_reason IN ('Damaged','Gifted','Staff Use','Stolen','Lost','Other','Returned to supplier')),
   removal_note TEXT,
+  -- A "borrowed / not yet in stock" piece sold at the till: a placeholder unit
+  -- created at sale time, linked to the pending purchase line that records the
+  -- supplier and cost. NULL for every ordinary unit.
+  manual_pending_line_id INTEGER REFERENCES pending_purchase_lines(id),
+  -- How the borrowed piece was settled at end of day. NULL = still open.
+  manual_resolution TEXT CHECK (manual_resolution IN ('paid','returned')),
   created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes'))
 );
 

@@ -6,6 +6,8 @@ import { AuthUser } from "./auth";
 // out of sync with what the Audit Log page knows how to label.
 export type AuditAction =
   | "product_delete"
+  | "borrowed_item_sold"
+  | "borrowed_item_settled"
   | "customer_delete"
   | "customer_suspend"
   | "customer_reactivate"

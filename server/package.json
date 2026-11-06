@@ -9,6 +9,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "db:migrate": "tsx src/db/migrate.ts",
+    "db:migrate-borrowed-items": "tsx src/db/migrate-borrowed-items.ts",
     "db:migrate-store-credit-exchange": "tsx src/db/migrate-store-credit-exchange.ts",
     "db:migrate-customer-suspend-delete": "tsx src/db/migrate-customer-suspend-delete.ts",
     "db:migrate-cheques": "tsx src/db/migrate-cheques.ts",

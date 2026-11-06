@@ -116,6 +116,7 @@ export default function AppShell() {
         { id: "checkout", label: "Checkout", path: "/pos", icon: ShoppingCart },
         { id: "sales-history", label: "Sale History", path: "/sales", icon: History },
         { id: "quotations", label: "Payment requests", path: "/quotations", icon: FileText },
+        { id: "borrowed", label: "Not in stock", path: "/borrowed", icon: Package },
         { id: "promotions", label: "Promotions", path: "/promotions", icon: Tag, adminOnly: true },
       ],
     },

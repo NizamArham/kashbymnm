@@ -401,7 +401,13 @@ export function approveReturnRequest(requestId: number | string, user: AuthUser,
       );
     const returnId = returnResult.lastInsertRowid;
 
-    const newStatus = request.condition === "clean" ? "available" : "damaged";
+    // A borrowed piece (not yet settled with its supplier) never goes back on the shelf: it is
+    // set aside as removed, and stays on the end-of-day list until settled.
+    const borrowed = db
+      .prepare(`SELECT manual_pending_line_id, manual_resolution FROM inventory WHERE id = ?`)
+      .get(saleItem.inventory_id) as { manual_pending_line_id: number | null; manual_resolution: string | null } | undefined;
+    const isOpenBorrowed = !!borrowed && borrowed.manual_pending_line_id != null && borrowed.manual_resolution == null;
+    const newStatus = isOpenBorrowed ? "removed" : request.condition === "clean" ? "available" : "damaged";
     db.prepare(`UPDATE inventory SET status = ? WHERE id = ?`).run(newStatus, saleItem.inventory_id);
 
     if (resolution === "refund") {

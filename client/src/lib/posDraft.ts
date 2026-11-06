@@ -17,9 +17,20 @@ import { InventoryUnit, Customer, SaleType, Coupon } from "./types";
 
 const STORAGE_KEY = "mm_pos_draft_sale";
 
+// A piece not in stock (borrowed / not yet entered), as the till needs to record it.
+export interface ManualDraft {
+  title: string;
+  color: string;
+  size: string;
+  cost_price: number;
+  supplier_id: number;
+  supplier_name: string;
+}
+
 export interface CartLineSnapshot {
   units: InventoryUnit[];
   unit_price: number;
+  manual?: ManualDraft;
 }
 
 export interface PosDraftSale {

@@ -15,6 +15,7 @@ import SupplierProfilePage from "./pages/SupplierProfilePage";
 import ViewCustomersPage from "./pages/ViewCustomersPage";
 import CustomerProfilePage from "./pages/CustomerProfilePage";
 import PosPage from "./pages/PosPage";
+import BorrowedItemsPage from "./pages/BorrowedItemsPage";
 import QuotationsPage from "./pages/QuotationsPage";
 import SaleHistoryPage from "./pages/SaleHistoryPage";
 import SaleDetailPage from "./pages/SaleDetailPage";
@@ -78,6 +79,7 @@ export default function App() {
       >
         <Route path="/" element={<RoleAwareHome />} />
         <Route path="/pos" element={<PosPage />} />
+        <Route path="/borrowed" element={<BorrowedItemsPage />} />
         <Route path="/inventory" element={<InventoryCategoriesPage />} />
         <Route path="/inventory/categories" element={<Navigate to="/inventory" replace />} />
 

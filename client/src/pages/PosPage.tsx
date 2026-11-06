@@ -45,7 +45,7 @@ import {
   calculateDeliveryFee,
   calculateCodAmount,
 } from "../lib/delivery";
-import { saveDraftSale, loadDraftSale, clearDraftSale, PosDraftSale } from "../lib/posDraft";
+import { saveDraftSale, loadDraftSale, clearDraftSale, PosDraftSale, ManualDraft } from "../lib/posDraft";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { whatsappMessageLink, loyaltyPointsMessage } from "../lib/whatsapp";
 import { normalizePhone, phoneError } from "../lib/phone";
@@ -62,10 +62,19 @@ import { useConfirm } from "../components/Feedback";
 interface CartLine {
   units: InventoryUnit[];
   unit_price: number;
+  // Set for a piece not in stock (borrowed / not yet entered): what the till records for it.
+  manual?: ManualDraft;
 }
 
 function cartLineKey(u: InventoryUnit): string {
   return `${u.product_id}::${u.color ?? ""}::${u.size ?? ""}`;
+}
+
+// Ids for pieces not in stock: negative, so they can never clash with a real inventory id.
+let fakeIdCounter = 0;
+function nextFakeId(): number {
+  fakeIdCounter += 1;
+  return -(Date.now() * 1000 + fakeIdCounter);
 }
 
 // One tick box with a short label and its explanation in a hint, so the
@@ -166,6 +175,17 @@ export default function PosPage() {
   // Full new-customer modal: name, phone (required) + phone2 (optional),
   // address line 1/2, and city — matching a real intake form rather than
   // the earlier quick name+phone shortcut.
+  // "Item not in stock" (borrowed / not yet entered): sold now, settled with the supplier at end of day.
+  const [showManualItem, setShowManualItem] = useState(false);
+  const [manualTitle, setManualTitle] = useState("");
+  const [manualColor, setManualColor] = useState("");
+  const [manualSize, setManualSize] = useState("");
+  const [manualQty, setManualQty] = useState("1");
+  const [manualCost, setManualCost] = useState("");
+  const [manualPrice, setManualPrice] = useState("");
+  const [manualSupplierId, setManualSupplierId] = useState("");
+  const [manualSuppliers, setManualSuppliers] = useState<{ id: number; name: string }[]>([]);
+  const [manualError, setManualError] = useState<string | null>(null);
   const [showAddCustomer, setShowAddCustomer] = useState(false);
   const [newCustomerName, setNewCustomerName] = useState("");
   const [newCustomerPhone, setNewCustomerPhone] = useState("");
@@ -511,7 +531,7 @@ export default function PosPage() {
     setEditingQuotation(draft.quotation ?? null);
 
     if (draft.cart.length > 0) {
-      const allIds = draft.cart.flatMap((line) => line.units.map((u) => u.id));
+      const allIds = draft.cart.flatMap((line) => line.units.map((u) => u.id)).filter((id) => id > 0);
       api
         .post<{ id: number; status: string }[]>("/inventory/check-status", { ids: allIds })
         .then((results) => {
@@ -690,6 +710,65 @@ export default function PosPage() {
     return units;
   }
 
+  async function openManualItem() {
+    setManualError(null);
+    setShowManualItem(true);
+    setCustomerSearchOpen(false);
+    setProductSearchOpen(false);
+    if (manualSuppliers.length === 0) {
+      try {
+        setManualSuppliers(await api.get<{ id: number; name: string }[]>("/manual-items/suppliers"));
+      } catch (err) {
+        setManualError(err instanceof ApiRequestError ? err.message : "Couldn't load the suppliers");
+      }
+    }
+  }
+
+  function addManualItemToCart() {
+    setManualError(null);
+    const qty = parseInt(manualQty, 10);
+    const cost = parseFloat(manualCost);
+    const price = parseFloat(manualPrice);
+    if (!manualTitle.trim()) return setManualError("Enter the item's name");
+    if (!manualSupplierId) return setManualError("Pick the supplier this piece is borrowed from");
+    if (!qty || qty < 1 || qty > 50) return setManualError("Quantity must be between 1 and 50");
+    if (isNaN(cost) || cost < 0) return setManualError("Enter the cost price — what the supplier charges for it");
+    if (isNaN(price) || price < 0) return setManualError("Enter the selling price");
+
+    const supplier = manualSuppliers.find((s) => String(s.id) === manualSupplierId);
+    const productId = nextFakeId();
+    const color = manualColor.trim();
+    const size = manualSize.trim();
+    const units: InventoryUnit[] = Array.from({ length: qty }, () => ({
+      id: nextFakeId(),
+      product_id: productId,
+      size: size || null,
+      color: color || null,
+      sku: "NOT IN STOCK",
+      barcode: null,
+      selling_price: price,
+      status: "available",
+      created_at: "",
+      product_title: manualTitle.trim(),
+    }));
+    setCart((c) => [
+      ...c,
+      {
+        units,
+        unit_price: price,
+        manual: { title: manualTitle.trim(), color, size, cost_price: cost, supplier_id: Number(manualSupplierId), supplier_name: supplier?.name ?? "" },
+      },
+    ]);
+    setShowManualItem(false);
+    setManualTitle("");
+    setManualColor("");
+    setManualSize("");
+    setManualQty("1");
+    setManualCost("");
+    setManualPrice("");
+    setManualSupplierId("");
+  }
+
   function toggleBrowser() {
     setShowBrowser((v) => {
       const next = !v;
@@ -772,7 +851,7 @@ export default function PosPage() {
         // available pool so the + stepper and search/browse can offer
         // it again instead of wrongly treating it as gone for the rest
         // of this session.
-        setAllAvailableUnits((prev) => (prev ? [...prev, removedUnit] : prev));
+        if (removedUnit.id > 0) setAllAvailableUnits((prev) => (prev ? [...prev, removedUnit] : prev));
       }
       return c.map((l) => (cartLineKey(l.units[0]) === lineKey ? { ...l, units: l.units.slice(0, -1) } : l)).filter((l) => l.units.length > 0);
     });
@@ -787,6 +866,12 @@ export default function PosPage() {
   }
 
   function incrementCartLine(lineKey: string) {
+    const manualLine = cart.find((l) => cartLineKey(l.units[0]) === lineKey && l.manual);
+    if (manualLine) {
+      const extra = { ...manualLine.units[0], id: nextFakeId() };
+      setCart((c) => c.map((l) => (cartLineKey(l.units[0]) === lineKey ? { ...l, units: [...l.units, extra] } : l)));
+      return;
+    }
     const cartIds = new Set(cart.flatMap((l) => l.units.map((u) => u.id)));
     const nextUnit = (allAvailableUnits ?? []).find((u) => cartLineKey(u) === lineKey && !cartIds.has(u.id));
     if (!nextUnit) return;
@@ -1143,7 +1228,20 @@ export default function PosPage() {
       const salePayload = {
         customer_id: selectedCustomer?.id,
         salesperson: user?.name ?? user?.username,
-        items: cart.flatMap((line) => line.units.map((u) => ({ inventory_id: u.id, unit_price: line.unit_price }))),
+        items: cart
+          .filter((line) => !line.manual)
+          .flatMap((line) => line.units.map((u) => ({ inventory_id: u.id, unit_price: line.unit_price }))),
+        manual_items: cart
+          .filter((line) => line.manual)
+          .map((line) => ({
+            product_title: line.manual!.title,
+            color: line.manual!.color || undefined,
+            size: line.manual!.size || undefined,
+            quantity: line.units.length,
+            cost_price: line.manual!.cost_price,
+            unit_price: line.unit_price,
+            supplier_id: line.manual!.supplier_id,
+          })),
         manual_discount_type: discountType,
         manual_discount_value: parseFloat(discountValue) || 0,
         coupon_code: appliedCoupon?.code,
@@ -1211,6 +1309,10 @@ export default function PosPage() {
   // quote stays valid.
   function beginQuotation() {
     setQuotationError(null);
+    if (cart.some((line) => line.manual)) {
+      setCheckoutError("Pieces not in stock can't go on a payment request yet — take the sale directly.");
+      return;
+    }
     if (cart.length === 0) {
       setCheckoutError("Cart is empty");
       return;
@@ -1674,6 +1776,9 @@ export default function PosPage() {
               )}
             </div>
             {productSearchError && <ErrorText>{productSearchError}</ErrorText>}
+            <button type="button" onClick={openManualItem} className="mt-2 text-xs text-gray-600 underline hover:text-gray-900">
+              Item not in stock? Add it here
+            </button>
           </div>
 
           <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
@@ -1705,7 +1810,7 @@ export default function PosPage() {
                   const isEditing = editingLineKey === lineKey;
                   const qty = line.units.length;
                   const hasStaleUnit = line.units.some((u) => staleUnitIds.has(u.id));
-                  const canAddMore = remainingAvailable(lineKey) > 0;
+                  const canAddMore = !!line.manual || remainingAvailable(lineKey) > 0;
                   const stepper = (
                     <div className="inline-flex items-center gap-1.5">
                       <button
@@ -1738,11 +1843,14 @@ export default function PosPage() {
                     >
                       <div className="col-span-9 lg:col-span-4 min-w-0 order-1 lg:order-none">
                         <p className={`font-medium text-sm truncate ${hasStaleUnit ? "text-gray-500 line-through" : "text-gray-900"}`}>
-                          {sample.product_id ? <RefLink to={`/products/${sample.product_id}`}>{sample.product_title}</RefLink> : sample.product_title}
+                          {sample.product_id > 0 ? <RefLink to={`/products/${sample.product_id}`}>{sample.product_title}</RefLink> : sample.product_title}
                         </p>
                         <p className={`text-xs mt-0.5 truncate ${hasStaleUnit ? "text-gray-500 line-through" : "text-gray-500"}`}>
                           {sample.color ?? "—"} / {sample.size ?? "—"} | SKU: {sample.sku}
                         </p>
+                        {line.manual && (
+                          <p className="text-xs text-amber-700 mt-0.5">Not in stock · borrowed from {line.manual.supplier_name}</p>
+                        )}
                         {hasStaleUnit && (
                           <p className="text-xs text-red-600 mt-0.5 font-medium">No longer in stock — remove before checkout</p>
                         )}
@@ -2337,6 +2445,64 @@ export default function PosPage() {
 
       {/* NEW CUSTOMER MODAL — full intake form: name, phone (required) +
           phone2 (optional), address line 1/2, and city. */}
+      {showManualItem && (
+        <Modal
+          size="md"
+          onClose={() => setShowManualItem(false)}
+          title="Item not in stock"
+          subtitle="Borrowed or not yet entered — sold now, settled with the supplier at end of day"
+          footer={
+            <>
+              <Button onClick={() => setShowManualItem(false)}>Cancel</Button>
+              <Button variant="primary" onClick={addManualItemToCart}>
+                Add to sale
+              </Button>
+            </>
+          }
+        >
+          <div className="space-y-3">
+            <FormGroup>
+              <Label>Item name</Label>
+              <Input value={manualTitle} onChange={(e) => setManualTitle(e.target.value)} autoFocus />
+            </FormGroup>
+            <div className="grid grid-cols-2 gap-3">
+              <FormGroup>
+                <Label>Color (optional)</Label>
+                <Input value={manualColor} onChange={(e) => setManualColor(e.target.value)} />
+              </FormGroup>
+              <FormGroup>
+                <Label>Size (optional)</Label>
+                <Input value={manualSize} onChange={(e) => setManualSize(e.target.value)} />
+              </FormGroup>
+            </div>
+            <FormGroup>
+              <Label>Supplier</Label>
+              <Dropdown
+                value={manualSupplierId}
+                onChange={setManualSupplierId}
+                placeholder="— Select —"
+                options={manualSuppliers.map((s) => ({ value: String(s.id), label: s.name }))}
+              />
+            </FormGroup>
+            <div className="grid grid-cols-3 gap-3">
+              <FormGroup>
+                <Label>Quantity</Label>
+                <Input type="number" min="1" value={manualQty} onChange={(e) => setManualQty(e.target.value)} />
+              </FormGroup>
+              <FormGroup>
+                <Label>Cost price (Rs.)</Label>
+                <Input type="number" min="0" step="0.01" value={manualCost} onChange={(e) => setManualCost(e.target.value)} />
+              </FormGroup>
+              <FormGroup>
+                <Label>Selling price (Rs.)</Label>
+                <Input type="number" min="0" step="0.01" value={manualPrice} onChange={(e) => setManualPrice(e.target.value)} />
+              </FormGroup>
+            </div>
+            {manualError && <ErrorText>{manualError}</ErrorText>}
+          </div>
+        </Modal>
+      )}
+
       {showAddCustomer && (
         <Modal
           size="lg"
@@ -2538,6 +2704,11 @@ export default function PosPage() {
                 </div>
               </div>
 
+              {cart.some((line) => line.manual) && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
+                  Not-in-stock items: confirm each piece is physically here before handing it over. Each one is settled with its supplier at end of day.
+                </div>
+              )}
               <div className="border-t border-gray-100 pt-3 space-y-1.5">
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">Customer</span>
