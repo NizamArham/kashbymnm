@@ -4,6 +4,7 @@ import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth } from "../lib/auth";
 import { approveIfNeeded } from "../lib/approval";
 import { SALE_EXCHANGE_FLAGS_SQL } from "../lib/exchanges";
+import { toPayFor } from "../lib/supplierOwing";
 import { CALC_SUBQUERY, searchCustomersForCashier } from "./customers";
 
 export const findRouter = Router();
@@ -106,16 +107,16 @@ findRouter.get(
 
     const purchase = db
       .prepare(
-        `SELECT purchases.id, purchases.purchase_code, purchases.purchase_date, purchases.total_cost, purchases.amount_paid,
+        `SELECT purchases.id, purchases.supplier_id, purchases.purchase_code, purchases.purchase_date, purchases.total_cost, purchases.amount_paid,
                 purchases.payment_status, purchases.fulfillment_status, suppliers.name as supplier_name
          FROM purchases
          JOIN suppliers ON suppliers.id = purchases.supplier_id
          WHERE LOWER(purchases.purchase_code) = LOWER(?)`
       )
-      .get(code);
+      .get(code) as any;
     if (purchase) {
       beyondACashier(req, res, "purchase");
-      return res.json({ type: "purchase", data: purchase });
+      return res.json({ type: "purchase", data: { ...purchase, to_pay: toPayFor(purchase) } });
     }
 
     const transaction = db

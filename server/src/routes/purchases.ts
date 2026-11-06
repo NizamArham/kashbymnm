@@ -5,6 +5,7 @@ import { nextPurchaseCode, nextSku, nextTransactionCode } from "../lib/codes";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth, requireRole } from "../lib/auth";
 import { logAudit } from "../lib/auditLog";
+import { toPayByPurchase, toPayFor } from "../lib/supplierOwing";
 
 export const purchasesRouter = Router();
 
@@ -92,8 +93,15 @@ purchasesRouter.get(
          ${bySupplier ? "WHERE purchases.supplier_id = ?" : ""}
          ORDER BY purchases.id DESC`
       )
-      .all(...(bySupplier ? [supplierId] : []));
-    res.json(rows);
+      .all(...(bySupplier ? [supplierId] : [])) as any[];
+    // "to_pay" is what is really still to pay on each purchase — money already paid past another purchase counts (lib/supplierOwing).
+    const toPay = new Map<number, Map<number, number>>();
+    res.json(
+      rows.map((r) => {
+        if (!toPay.has(r.supplier_id)) toPay.set(r.supplier_id, toPayByPurchase(r.supplier_id));
+        return { ...r, to_pay: toPay.get(r.supplier_id)!.get(r.id) ?? Math.max(0, r.total_cost - r.amount_paid) };
+      })
+    );
   })
 );
 
@@ -690,7 +698,7 @@ purchasesRouter.get(
          FROM purchases JOIN suppliers ON suppliers.id = purchases.supplier_id
          WHERE purchases.id = ?`
       )
-      .get(req.params.id);
+      .get(req.params.id) as any;
     if (!purchase) throw new ApiError(404, "Purchase not found");
 
     const items = db
@@ -703,7 +711,7 @@ purchasesRouter.get(
 
     const lines = db.prepare(`SELECT * FROM pending_purchase_lines WHERE purchase_id = ?`).all(req.params.id);
 
-    res.json({ ...purchase, items, lines });
+    res.json({ ...purchase, to_pay: toPayFor(purchase), items, lines });
   })
 );
 

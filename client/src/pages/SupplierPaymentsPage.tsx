@@ -541,9 +541,29 @@ export default function SupplierPaymentsPage() {
                       />
                     </FormGroup>
 
+                    {supplierId && (() => {
+                      const owedNow = balances.find((b) => String(b.id) === supplierId)?.balance_owed;
+                      if (owedNow == null) return null;
+                      return (
+                        <p className="text-sm text-gray-600 -mt-1">
+                          {owedNow > 0 ? (
+                            <>You owe {suppliers.find((s) => String(s.id) === supplierId)?.name} <span className="font-semibold text-gray-900">Rs. {owedNow.toLocaleString()}</span> in all.</>
+                          ) : owedNow < 0 ? (
+                            <>You've paid {suppliers.find((s) => String(s.id) === supplierId)?.name} <span className="font-semibold text-gray-900">Rs. {(-owedNow).toLocaleString()}</span> ahead.</>
+                          ) : (
+                            <>Nothing owed to {suppliers.find((s) => String(s.id) === supplierId)?.name} right now.</>
+                          )}
+                        </p>
+                      );
+                    })()}
+
                     {(() => {
+                      // "Still to pay" is the purchase's own balance less any money already paid past another of this supplier's
+                      // purchases — the same figure as the supplier's total, not the bill on its own.
+                      const ownLeft = (p: Purchase) => Math.max(0, p.total_cost - p.amount_paid);
+                      const leftOn = (p: Purchase) => p.to_pay ?? ownLeft(p);
                       const outstanding = purchases.filter(
-                        (p) => String(p.supplier_id) === supplierId && p.payment_status !== "paid"
+                        (p) => String(p.supplier_id) === supplierId && p.payment_status !== "paid" && leftOn(p) > 0
                       );
                       if (!supplierId || outstanding.length === 0) return null;
                       return (
@@ -554,12 +574,16 @@ export default function SupplierPaymentsPage() {
                             onChange={(v) => {
                               setPurchaseId(v);
                               const match = outstanding.find((p) => String(p.id) === v);
-                              if (match) setAmount(String(match.total_cost - match.amount_paid));
+                              if (match) setAmount(String(leftOn(match)));
                             }}
                             placeholder="— General payment, not tied to one purchase —"
                             options={outstanding.map((p) => ({
                               value: String(p.id),
-                              label: `${p.purchase_code} — owes Rs. ${(p.total_cost - p.amount_paid).toLocaleString()}`,
+                              label: `${p.purchase_code} — Rs. ${leftOn(p).toLocaleString()} still to pay`,
+                              sublabel:
+                                leftOn(p) < ownLeft(p)
+                                  ? `Rs. ${ownLeft(p).toLocaleString()} on this bill, less Rs. ${(ownLeft(p) - leftOn(p)).toLocaleString()} already paid on other bills`
+                                  : undefined,
                             }))}
                           />
                         </FormGroup>
@@ -737,12 +761,30 @@ export default function SupplierPaymentsPage() {
                         (() => {
                           const sel = suppliers.find((s) => String(s.id) === supplierId);
                           const displayAmount = method === "cheque" ? chequeListTotal : parseFloat(amount) || 0;
+                          const owedNow = balances.find((b) => String(b.id) === supplierId)?.balance_owed;
+                          const after = owedNow == null ? null : owedNow - displayAmount;
                           return (
                             <div className="bg-white rounded-lg border border-gray-200 px-3 py-2.5">
                               <p className="text-sm font-medium text-gray-900">{sel?.name}</p>
+                              {owedNow != null && (
+                                <p className="text-xs text-gray-500 mt-1">
+                                  Owed now <span className="font-medium text-gray-700">Rs. {Math.max(0, owedNow).toLocaleString()}</span>
+                                </p>
+                              )}
                               <p className="text-xs text-gray-500 mt-1">
                                 Paying <span className="font-medium text-gray-700">Rs. {displayAmount.toLocaleString()}</span>
                               </p>
+                              {after != null && displayAmount > 0 && (
+                                <p className="text-xs text-gray-500 mt-1">
+                                  {after > 0 ? (
+                                    <>Still owed after <span className="font-medium text-gray-700">Rs. {after.toLocaleString()}</span></>
+                                  ) : after === 0 ? (
+                                    <span className="font-medium text-gray-700">Settled after this payment</span>
+                                  ) : (
+                                    <>Paid ahead by <span className="font-medium text-gray-700">Rs. {(-after).toLocaleString()}</span></>
+                                  )}
+                                </p>
+                              )}
                             </div>
                           );
                         })()

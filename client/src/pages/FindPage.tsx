@@ -87,6 +87,7 @@ interface PurchaseResult {
   purchase_date: string;
   total_cost: number;
   amount_paid: number;
+  to_pay?: number;
   payment_status: string;
   fulfillment_status: string;
   supplier_name: string;
@@ -355,7 +356,9 @@ function buildViewFor(result: FindResult): ResultView {
     }
     case "purchase": {
       const d = result.data;
-      const toPay = Math.max(0, d.total_cost - d.amount_paid);
+      // The real figure — money already paid past another of this supplier's bills counts (the server works it out).
+      const ownLeft = Math.max(0, d.total_cost - d.amount_paid);
+      const toPay = d.to_pay ?? ownLeft;
       return {
         title: d.purchase_code,
         chips: (
@@ -372,6 +375,7 @@ function buildViewFor(result: FindResult): ResultView {
         details: [
           ["Supplier", d.supplier_name],
           ["Date", when(d.purchase_date)],
+          ...(toPay < ownLeft ? [["Already covered", `${money(ownLeft - toPay)} paid on other bills of this supplier`] as [string, ReactNode]] : []),
         ],
         actions: [{ label: "Go to Purchases", to: "/purchases", primary: true }],
       };

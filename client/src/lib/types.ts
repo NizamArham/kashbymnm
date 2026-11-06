@@ -846,6 +846,8 @@ export interface Purchase {
   payment_status: "paid" | "partial" | "unpaid";
   fulfillment_status: "pending" | "fulfilled";
   description: string | null;
+  // What is really still to pay on it — money already paid past another of the supplier's purchases counts.
+  to_pay?: number;
   lines?: PendingPurchaseLine[];
   expenses?: PurchaseExpense[];
 }
