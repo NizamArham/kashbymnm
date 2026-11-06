@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { db } from "../db/connection";
-import { nextInvoiceCode, InvoiceCategory, nextTransactionCode, nextQuotationCode, invoiceCodeFromQuotation } from "../lib/codes";
+import { nextInvoiceCode, InvoiceCategory, nextTransactionCode, nextQuotationCode, invoiceCodeFromQuotation, nextPurchaseCode, nextSku } from "../lib/codes";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth, requireRole, AuthUser } from "../lib/auth";
 import { requireAdminOrApproval, approveIfNeeded, actorOf } from "../lib/approval";
@@ -43,10 +43,25 @@ const saleItemInput = z.object({
   unit_price: z.number().nonnegative(),
 });
 
+// A piece sold at the till that is not in stock yet (borrowed, or not yet entered). Sold
+// through an admin's approval. A placeholder unit is created at sale time and linked to a
+// pending purchase line that records the supplier and the cost owed.
+const manualItemInput = z.object({
+  product_title: z.string().trim().min(1, "Enter the item's name"),
+  color: z.string().trim().max(60).optional(),
+  size: z.string().trim().max(30).optional(),
+  quantity: z.number().int().min(1).max(50),
+  cost_price: z.number().nonnegative(),
+  unit_price: z.number().nonnegative(),
+  supplier_id: z.number().int().positive(),
+});
+export type ManualSaleItem = z.infer<typeof manualItemInput>;
+
 const saleInput = z.object({
   customer_id: z.number().int().positive().optional(),
   salesperson: z.string().optional(),
-  items: z.array(saleItemInput).min(1),
+  items: z.array(saleItemInput).default([]),
+  manual_items: z.array(manualItemInput).max(20).default([]),
   // Manual discount — staff-entered, either a percentage of the subtotal
   // or a flat amount. Kept separate from any coupon applied, per the
   // requirement that the two be tracked separately for audit even
@@ -166,12 +181,74 @@ interface ItemPricing {
   approvalReasons: string[];
 }
 
+// Creates the placeholder units for not-in-stock items, inside the sale's own transaction (so a
+// failed sale leaves nothing behind). One pending purchase per supplier records what is owed to
+// them; each piece gets a product row (hidden from the catalogue), a unit marked 'sold', and a
+// link to its purchase line.
+function openBorrowedItems(manualItems: ManualSaleItem[], invoice: string): { inventory_id: number; unit_price: number }[] {
+  const out: { inventory_id: number; unit_price: number }[] = [];
+  if (manualItems.length === 0) return out;
+
+  const bySupplier = new Map<number, ManualSaleItem[]>();
+  for (const m of manualItems) {
+    const list = bySupplier.get(m.supplier_id) ?? [];
+    list.push(m);
+    bySupplier.set(m.supplier_id, list);
+  }
+
+  for (const [supplierId, lines] of bySupplier) {
+    const total = lines.reduce((sum, m) => sum + m.cost_price * m.quantity, 0);
+    const purchaseId = Number(
+      db
+        .prepare(
+          `INSERT INTO purchases (purchase_code, supplier_id, total_cost, amount_paid, payment_status, fulfillment_status, description)
+           VALUES (?, ?, ?, 0, 'unpaid', 'pending', ?)`
+        )
+        .run(nextPurchaseCode(), supplierId, total, `Not in stock at sale — ${invoice}`).lastInsertRowid
+    );
+
+    for (const m of lines) {
+      const description = [m.product_title, m.color, m.size].filter(Boolean).join(" / ");
+      const lineId = Number(
+        db
+          .prepare(
+            `INSERT INTO pending_purchase_lines (purchase_id, description, quantity, unit_cost, product_type)
+             VALUES (?, ?, ?, ?, 'OG')`
+          )
+          .run(purchaseId, description, m.quantity, m.cost_price).lastInsertRowid
+      );
+      const productId = Number(
+        db
+          .prepare(
+            `INSERT INTO products (product_title, cost_price, selling_price, supplier_id, is_public)
+             VALUES (?, ?, ?, ?, 0)`
+          )
+          .run(m.product_title, m.cost_price, m.unit_price, supplierId).lastInsertRowid
+      );
+
+      for (let i = 0; i < m.quantity; i++) {
+        const unitId = Number(
+          db
+            .prepare(
+              `INSERT INTO inventory (product_id, size, color, sku, cost_price, selling_price, status, manual_pending_line_id)
+               VALUES (?, ?, ?, ?, ?, ?, 'sold', ?)`
+            )
+            .run(productId, m.size ?? null, m.color ?? null, nextSku(productId), m.cost_price, m.unit_price, lineId).lastInsertRowid
+        );
+        out.push({ inventory_id: unitId, unit_price: m.unit_price });
+      }
+    }
+  }
+  return out;
+}
+
 function priceItems(
   items: { inventory_id: number; unit_price: number }[],
   manualDiscountType: "percent" | "fixed" | undefined,
   manualDiscountValue: number | undefined,
   couponCodeInput: string | undefined,
-  actor?: AuthUser
+  actor?: AuthUser,
+  notInStock: { unit_price: number; quantity: number }[] = []
 ): ItemPricing {
   const approvalReasons = new Set<string>();
   const inventoryRows = items.map((item) => {
@@ -193,7 +270,8 @@ function priceItems(
     return row;
   });
 
-  const subtotal = items.reduce((sum, item) => sum + item.unit_price, 0);
+  const subtotal =
+    items.reduce((sum, item) => sum + item.unit_price, 0) + notInStock.reduce((sum, m) => sum + m.unit_price * m.quantity, 0);
 
   const manual_discount =
     manualDiscountType === "percent" ? Math.round((subtotal * (manualDiscountValue ?? 0)) / 100) : manualDiscountValue ?? 0;
@@ -648,13 +726,26 @@ salesRouter.post(
     // available) and compute subtotal/discount/total — shared with the
     // quotation endpoint below so a quoted price is always exactly what
     // a real checkout of the same cart would charge.
-    const priced = priceItems(data.items, data.manual_discount_type, data.manual_discount_value, data.coupon_code, req.user);
+    if (data.items.length === 0 && data.manual_items.length === 0) throw new ApiError(400, "Cart is empty");
+    for (const m of data.manual_items) {
+      const supplier = db.prepare(`SELECT id FROM suppliers WHERE id = ?`).get(m.supplier_id);
+      if (!supplier) throw new ApiError(400, `Pick the supplier for "${m.product_title}"`);
+    }
+    const priced = priceItems(
+      data.items,
+      data.manual_discount_type,
+      data.manual_discount_value,
+      data.coupon_code,
+      req.user,
+      data.manual_items.map((m) => ({ unit_price: m.unit_price, quantity: m.quantity }))
+    );
     const { subtotal, manual_discount, coupon_discount, coupon_code, discount, total } = priced;
     // Things a cashier can't do alone — credit, a big discount, free delivery, a price above the tag —
     // go ahead only when an admin types their password for this sale.
     const approvalReasons = [...priced.approvalReasons];
     if (isCredit) approvalReasons.push("selling on credit");
     if (data.sale_type === "online" && (data.is_free_delivery || data.delivery_paid_by === "shop")) approvalReasons.push("free delivery");
+    if (data.manual_items.length > 0) approvalReasons.push("an item not in stock");
     approveIfNeeded(req, res, approvalReasons, "This sale");
     // Wholesale orders, and customers marked as never earning points, get
     // none — the sale is simply recorded without any.
@@ -816,7 +907,8 @@ salesRouter.post(
         ).run(data.customer_id, loyalty_points_earned, saleId, `Earned from invoice ${invoice}`);
       }
 
-      for (const item of data.items) {
+      const borrowedLines = openBorrowedItems(data.manual_items, invoice);
+      for (const item of [...data.items, ...borrowedLines]) {
         db.prepare(
           `INSERT INTO sale_items (sale_id, inventory_id, quantity, unit_price, line_total)
            VALUES (?, ?, 1, ?, ?)`
