@@ -21,6 +21,39 @@ const entryInput = z.object({
   entry_date: z.string().optional(),
 });
 
+// GET /api/cash-book/by-code/:code — one transaction by its ID (TXN-0119), with what it was for: the supplier and bill a payment went to,
+// or the invoice a sale's money belongs to. What the "TXN-…" links on a statement open.
+cashBookRouter.get(
+  "/by-code/:code",
+  asyncHandler(async (req, res) => {
+    const entry = db
+      .prepare(
+        `SELECT id, transaction_code, entry_date, type, category, payment_method, reference_id, amount, notes
+         FROM cash_book WHERE LOWER(transaction_code) = LOWER(?)`
+      )
+      .get(req.params.code) as any;
+    if (!entry) throw new ApiError(404, "Transaction not found");
+
+    let supplier_payment: unknown = null;
+    let sale: unknown = null;
+    if (entry.category === "supplier_payment" && entry.reference_id) {
+      supplier_payment =
+        db
+          .prepare(
+            `SELECT sp.id, sp.supplier_id, s.name AS supplier_name, s.supplier_code, sp.purchase_id, pu.purchase_code
+             FROM supplier_payments sp
+             JOIN suppliers s ON s.id = sp.supplier_id
+             LEFT JOIN purchases pu ON pu.id = sp.purchase_id
+             WHERE sp.id = ?`
+          )
+          .get(entry.reference_id) ?? null;
+    } else if ((entry.category === "sale" || entry.category === "sale_void") && entry.reference_id) {
+      sale = db.prepare(`SELECT id, invoice FROM sales WHERE id = ?`).get(entry.reference_id) ?? null;
+    }
+    res.json({ ...entry, supplier_payment, sale });
+  })
+);
+
 // GET /api/cash-book — paginated ledger, newest first, with a TRUE
 // running balance on every row.
 //

@@ -326,6 +326,10 @@ supplierPaymentsRouter.get(
       effect: number;
       id?: number;
       cheque?: ChequeInfo;
+      // So the statement can link a purchase's code to what was bought, and a payment's transaction ID to its details.
+      purchase_id?: number;
+      purchase_code?: string;
+      transaction_code?: string;
     };
     const entries: LedgerEntry[] = [
       ...purchases.map((p) => {
@@ -345,6 +349,8 @@ supplierPaymentsRouter.get(
           }`,
           amount: Math.abs(netOwed),
           effect: netOwed,
+          purchase_id: p.id,
+          purchase_code: p.purchase_code,
         };
       }),
       ...payments.map((p) => {
@@ -360,6 +366,7 @@ supplierPaymentsRouter.get(
           effect: -p.amount,
           id: p.id,
           cheque: cheque ?? undefined,
+          transaction_code: p.transaction_code ?? undefined,
         };
       }),
       ...credits.map((c) => ({
