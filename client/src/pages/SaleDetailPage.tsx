@@ -584,7 +584,7 @@ export default function SaleDetailPage() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
               <div>
                 <p className="text-xs text-gray-500">Status</p>
-                <p className="text-gray-900 font-medium capitalize">{isQuotation ? "Payment request" : saleStatusLabel({ payment_status: sale.payment_status, is_voided: sale.is_voided, exchange_in_status: sale.exchange?.status ?? null })}</p>
+                <p className="text-gray-900 font-medium capitalize">{isQuotation ? "Payment request" : saleStatusLabel({ payment_status: sale.payment_status, is_voided: sale.is_voided, exchange_in_status: sale.exchange?.status ?? null, fully_returned: sale.fully_returned })}</p>
               </div>
               <div>
                 <p className="text-xs text-gray-500">Payment</p>

@@ -11,6 +11,7 @@ import { storeCreditSources } from "../lib/storeCreditSources";
 import { loyaltyBalance } from "../lib/loyalty";
 import {
   SALE_EXCHANGE_FLAGS_SQL,
+  SALE_FULLY_RETURNED_SQL,
   cancelExchangeForSale,
   checkExchangeSources,
   exchangeForSale,
@@ -616,7 +617,8 @@ salesRouter.get(
                 deliveries.fee_paid as delivery_fee_paid, deliveries.pickup_prepaid as delivery_pickup_prepaid, deliveries.delivery_status,
                 deliveries.tracking_number as delivery_tracking_number, deliveries.waybill_number as delivery_waybill_number,
                 deliveries.packed_at as delivery_packed_at, deliveries.dispatched_at as delivery_dispatched_at,
-                deliveries.delivery_date as delivery_delivered_at
+                deliveries.delivery_date as delivery_delivered_at,
+                ${SALE_FULLY_RETURNED_SQL} AS fully_returned
          FROM sales
          LEFT JOIN customers ON customers.id = sales.customer_id
          LEFT JOIN deliveries ON deliveries.sale_id = sales.id

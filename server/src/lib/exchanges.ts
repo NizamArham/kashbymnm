@@ -168,6 +168,15 @@ export function recentExchangesBySale(): Map<number, any> {
   return new Map(rows.map((r) => [r.new_sale_id, withItems(r)]));
 }
 
+// 1 when every item on the invoice has been handed back (a refund, or credit for a store-credit exchange): there is nothing left of
+// the sale, so its status reads "Returned" rather than Paid / Unpaid. A direct 1:1 swap doesn't count — the customer kept something.
+export const SALE_FULLY_RETURNED_SQL = `(CASE
+  WHEN EXISTS (SELECT 1 FROM sale_items fsi WHERE fsi.sale_id = sales.id)
+   AND NOT EXISTS (
+     SELECT 1 FROM sale_items fsi WHERE fsi.sale_id = sales.id
+       AND NOT EXISTS (SELECT 1 FROM returns fr WHERE fr.sale_item_id = fsi.id AND fr.resolution IN ('refund', 'store_credit_exchange'))
+   ) THEN 1 ELSE 0 END)`;
+
 // Columns to add to any query that selects FROM sales, saying how that invoice
 // figures in an exchange — so a list or a search can show it without opening the sale:
 //   exchange_out_*  the invoice's own items are being (or were) swapped for a replacement order
@@ -187,7 +196,8 @@ export const SALE_EXCHANGE_FLAGS_SQL = `
   (SELECT status FROM online_exchanges WHERE new_sale_id = sales.id) AS exchange_in_status,
   (SELECT group_concat(DISTINCT os.invoice) FROM online_exchange_items ei
      JOIN online_exchanges ox ON ox.id = ei.exchange_id JOIN sale_items osi ON osi.id = ei.old_sale_item_id
-     JOIN sales os ON os.id = osi.sale_id WHERE ox.new_sale_id = sales.id) AS exchange_in_from
+     JOIN sales os ON os.id = osi.sale_id WHERE ox.new_sale_id = sales.id) AS exchange_in_from,
+  ${SALE_FULLY_RETURNED_SQL} AS fully_returned
 `;
 
 // The exchanges that took items out of this invoice, with each item's state — what

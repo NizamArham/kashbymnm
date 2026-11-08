@@ -10,6 +10,7 @@ import ReceiptOptionsModal, { ModalOption } from "../components/ReceiptOptionsMo
 import { useCopyToClipboard } from "../lib/useCopyToClipboard";
 import { useSortableData } from "../lib/useSortableData";
 import { formatDate } from "../lib/dates";
+import { saleStatusLabel } from "../lib/salePayment";
 
 type OrderSortKey = "invoice" | "date" | "total";
 
@@ -226,7 +227,7 @@ export default function CustomerOrderHistoryPage({ customerId }: { customerId?: 
                         {sale.is_voided ? (
                           <Badge label="voided" tone="danger" />
                         ) : (
-                          <Badge label={sale.payment_status} tone={paymentStatusTone(sale.payment_status)} />
+                          <Badge label={saleStatusLabel(sale)} tone={paymentStatusTone(sale.payment_status)} />
                         )}
                       </Td>
                       <Td className="w-8">

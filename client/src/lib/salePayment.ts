@@ -22,12 +22,14 @@ export function isAwaitingCod(
   );
 }
 
-// The status shown next to an invoice. An exchange replacement whose old item hasn't come back yet has
+// The status shown next to an invoice: Voided, Returned (all of it came back), or its payment status. An exchange replacement whose old item hasn't come back yet has
 // no money on it — its value is covered by the item that's on its way — so it says that, instead of a
 // bare "unpaid" that would read as the customer owing it (their payment history says "settled").
 // Once the old item is received the credit is applied and it becomes Paid.
-export function saleStatusLabel(sale: Pick<Sale, "payment_status" | "is_voided" | "exchange_in_status">): string {
+export function saleStatusLabel(sale: Pick<Sale, "payment_status" | "is_voided" | "exchange_in_status" | "fully_returned">): string {
   if (sale.is_voided) return "voided";
+  // Every item came back (a parcel nobody collected, or goods refunded): nothing is left of the sale, so not "Paid" — it was returned.
+  if (sale.fully_returned) return "returned";
   if (sale.exchange_in_status === "awaiting_pickup" && sale.payment_status !== "paid") return "exchange pending";
   return sale.payment_status;
 }

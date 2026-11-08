@@ -520,6 +520,8 @@ export interface Sale {
   exchange_out_invoice?: string | null;
   exchange_out_sale_id?: number | null;
   exchange_in_status?: SaleExchange["status"] | null;
+  // 1 when every item on the invoice has been handed back — its status then reads "Returned".
+  fully_returned?: number;
   exchange_in_from?: string | null;
   // On one invoice's own page: the exchanges that took items out of it.
   exchanged_out?: SaleExchangeOut[];
