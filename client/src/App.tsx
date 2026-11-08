@@ -23,8 +23,10 @@ import ProductDetailPage from "./pages/ProductDetailPage";
 import ReturnsPage from "./pages/ReturnsPage";
 import SuppliersPage from "./pages/SuppliersPage";
 import PurchasesPage from "./pages/PurchasesPage";
+import PurchaseDetailPage from "./pages/PurchaseDetailPage";
 import DeliveriesPage from "./pages/DeliveriesPage";
 import CashBookPage from "./pages/CashBookPage";
+import TransactionDetailPage from "./pages/TransactionDetailPage";
 import ProfilePage from "./pages/ProfilePage";
 import AttendancePage from "./pages/AttendancePage";
 import StaffPage from "./pages/StaffPage";
@@ -162,6 +164,14 @@ export default function App() {
           }
         />
         <Route
+          path="/purchases/:id"
+          element={
+            <ProtectedRoute adminOnly>
+              <PurchaseDetailPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/supplier-payments"
           element={
             <ProtectedRoute adminOnly>
@@ -208,6 +218,14 @@ export default function App() {
           element={
             <ProtectedRoute adminOnly>
               <CashBookPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/cash-book/:code"
+          element={
+            <ProtectedRoute adminOnly>
+              <TransactionDetailPage />
             </ProtectedRoute>
           }
         />

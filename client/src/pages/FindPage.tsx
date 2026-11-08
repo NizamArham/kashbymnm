@@ -110,6 +110,11 @@ interface TransactionResult {
   reference_id: number | null;
   amount: number;
   notes: string | null;
+  // Who it was paid to or received from, what it was against, and the cash book's balance right after it.
+  party?: { kind: "supplier" | "customer" | "courier"; id: number | null; name: string; code: string | null } | null;
+  purchase?: { id: number; purchase_code: string } | null;
+  sale?: { id: number; invoice: string } | null;
+  balance_after?: number;
 }
 interface CouponResult {
   id: number;
@@ -396,7 +401,8 @@ function buildViewFor(result: FindResult): ResultView {
     case "transaction": {
       const d = result.data;
       const isIncome = d.type === "income";
-      const saleLinked = (d.category === "sale" || d.category === "sale_void") && d.reference_id;
+      const party = d.party ?? null;
+      const partyTo = party ? (party.kind === "supplier" ? `/suppliers/${party.id}` : party.kind === "customer" ? `/customers/${party.id}` : "/couriers") : null;
       return {
         title: d.transaction_code,
         chips: (
@@ -406,16 +412,35 @@ function buildViewFor(result: FindResult): ResultView {
             {d.payment_method && <Badge label={cap(d.payment_method)} />}
           </>
         ),
-        stats: [{ label: isIncome ? "Money in" : "Money out", value: `${isIncome ? "+" : "−"} ${money(d.amount)}`, tone: isIncome ? "good" : "bad" }],
+        stats: [
+          { label: isIncome ? "Money in" : "Money out", value: `${isIncome ? "+" : "−"} ${money(d.amount)}`, tone: isIncome ? "good" : "bad" },
+          ...(d.balance_after !== undefined ? [{ label: "Cash book balance after", value: money(d.balance_after) }] : []),
+        ],
         details: [
+          // The whole point of looking a transaction up: who the money went to (or came from) and what it was for.
+          [
+            isIncome ? "Received from" : "Paid to",
+            party ? (
+              <>
+                {party.id !== null && partyTo ? <RefLink to={partyTo}>{party.name}</RefLink> : party.name}
+                {party.code ? ` · ${party.code}` : ""}
+              </>
+            ) : (
+              "Not tied to a supplier, customer or courier — see the note"
+            ),
+          ],
+          ...(d.purchase ? ([["For purchase", <RefLink to={`/purchases/${d.purchase.id}`}>{d.purchase.purchase_code}</RefLink>]] as [string, ReactNode][]) : []),
+          ...(d.sale ? ([["Invoice", <RefLink to={`/sales/${d.sale.id}`}>{d.sale.invoice}</RefLink>]] as [string, ReactNode][]) : []),
           ["Date", when(d.entry_date)],
           ["Category", cap(d.category)],
           ["Method", cap(d.payment_method)],
           ...(d.notes ? ([["Notes", d.notes]] as [string, ReactNode][]) : []),
         ],
         actions: [
-          { label: "Go to Cash Book", to: "/cash-book", primary: true },
-          ...(saleLinked ? [{ label: "Open the invoice", to: `/sales/${d.reference_id}` }] : []),
+          { label: "Open transaction", to: `/cash-book/${d.transaction_code}`, primary: true },
+          ...(d.purchase ? [{ label: "Open purchase", to: `/purchases/${d.purchase.id}` }] : []),
+          ...(d.sale ? [{ label: "Open the invoice", to: `/sales/${d.sale.id}` }] : []),
+          { label: "Go to Cash Book", to: "/cash-book" },
         ],
       };
     }

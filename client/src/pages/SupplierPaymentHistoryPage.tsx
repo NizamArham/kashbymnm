@@ -6,10 +6,8 @@ import { api, ApiRequestError } from "../lib/api";
 import { Supplier, BusinessInfo, ChequeInfo } from "../lib/types";
 import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
-import { PageHeader, Card, Table, Th, Td, EmptyState, ErrorText, DateRangePicker, Button } from "../components/ui";
+import { PageHeader, Card, Table, Th, Td, EmptyState, ErrorText, DateRangePicker, Button, RefLink } from "../components/ui";
 import ChequePreviewModal from "../components/ChequePreviewModal";
-import PurchaseDetailModal from "../components/PurchaseDetailModal";
-import TransactionDetailModal from "../components/TransactionDetailModal";
 import { formatDate } from "../lib/dates";
 
 interface LedgerEntry {
@@ -26,28 +24,28 @@ interface LedgerEntry {
   transaction_code?: string;
 }
 
-// A statement line's description, with its purchase code and transaction ID as links: the code opens what was bought in that purchase, the
-// ID opens that transaction. They stop the click here so a cheque row's own "view cheque" click doesn't also fire.
-function EntryLabel({ entry, onPurchase, onTransaction }: { entry: LedgerEntry; onPurchase: (id: number) => void; onTransaction: (code: string) => void }) {
+// A statement line's description, with its purchase code and transaction ID as links: the code opens that purchase's own page (what was
+// bought in it), the ID opens that transaction's page (who it went to, what for). RefLink stops the click here, so a cheque row's own
+// "view cheque" click doesn't also fire.
+function EntryLabel({ entry }: { entry: LedgerEntry }) {
   const codes = [entry.purchase_code, entry.transaction_code].filter((c): c is string => !!c);
   if (codes.length === 0) return <>{entry.label}</>;
   const parts = entry.label.split(new RegExp(`(${codes.map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`));
-  const linkClass = "cursor-pointer font-medium underline decoration-dotted decoration-gray-400 underline-offset-2 hover:decoration-gray-900";
   return (
     <>
       {parts.map((part, i) => {
         if (entry.purchase_code && entry.purchase_id && part === entry.purchase_code) {
           return (
-            <button key={i} type="button" title="See what was bought" onClick={(e) => { e.stopPropagation(); onPurchase(entry.purchase_id!); }} className={linkClass}>
+            <RefLink key={i} to={`/purchases/${entry.purchase_id}`} className="font-medium">
               {part}
-            </button>
+            </RefLink>
           );
         }
         if (entry.transaction_code && part === entry.transaction_code) {
           return (
-            <button key={i} type="button" title="See this transaction" onClick={(e) => { e.stopPropagation(); onTransaction(entry.transaction_code!); }} className={linkClass}>
+            <RefLink key={i} to={`/cash-book/${entry.transaction_code}`} className="font-medium">
               {part}
-            </button>
+            </RefLink>
           );
         }
         return <span key={i}>{part}</span>;
@@ -100,8 +98,6 @@ export default function SupplierPaymentHistoryPage({ supplierId }: { supplierId?
 
   const [businessInfo, setBusinessInfo] = useState<BusinessInfo | null>(null);
   const [chequePreview, setChequePreview] = useState<LedgerEntry | null>(null);
-  const [openPurchaseId, setOpenPurchaseId] = useState<number | null>(null);
-  const [openTransaction, setOpenTransaction] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -307,7 +303,7 @@ export default function SupplierPaymentHistoryPage({ supplierId }: { supplierId?
                   >
                     <Td>{formatDate(entry.date)}</Td>
                     <Td>
-                      <EntryLabel entry={entry} onPurchase={setOpenPurchaseId} onTransaction={setOpenTransaction} />
+                      <EntryLabel entry={entry} />
                       {clickable && (
                         <span className="inline-flex items-center gap-1 ml-2 text-xs text-gray-500 align-middle">
                           <CreditCard size={12} />
@@ -334,17 +330,6 @@ export default function SupplierPaymentHistoryPage({ supplierId }: { supplierId?
         />
       )}
 
-      {openPurchaseId !== null && <PurchaseDetailModal purchaseId={openPurchaseId} onClose={() => setOpenPurchaseId(null)} />}
-      {openTransaction !== null && (
-        <TransactionDetailModal
-          code={openTransaction}
-          onClose={() => setOpenTransaction(null)}
-          onOpenPurchase={(id) => {
-            setOpenTransaction(null);
-            setOpenPurchaseId(id);
-          }}
-        />
-      )}
     </div>
   );
 }

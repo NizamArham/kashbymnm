@@ -568,7 +568,7 @@ export default function CashBookPage() {
                             <td className="px-3 py-2 text-gray-500 text-xs whitespace-nowrap">
                               {formatDateTime(entry.entry_date)}
                               {entry.transaction_code && (
-                                <span className="ml-2 text-xs text-gray-500 font-mono">{entry.transaction_code}</span>
+                                <RefLink to={`/cash-book/${entry.transaction_code}`} className="ml-2 text-xs text-gray-500 font-mono">{entry.transaction_code}</RefLink>
                               )}
                             </td>
                             <td className="px-3 py-2">
@@ -666,7 +666,7 @@ export default function CashBookPage() {
                             <td className="px-3 py-2 text-gray-500 text-xs whitespace-nowrap">
                               {formatDateTime(entry.entry_date)}
                               {entry.transaction_code && (
-                                <span className="ml-2 text-xs text-gray-500 font-mono">{entry.transaction_code}</span>
+                                <RefLink to={`/cash-book/${entry.transaction_code}`} className="ml-2 text-xs text-gray-500 font-mono">{entry.transaction_code}</RefLink>
                               )}
                             </td>
                             <td className="px-3 py-2">

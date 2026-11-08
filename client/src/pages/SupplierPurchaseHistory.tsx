@@ -4,9 +4,8 @@ import { ShoppingBag } from "lucide-react";
 import { PageLoader } from "../components/Loader";
 import { api, ApiRequestError } from "../lib/api";
 import { Purchase } from "../lib/types";
-import { Card, Table, Th, Td, EmptyState, ErrorText, Badge, RowCard, RowCardStats, RowCardStat } from "../components/ui";
+import { Card, Table, Th, Td, EmptyState, ErrorText, Badge, RowCard, RowCardStats, RowCardStat, RefLink } from "../components/ui";
 import { formatDate } from "../lib/dates";
-import PurchaseDetailModal from "../components/PurchaseDetailModal";
 
 const PAYMENT_WORD: Record<Purchase["payment_status"], string> = { paid: "Paid", partial: "Part paid", unpaid: "Unpaid" };
 
@@ -18,7 +17,6 @@ export default function SupplierPurchaseHistory({ supplierId }: { supplierId: nu
   const navigate = useNavigate();
   const [purchases, setPurchases] = useState<Purchase[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [openId, setOpenId] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -75,9 +73,7 @@ export default function SupplierPurchaseHistory({ supplierId }: { supplierId: nu
               <tr key={p.id} className={i % 2 === 1 ? "bg-gray-50/60" : ""}>
                 <Td>{formatDate(p.purchase_date)}</Td>
                 <Td>
-                  <button type="button" title="See what was bought" onClick={() => setOpenId(p.id)} className="cursor-pointer font-medium underline decoration-dotted decoration-gray-400 underline-offset-2 hover:decoration-gray-900">
-                    {p.purchase_code}
-                  </button>
+                  <RefLink to={`/purchases/${p.id}`} className="font-medium">{p.purchase_code}</RefLink>
                 </Td>
                 <Td className="text-gray-500">{p.description || "—"}</Td>
                 <Td align="right">{p.total_cost.toLocaleString()}</Td>
@@ -101,9 +97,7 @@ export default function SupplierPurchaseHistory({ supplierId }: { supplierId: nu
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="leading-snug text-gray-900">
-                  <button type="button" title="See what was bought" onClick={() => setOpenId(p.id)} className="cursor-pointer font-medium underline decoration-dotted decoration-gray-400 underline-offset-2 hover:decoration-gray-900">
-                    {p.purchase_code}
-                  </button>
+                  <RefLink to={`/purchases/${p.id}`} className="font-medium">{p.purchase_code}</RefLink>
                 </p>
                 <p className="mt-0.5 text-xs text-gray-500">
                   {formatDate(p.purchase_date)}
@@ -122,7 +116,6 @@ export default function SupplierPurchaseHistory({ supplierId }: { supplierId: nu
           </RowCard>
         ))}
       </div>
-      {openId !== null && <PurchaseDetailModal purchaseId={openId} onClose={() => setOpenId(null)} />}
     </>
   );
 }

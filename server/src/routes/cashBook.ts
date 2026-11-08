@@ -5,6 +5,7 @@ import { ApiError, asyncHandler } from "../lib/errors";
 import { nextTransactionCode } from "../lib/codes";
 import { requireAuth, requireRole } from "../lib/auth";
 import { logAudit } from "../lib/auditLog";
+import { transactionContext } from "../lib/transactionDetail";
 
 export const cashBookRouter = Router();
 
@@ -21,8 +22,8 @@ const entryInput = z.object({
   entry_date: z.string().optional(),
 });
 
-// GET /api/cash-book/by-code/:code — one transaction by its ID (TXN-0119), with what it was for: the supplier and bill a payment went to,
-// or the invoice a sale's money belongs to. What the "TXN-…" links on a statement open.
+// GET /api/cash-book/by-code/:code — one transaction by its ID (TXN-0119), with what it was for: who the money went to or came from, the
+// purchase or invoice it was against, and the balance right after it. What the "TXN-…" links open.
 cashBookRouter.get(
   "/by-code/:code",
   asyncHandler(async (req, res) => {
@@ -33,24 +34,7 @@ cashBookRouter.get(
       )
       .get(req.params.code) as any;
     if (!entry) throw new ApiError(404, "Transaction not found");
-
-    let supplier_payment: unknown = null;
-    let sale: unknown = null;
-    if (entry.category === "supplier_payment" && entry.reference_id) {
-      supplier_payment =
-        db
-          .prepare(
-            `SELECT sp.id, sp.supplier_id, s.name AS supplier_name, s.supplier_code, sp.purchase_id, pu.purchase_code
-             FROM supplier_payments sp
-             JOIN suppliers s ON s.id = sp.supplier_id
-             LEFT JOIN purchases pu ON pu.id = sp.purchase_id
-             WHERE sp.id = ?`
-          )
-          .get(entry.reference_id) ?? null;
-    } else if ((entry.category === "sale" || entry.category === "sale_void") && entry.reference_id) {
-      sale = db.prepare(`SELECT id, invoice FROM sales WHERE id = ?`).get(entry.reference_id) ?? null;
-    }
-    res.json({ ...entry, supplier_payment, sale });
+    res.json({ ...entry, ...transactionContext(entry) });
   })
 );
 

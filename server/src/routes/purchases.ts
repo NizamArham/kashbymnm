@@ -688,6 +688,56 @@ purchasesRouter.get(
   })
 );
 
+// GET /api/purchases/:id/detail — one purchase in full, for its own page: what was bought, the pieces sorted into stock from it, and every
+// payment and extra cost against it (each with its cash book transaction ID, where it has one).
+purchasesRouter.get(
+  "/:id/detail",
+  asyncHandler(async (req, res) => {
+    const purchase = db
+      .prepare(
+        `SELECT purchases.*, suppliers.name AS supplier_name, suppliers.supplier_code
+         FROM purchases JOIN suppliers ON suppliers.id = purchases.supplier_id
+         WHERE purchases.id = ?`
+      )
+      .get(req.params.id) as any;
+    if (!purchase) throw new ApiError(404, "Purchase not found");
+
+    const items = db
+      .prepare(
+        `SELECT purchase_items.*, COALESCE(products.product_title, purchase_items.product_snapshot) AS product_title
+         FROM purchase_items LEFT JOIN products ON products.id = purchase_items.product_id
+         WHERE purchase_items.purchase_id = ? ORDER BY purchase_items.id`
+      )
+      .all(req.params.id);
+    const lines = db.prepare(`SELECT * FROM pending_purchase_lines WHERE purchase_id = ? ORDER BY id`).all(req.params.id);
+
+    // Payments made against this purchase later, from the supplier payments screen.
+    const payments = db
+      .prepare(
+        `SELECT supplier_payments.id, supplier_payments.payment_date, supplier_payments.amount, supplier_payments.method, supplier_payments.notes,
+                (SELECT transaction_code FROM cash_book WHERE category = 'supplier_payment' AND reference_id = supplier_payments.id ORDER BY id LIMIT 1) AS transaction_code
+         FROM supplier_payments WHERE supplier_payments.purchase_id = ? ORDER BY supplier_payments.payment_date, supplier_payments.id`
+      )
+      .all(req.params.id);
+    // What was paid when the goods arrived, and the costs that came with them (transport and the like) — straight from the cash book.
+    const cash = db
+      .prepare(
+        `SELECT id, transaction_code, entry_date, category, payment_method, amount, notes
+         FROM cash_book WHERE category IN ('purchase', 'purchase_other_costs') AND reference_id = ? ORDER BY entry_date, id`
+      )
+      .all(req.params.id) as { category: string }[];
+
+    res.json({
+      ...purchase,
+      items,
+      lines,
+      payments,
+      at_purchase: cash.filter((c) => c.category === "purchase"),
+      extra_costs: cash.filter((c) => c.category === "purchase_other_costs"),
+    });
+  })
+);
+
 // GET /api/purchases/:id — includes line items
 purchasesRouter.get(
   "/:id",

@@ -4,6 +4,7 @@ import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth } from "../lib/auth";
 import { approveIfNeeded } from "../lib/approval";
 import { SALE_EXCHANGE_FLAGS_SQL } from "../lib/exchanges";
+import { transactionContext } from "../lib/transactionDetail";
 import { toPayFor } from "../lib/supplierOwing";
 import { CALC_SUBQUERY, searchCustomersForCashier } from "./customers";
 
@@ -124,10 +125,11 @@ findRouter.get(
         `SELECT id, transaction_code, entry_date, type, category, payment_method, reference_id, amount, notes
          FROM cash_book WHERE LOWER(transaction_code) = LOWER(?)`
       )
-      .get(code);
+      .get(code) as any;
     if (transaction) {
       beyondACashier(req, res, "cash book");
-      return res.json({ type: "transaction", data: transaction });
+      // Who it was paid to (or received from) and what it was for, not just its note.
+      return res.json({ type: "transaction", data: { ...transaction, ...transactionContext(transaction) } });
     }
 
     const staff = db
