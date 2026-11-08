@@ -522,18 +522,48 @@ export function Label({ children }: { children: ReactNode }) {
 // longer explanation would otherwise sit as permanent on-page text. Shows
 // its tip on hover (desktop) and tap (touch, since hover never fires
 // there); tapping elsewhere closes it.
+// The tip is drawn on the very top layer (outside the page's own layout, like the row menus): a card that clips its contents, a pinned
+// table header or a dialog can never cover or cut it off. It sits under the "?" — or above it when there is no room below — and is kept
+// inside the screen; scrolling or resizing closes it.
 export function HelpHint({ text, className = "" }: { text: string; className?: string }) {
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const ref = useRef<HTMLSpanElement>(null);
+  const tipRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
     function handleClickOutside(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     }
+    const close = () => setOpen(false);
     document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
   }, [open]);
+
+  // Place the tip once it has rendered and can be measured.
+  useLayoutEffect(() => {
+    if (!open) {
+      setPos(null);
+      return;
+    }
+    const btn = ref.current;
+    const tip = tipRef.current;
+    if (!btn || !tip) return;
+    const r = btn.getBoundingClientRect();
+    const w = tip.offsetWidth;
+    const h = tip.offsetHeight;
+    const left = Math.max(8, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - 8));
+    const below = r.bottom + 6;
+    const top = below + h <= window.innerHeight - 8 ? below : Math.max(8, r.top - 6 - h);
+    setPos({ left, top });
+  }, [open, text]);
 
   return (
     <span className={`relative inline-flex align-middle ml-1 ${className}`} ref={ref}>
@@ -550,14 +580,18 @@ export function HelpHint({ text, className = "" }: { text: string; className?: s
       >
         ?
       </button>
-      {open && (
-        <div
-          role="tooltip"
-          className="absolute z-30 left-1/2 -translate-x-1/2 top-full mt-1.5 w-72 max-w-[85vw] bg-gray-900 text-white text-xs leading-relaxed rounded-lg px-3.5 py-2.5 shadow-lg"
-        >
-          {text}
-        </div>
-      )}
+      {open &&
+        createPortal(
+          <div
+            ref={tipRef}
+            role="tooltip"
+            style={{ position: "fixed", left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? "visible" : "hidden" }}
+            className="pointer-events-none z-[200] w-72 max-w-[85vw] rounded-lg bg-gray-900 px-3.5 py-2.5 text-xs leading-relaxed text-white shadow-lg"
+          >
+            {text}
+          </div>,
+          document.body
+        )}
     </span>
   );
 }
