@@ -204,8 +204,14 @@ supplierPaymentsRouter.get(
       )
       .all(req.params.supplierId) as { purchase_id: number; total: number }[];
     const linkedPaymentByPurchase = new Map(linkedPaymentTotals.map((row) => [row.purchase_id, row.total]));
+    // notes carries the account a bank transfer went to ("— HNB 081020323065"); transaction_code is the cash book's ID for the money that
+    // left (none for older payments made before every payment had one).
     const payments = db
-      .prepare(`SELECT id, payment_date, amount, method, purchase_id FROM supplier_payments WHERE supplier_id = ? ORDER BY payment_date`)
+      .prepare(
+        `SELECT id, payment_date, amount, method, purchase_id, notes,
+                (SELECT transaction_code FROM cash_book WHERE category = 'supplier_payment' AND reference_id = supplier_payments.id ORDER BY id LIMIT 1) AS transaction_code
+         FROM supplier_payments WHERE supplier_id = ? ORDER BY payment_date`
+      )
       .all(req.params.supplierId) as any[];
 
     // For each cheque payment, trace it back to the real cheque — either
@@ -346,7 +352,10 @@ supplierPaymentsRouter.get(
         return {
           date: p.payment_date,
           type: "payment" as const,
-          label: `Payment${p.method ? ` (${p.method})` : ""}${cheque ? ` — #${cheque.cheque_number}` : ""}`,
+          // "Payment (bank transfer) — HNB 081020323065 · TXN-0119": how it was paid, which account it went to, and its transaction ID.
+          label: `Payment${p.method ? ` (${String(p.method).replace(/_/g, " ")})` : ""}${cheque ? ` — #${cheque.cheque_number}` : ""}${
+            p.method === "bank_transfer" && p.notes ? ` — ${String(p.notes).replace(/^\s*—\s*/, "")}` : ""
+          }${p.transaction_code ? ` · ${p.transaction_code}` : ""}`,
           amount: p.amount,
           effect: -p.amount,
           id: p.id,

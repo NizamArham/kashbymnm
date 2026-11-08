@@ -145,7 +145,7 @@ export default function SupplierPaymentHistoryPage({ supplierId }: { supplierId?
         return {
           cells: [
             entry.date.slice(0, 10),
-            entry.label.length > 48 ? entry.label.slice(0, 45) + "..." : entry.label,
+            entry.label.length > 62 ? entry.label.slice(0, 59) + "..." : entry.label,
             formatEntryAmount(entry),
             `Rs. ${entry.running_balance.toLocaleString()}`,
           ],
