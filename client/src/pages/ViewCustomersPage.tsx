@@ -1,11 +1,11 @@
 import { useEffect, useState, useMemo, useRef } from "react";
 import { PageLoader } from "../components/Loader";
-import { Users, Search, Lock, Plus, Star, ChevronRight, Copy, Download, X } from "lucide-react";
+import { Users, Search, Lock, Plus, Star, ChevronRight, Copy, Download, X, SlidersHorizontal } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Customer } from "../lib/types";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { PageHeader, Card, Table, Th, Td, Input, Button, EmptyState, ErrorText, SortHeader, RowCard, RowCardStats, RowCardStat, Badge } from "../components/ui";
+import { PageHeader, Card, Table, Th, Td, Input, Button, EmptyState, ErrorText, SortHeader, RowCard, RowCardStats, RowCardStat } from "../components/ui";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { useSortableData } from "../lib/useSortableData";
 import { findCustomers, CASHIER_SEARCH_MIN_CHARS } from "../lib/customerSearch";
@@ -55,6 +55,33 @@ const inSegment = (c: Customer, segment: Segment): boolean =>
   (segment === "inactive" && isInactive(c));
 
 // Find a customer; clicking one opens their page (/customers/<id>), which is where everything about them lives.
+// A filter that is switched on, as a small tag you can take off.
+function FilterTag({ label, onRemove }: { label: string; onRemove: () => void }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 py-1 pl-3 pr-1.5 text-xs font-medium text-gray-800">
+      {label}
+      <button type="button" onClick={onRemove} aria-label={`Remove filter: ${label}`} className="rounded-full p-0.5 text-gray-500 hover:bg-gray-200 hover:text-gray-900">
+        <X size={12} />
+      </button>
+    </span>
+  );
+}
+
+// One choice inside the filter options, with how many people it would show.
+function FilterChoice({ active, count, title, onClick, children }: { active: boolean; count: number; title?: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition ${active ? "bg-black text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+    >
+      {children}
+      <span className={`text-xs tabular-nums ${active ? "text-white/70" : "text-gray-500"}`}>{count}</span>
+    </button>
+  );
+}
+
 export default function ViewCustomersPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -69,6 +96,8 @@ export default function ViewCustomersPage() {
   const [query, setQuery] = useState("");
   const [segment, setSegment] = useState<Segment>("all");
   const [gender, setGender] = useState<GenderFilter>("all");
+  // The filter options stay folded away until asked for; what is switched on shows as small tags beside the Filter button.
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const toast = useToast();
   // "Bought before": what was typed, and the people who bought something matching it (null = not filtering by it).
   const [boughtText, setBoughtText] = useState("");
@@ -289,6 +318,22 @@ export default function ViewCustomersPage() {
     toast.success(`Downloaded ${contacts.length} contact${contacts.length === 1 ? "" : "s"} — open the file on your phone to add them`);
   }
 
+  // How many of the filters are switched on, and the two ways of changing them.
+  const activeFilters = (segment !== "all" ? 1 : 0) + (gender !== "all" ? 1 : 0) + (boughtText.trim() ? 1 : 0);
+  function chooseSegment(value: Segment) {
+    setSegment(value);
+    // Each group has the order you'd want: biggest debt first, most credit first, longest quiet first.
+    if (value === "owes") setSort("balance", "asc");
+    else if (value === "credit") setSort("balance", "desc");
+    else if (value === "inactive") setSort("last_order", "asc");
+    else setSort("priority", "asc");
+  }
+  function clearFilters() {
+    chooseSegment("all");
+    setGender("all");
+    setBoughtText("");
+  }
+
   return (
     <div>
       <PageHeader
@@ -345,66 +390,90 @@ export default function ViewCustomersPage() {
       {isAdmin && !loading && customers.length > 0 && (
         <>
           <div className="mb-3 flex flex-wrap items-center gap-2">
-            {SEGMENTS.map((seg) => {
-              const active = segment === seg.value;
-              return (
-                <button
-                  key={seg.value}
-                  title={seg.hint}
-                  onClick={() => {
-                    setSegment(seg.value);
-                    // Each group has the order you'd want: biggest debt first, most credit first, longest quiet first.
-                    if (seg.value === "owes") setSort("balance", "asc");
-                    else if (seg.value === "credit") setSort("balance", "desc");
-                    else if (seg.value === "inactive") setSort("last_order", "asc");
-                    else setSort("priority", "asc");
-                  }}
-                  className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-sm font-medium transition ${
-                    active ? "bg-black text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                  }`}
-                >
-                  {seg.label}
-                  <span className={`text-xs tabular-nums ${active ? "text-white/70" : "text-gray-400"}`}>{segmentCounts[seg.value]}</span>
-                </button>
-              );
-            })}
+            <Button size="sm" onClick={() => setFiltersOpen((o) => !o)} aria-expanded={filtersOpen} className="inline-flex items-center gap-1.5">
+              <SlidersHorizontal size={14} />
+              Filter
+              {activeFilters > 0 && <span className="rounded-full bg-black px-1.5 text-xs font-medium text-white">{activeFilters}</span>}
+            </Button>
+            {/* What is switched on, each one removable on the spot. */}
+            {segment !== "all" && <FilterTag label={SEGMENTS.find((x) => x.value === segment)!.label} onRemove={() => chooseSegment("all")} />}
+            {gender !== "all" && <FilterTag label={GENDERS.find((x) => x.value === gender)!.label} onRemove={() => setGender("all")} />}
+            {boughtText.trim() && <FilterTag label={`Bought: ${boughtText.trim()}`} onRemove={() => setBoughtText("")} />}
+            {activeFilters > 1 && (
+              <button type="button" onClick={clearFilters} className="text-xs text-gray-500 underline hover:text-gray-800">
+                Clear all
+              </button>
+            )}
+            {segmentCustomers.length > 0 && contacts.length > 0 && (
+              <div className="ml-auto flex items-center gap-2">
+                <Button size="sm" onClick={copyNumbers} className="inline-flex items-center gap-1.5" title="Copy these phone numbers, one per line, in +94… form">
+                  <Copy size={13} />
+                  Copy numbers
+                </Button>
+                <Button size="sm" onClick={downloadContacts} className="inline-flex items-center gap-1.5" title="A contacts file: open it on your phone to add them all, then pick them for a WhatsApp broadcast list">
+                  <Download size={13} />
+                  Contacts file
+                </Button>
+              </div>
+            )}
           </div>
-          <div className="mb-3 flex flex-wrap items-center gap-2">
-            {GENDERS.filter((g) => g.value !== "unspecified" || customers.some((c) => c.gender === "unspecified")).map((g) => {
-              const active = gender === g.value;
-              return (
-                <button
-                  key={g.value}
-                  onClick={() => setGender(g.value)}
-                  className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-sm font-medium transition ${
-                    active ? "bg-black text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                  }`}
-                >
-                  {g.label}
-                  <span className={`text-xs tabular-nums ${active ? "text-white/70" : "text-gray-400"}`}>{genderCounts[g.value]}</span>
-                </button>
-              );
-            })}
-            <div className="relative ml-1 w-full sm:w-64">
-              <Input
-                value={boughtText}
-                onChange={(e) => setBoughtText(e.target.value)}
-                placeholder="Bought before… e.g. leggings"
-                aria-label="Only people who bought this before"
-                className="!py-1.5 !pr-8"
-              />
-              {boughtText && (
-                <button
-                  type="button"
-                  onClick={() => setBoughtText("")}
-                  aria-label="Clear"
-                  className="absolute inset-y-0 right-2 flex items-center text-gray-400 hover:text-gray-700"
-                >
-                  <X size={14} />
-                </button>
-              )}
-            </div>
-          </div>
+
+          {filtersOpen && (
+            <Card className="mb-3">
+              <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
+                <div>
+                  <p className="mb-2 text-xs font-medium text-gray-500">Show</p>
+                  <div className="flex flex-wrap gap-2">
+                    {SEGMENTS.map((seg) => (
+                      <FilterChoice key={seg.value} active={segment === seg.value} title={seg.hint} count={segmentCounts[seg.value]} onClick={() => chooseSegment(seg.value)}>
+                        {seg.label}
+                      </FilterChoice>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <p className="mb-2 text-xs font-medium text-gray-500">Who</p>
+                  <div className="flex flex-wrap gap-2">
+                    {GENDERS.filter((g) => g.value !== "unspecified" || customers.some((c) => c.gender === "unspecified")).map((g) => (
+                      <FilterChoice key={g.value} active={gender === g.value} count={genderCounts[g.value]} onClick={() => setGender(g.value)}>
+                        {g.label}
+                      </FilterChoice>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <p className="mb-2 text-xs font-medium text-gray-500">Bought before</p>
+                  <div className="relative">
+                    <Input
+                      value={boughtText}
+                      onChange={(e) => setBoughtText(e.target.value)}
+                      placeholder="e.g. leggings"
+                      aria-label="Only people who bought this before"
+                      className="!py-1.5 !pr-8"
+                    />
+                    {boughtText && (
+                      <button type="button" onClick={() => setBoughtText("")} aria-label="Clear" className="absolute inset-y-0 right-2 flex items-center text-gray-400 hover:text-gray-700">
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-4 flex items-center justify-between gap-3 border-t border-gray-100 pt-3">
+                {activeFilters > 0 ? (
+                  <button type="button" onClick={clearFilters} className="text-xs text-gray-500 underline hover:text-gray-800">
+                    Clear filters
+                  </button>
+                ) : (
+                  <span />
+                )}
+                <Button size="sm" variant="primary" onClick={() => setFiltersOpen(false)}>
+                  {activeFilters > 0 ? `Show ${segmentCustomers.length} ${segmentCustomers.length === 1 ? "person" : "people"}` : "Done"}
+                </Button>
+              </div>
+            </Card>
+          )}
+
           {boughtError && <p className="mb-3 text-xs text-red-600">{boughtError}</p>}
           {bought && (
             <p className="mb-3 text-xs text-gray-500">
@@ -416,33 +485,19 @@ export default function ViewCustomersPage() {
             </p>
           )}
           {segmentCustomers.length > 0 && (
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs text-gray-500">
-                Showing {segmentCustomers.length} {segmentCustomers.length === 1 ? "person" : "people"}
-                {contacts.length !== segmentCustomers.length && ` · ${contacts.length} with a phone number`}
-              </p>
-              {contacts.length > 0 && (
-                <div className="flex items-center gap-2">
-                  <Button size="sm" onClick={copyNumbers} className="inline-flex items-center gap-1.5" title="Copy these phone numbers, one per line, in +94… form">
-                    <Copy size={13} />
-                    Copy numbers
-                  </Button>
-                  <Button size="sm" onClick={downloadContacts} className="inline-flex items-center gap-1.5" title="A contacts file: open it on your phone to add them all, then pick them for a WhatsApp broadcast list">
-                    <Download size={13} />
-                    Contacts file
-                  </Button>
-                </div>
-              )}
-            </div>
+            <p className="mb-3 text-xs text-gray-500">
+              Showing {segmentCustomers.length} {segmentCustomers.length === 1 ? "person" : "people"}
+              {contacts.length !== segmentCustomers.length && ` · ${contacts.length} with a phone number`}
+            </p>
           )}
           {segment === "owes" && segmentCustomers.length > 0 && (
             <p className="mb-3 text-xs text-gray-500">
-              {segmentCustomers.length} customer{segmentCustomers.length === 1 ? "" : "s"} owe <span className="font-medium text-red-600">Rs. {owedTotal.toLocaleString()}</span> in total
+              {segmentCustomers.length} customer{segmentCustomers.length === 1 ? " owes" : "s owe"} <span className="font-medium text-red-600">Rs. {owedTotal.toLocaleString()}</span> in total
             </p>
           )}
           {segment === "credit" && segmentCustomers.length > 0 && (
             <p className="mb-3 text-xs text-gray-500">
-              {segmentCustomers.length} customer{segmentCustomers.length === 1 ? "" : "s"} hold <span className="font-medium text-green-700">Rs. {creditTotal.toLocaleString()}</span> in store credit
+              {segmentCustomers.length} customer{segmentCustomers.length === 1 ? " holds" : "s hold"} <span className="font-medium text-green-700">Rs. {creditTotal.toLocaleString()}</span> in store credit
             </p>
           )}
         </>
@@ -521,11 +576,6 @@ export default function ViewCustomersPage() {
                     <Td className="font-medium">
                       {c.name}
                       {c.is_suspended === 1 && <span className="ml-1.5 text-xs font-normal text-red-600">(suspended)</span>}
-                      {isAdmin && genderLabel(c.gender) && (
-                        <span className="ml-2 align-middle">
-                          <Badge label={genderLabel(c.gender)!} />
-                        </span>
-                      )}
                     </Td>
                     <Td>{c.phone ?? "—"}</Td>
                     <Td>
@@ -564,7 +614,6 @@ export default function ViewCustomersPage() {
                     </p>
                     <p className="mt-0.5 text-xs text-gray-500">
                       {c.customer_code}
-                      {isAdmin && genderLabel(c.gender) ? ` · ${genderLabel(c.gender)}` : ""}
                       {c.phone ? ` · ${c.phone}` : ""}
                     </p>
                   </div>
