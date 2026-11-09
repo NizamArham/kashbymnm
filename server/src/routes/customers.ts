@@ -248,6 +248,31 @@ customersRouter.get(
 // GET /api/customers/check-phone?phone=... — used by Add Customer to warn
 // if this phone number (checked against BOTH phone and phone2) already
 // belongs to an existing customer, avoiding accidental duplicate entries.
+// GET /api/customers/bought?q=legging — admin only. Who has bought something matching that text (a product's name, brand or
+// category) in a sale that stood, so the customer list can be narrowed to the people most likely to want more of it.
+customersRouter.get(
+  "/bought",
+  requireRole("admin"),
+  asyncHandler(async (req, res) => {
+    const q = String(req.query.q ?? "").trim().toLowerCase();
+    if (q.length < 2) throw new ApiError(400, "Type at least 2 letters of a product, brand or category");
+    const like = `%${escapeLike(q)}%`;
+    const match = `(LOWER(p.product_title) LIKE @like ESCAPE '\\' OR LOWER(COALESCE(p.brand, '')) LIKE @like ESCAPE '\\' OR LOWER(COALESCE(p.category, '')) LIKE @like ESCAPE '\\')`;
+    const ids = db
+      .prepare(
+        `SELECT DISTINCT s.customer_id AS id
+         FROM sales s
+         JOIN sale_items si ON si.sale_id = s.id
+         JOIN inventory i ON i.id = si.inventory_id
+         JOIN products p ON p.id = i.product_id
+         WHERE s.customer_id IS NOT NULL AND s.is_voided = 0 AND s.status = 'completed' AND ${match}`
+      )
+      .all({ like }) as { id: number }[];
+    const products = db.prepare(`SELECT COUNT(*) AS n FROM products p WHERE ${match}`).get({ like }) as { n: number };
+    res.json({ customer_ids: ids.map((r) => r.id), matching_products: products.n });
+  })
+);
+
 customersRouter.get(
   "/check-phone",
   asyncHandler(async (req, res) => {

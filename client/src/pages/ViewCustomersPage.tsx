@@ -1,16 +1,18 @@
 import { useEffect, useState, useMemo, useRef } from "react";
 import { PageLoader } from "../components/Loader";
-import { Users, Search, Lock, Plus, Star, ChevronRight } from "lucide-react";
+import { Users, Search, Lock, Plus, Star, ChevronRight, Copy, Download, X } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Customer } from "../lib/types";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { PageHeader, Card, Table, Th, Td, Input, Button, EmptyState, ErrorText, SortHeader, RowCard, RowCardStats, RowCardStat } from "../components/ui";
+import { PageHeader, Card, Table, Th, Td, Input, Button, EmptyState, ErrorText, SortHeader, RowCard, RowCardStats, RowCardStat, Badge } from "../components/ui";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { useSortableData } from "../lib/useSortableData";
 import { findCustomers, CASHIER_SEARCH_MIN_CHARS } from "../lib/customerSearch";
 import { useAdminApproval } from "../components/AdminApproval";
 import { formatDate } from "../lib/dates";
+import { whatsappNumber } from "../lib/phone";
+import { useToast } from "../components/Feedback";
 
 type CustomerSortKey = "priority" | "code" | "name" | "phone" | "loyalty" | "balance" | "last_order";
 // The groups an admin can narrow the list to.
@@ -21,6 +23,25 @@ const SEGMENTS: { value: Segment; label: string; hint: string }[] = [
   { value: "credit", label: "Has credit", hint: "Customers with store credit to spend" },
   { value: "inactive", label: "Inactive", hint: "No order in the last 60 days (or never)" },
 ];
+// Ladies / Men's, for finding the right people to tell about something (the stored values are female / male).
+type GenderFilter = "all" | "female" | "male" | "unspecified";
+const GENDERS: { value: GenderFilter; label: string }[] = [
+  { value: "all", label: "Everyone" },
+  { value: "female", label: "Ladies" },
+  { value: "male", label: "Men's" },
+  { value: "unspecified", label: "Not set" },
+];
+const genderLabel = (g: string | null | undefined) => (g === "female" ? "Ladies" : g === "male" ? "Men's" : null);
+
+// A phone as the +94… number WhatsApp and phone books want.
+const fullNumber = (stored: string) => `+${whatsappNumber(stored)}`;
+
+// One .vcf file holding everyone — open it on a phone (or import it into Contacts) and they all land in the address book, ready to pick
+// for a WhatsApp broadcast list.
+function vcardOf(people: { name: string; phone: string }[]): string {
+  const clean = (t: string) => t.replace(/[\\;,]/g, " ").replace(/\s+/g, " ").trim();
+  return people.map((c) => `BEGIN:VCARD\r\nVERSION:3.0\r\nFN:${clean(c.name)}\r\nTEL;TYPE=CELL:${fullNumber(c.phone)}\r\nEND:VCARD\r\n`).join("");
+}
 const INACTIVE_AFTER_DAYS = 60;
 function isInactive(c: Customer): boolean {
   if (!c.last_order_date) return true;
@@ -47,6 +68,12 @@ export default function ViewCustomersPage() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [segment, setSegment] = useState<Segment>("all");
+  const [gender, setGender] = useState<GenderFilter>("all");
+  const toast = useToast();
+  // "Bought before": what was typed, and the people who bought something matching it (null = not filtering by it).
+  const [boughtText, setBoughtText] = useState("");
+  const [bought, setBought] = useState<{ ids: Set<number>; products: number } | null>(null);
+  const [boughtError, setBoughtError] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   useKeyboardShortcut("/", () => searchInputRef.current?.focus());
 
@@ -130,6 +157,34 @@ export default function ViewCustomersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, isAdmin]);
 
+  useEffect(() => {
+    const text = boughtText.trim();
+    if (!isAdmin || text.length < 2) {
+      setBought(null);
+      setBoughtError(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      api
+        .get<{ customer_ids: number[]; matching_products: number }>(`/customers/bought?q=${encodeURIComponent(text)}`)
+        .then((r) => {
+          if (cancelled) return;
+          setBought({ ids: new Set(r.customer_ids), products: r.matching_products });
+          setBoughtError(null);
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          setBought(null);
+          setBoughtError(err instanceof ApiRequestError ? err.message : "Couldn't look that up");
+        });
+    }, 350);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [boughtText, isAdmin]);
+
   const filteredCustomers = useMemo(() => {
     // A cashier's list already is the exact match the server found (a typed "0771234567" is a stored
     // "771234567"), so it isn't filtered again here.
@@ -146,14 +201,29 @@ export default function ViewCustomersPage() {
   }, [customers, query, isAdmin]);
 
   // How many of the searched list fall in each group, and the list narrowed to the chosen one (admin only).
+  // Every filter narrows the same list, and each chip's count follows the other filters: with "Ladies" on, "Owes me" counts the ladies who owe.
+  const passes = (c: Customer, seg: Segment, g: GenderFilter) =>
+    inSegment(c, seg) && (g === "all" || c.gender === g) && (!bought || bought.ids.has(c.id));
   const segmentCounts = useMemo(() => {
     const counts: Record<Segment, number> = { all: 0, owes: 0, credit: 0, inactive: 0 };
-    for (const c of filteredCustomers) for (const seg of SEGMENTS) if (inSegment(c, seg.value)) counts[seg.value]++;
+    for (const c of filteredCustomers) for (const seg of SEGMENTS) if (passes(c, seg.value, gender)) counts[seg.value]++;
     return counts;
-  }, [filteredCustomers]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredCustomers, gender, bought]);
+  const genderCounts = useMemo(() => {
+    const counts: Record<GenderFilter, number> = { all: 0, female: 0, male: 0, unspecified: 0 };
+    for (const c of filteredCustomers) {
+      if (!passes(c, segment, "all")) continue;
+      counts.all++;
+      counts[c.gender as GenderFilter]++;
+    }
+    return counts;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredCustomers, segment, bought]);
   const segmentCustomers = useMemo(
-    () => (isAdmin ? filteredCustomers.filter((c) => inSegment(c, segment)) : filteredCustomers),
-    [filteredCustomers, segment, isAdmin]
+    () => (isAdmin ? filteredCustomers.filter((c) => passes(c, segment, gender)) : filteredCustomers),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [filteredCustomers, segment, gender, bought, isAdmin]
   );
   const owedTotal = useMemo(() => segmentCustomers.reduce((sum, c) => sum + Math.max(0, c.balance_due ?? 0), 0), [segmentCustomers]);
   const creditTotal = useMemo(() => segmentCustomers.reduce((sum, c) => sum + Math.max(0, c.store_credit_balance ?? 0), 0), [segmentCustomers]);
@@ -193,6 +263,31 @@ export default function ViewCustomersPage() {
     // Most-owing first is an admin's view; a cashier's list just goes by name.
     isAdmin ? "priority" : "name"
   );
+
+  // The people showing right now, as contacts: the number WhatsApp wants, one per line / one card each in a .vcf.
+  const contacts = useMemo(
+    () => sortedCustomers.filter((c) => !!c.phone).map((c) => ({ name: c.name, phone: c.phone as string })),
+    [sortedCustomers]
+  );
+  async function copyNumbers() {
+    const text = contacts.map((c) => fullNumber(c.phone)).join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(`Copied ${contacts.length} number${contacts.length === 1 ? "" : "s"}`);
+    } catch {
+      toast.error("Couldn't copy — allow clipboard access for this page and try again");
+    }
+  }
+  function downloadContacts() {
+    const label = [genderLabel(gender), boughtText.trim() && `bought ${boughtText.trim()}`].filter(Boolean).join(" ") || "customers";
+    const url = URL.createObjectURL(new Blob([vcardOf(contacts)], { type: "text/vcard" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${label.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-contacts.vcf`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success(`Downloaded ${contacts.length} contact${contacts.length === 1 ? "" : "s"} — open the file on your phone to add them`);
+  }
 
   return (
     <div>
@@ -274,6 +369,72 @@ export default function ViewCustomersPage() {
               );
             })}
           </div>
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            {GENDERS.filter((g) => g.value !== "unspecified" || customers.some((c) => c.gender === "unspecified")).map((g) => {
+              const active = gender === g.value;
+              return (
+                <button
+                  key={g.value}
+                  onClick={() => setGender(g.value)}
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-sm font-medium transition ${
+                    active ? "bg-black text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  {g.label}
+                  <span className={`text-xs tabular-nums ${active ? "text-white/70" : "text-gray-400"}`}>{genderCounts[g.value]}</span>
+                </button>
+              );
+            })}
+            <div className="relative ml-1 w-full sm:w-64">
+              <Input
+                value={boughtText}
+                onChange={(e) => setBoughtText(e.target.value)}
+                placeholder="Bought before… e.g. leggings"
+                aria-label="Only people who bought this before"
+                className="!py-1.5 !pr-8"
+              />
+              {boughtText && (
+                <button
+                  type="button"
+                  onClick={() => setBoughtText("")}
+                  aria-label="Clear"
+                  className="absolute inset-y-0 right-2 flex items-center text-gray-400 hover:text-gray-700"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+          </div>
+          {boughtError && <p className="mb-3 text-xs text-red-600">{boughtError}</p>}
+          {bought && (
+            <p className="mb-3 text-xs text-gray-500">
+              {bought.ids.size === 0
+                ? bought.products === 0
+                  ? `No product, brand or category matches "${boughtText.trim()}".`
+                  : `${bought.products} product${bought.products === 1 ? "" : "s"} match "${boughtText.trim()}", but nobody has bought ${bought.products === 1 ? "it" : "them"} yet.`
+                : `${bought.ids.size} customer${bought.ids.size === 1 ? "" : "s"} bought something matching "${boughtText.trim()}" (${bought.products} product${bought.products === 1 ? "" : "s"}).`}
+            </p>
+          )}
+          {segmentCustomers.length > 0 && (
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-gray-500">
+                Showing {segmentCustomers.length} {segmentCustomers.length === 1 ? "person" : "people"}
+                {contacts.length !== segmentCustomers.length && ` · ${contacts.length} with a phone number`}
+              </p>
+              {contacts.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <Button size="sm" onClick={copyNumbers} className="inline-flex items-center gap-1.5" title="Copy these phone numbers, one per line, in +94… form">
+                    <Copy size={13} />
+                    Copy numbers
+                  </Button>
+                  <Button size="sm" onClick={downloadContacts} className="inline-flex items-center gap-1.5" title="A contacts file: open it on your phone to add them all, then pick them for a WhatsApp broadcast list">
+                    <Download size={13} />
+                    Contacts file
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
           {segment === "owes" && segmentCustomers.length > 0 && (
             <p className="mb-3 text-xs text-gray-500">
               {segmentCustomers.length} customer{segmentCustomers.length === 1 ? "" : "s"} owe <span className="font-medium text-red-600">Rs. {owedTotal.toLocaleString()}</span> in total
@@ -298,6 +459,8 @@ export default function ViewCustomersPage() {
             title={
               query
                 ? "No matching customers"
+                : bought || gender !== "all"
+                ? "Nobody fits all of those filters"
                 : segment === "owes"
                 ? "Nobody owes you anything right now"
                 : segment === "credit"
@@ -309,6 +472,10 @@ export default function ViewCustomersPage() {
             actions={
               query
                 ? [{ label: "Clear search", onClick: () => setQuery("") }]
+                : bought || gender !== "all"
+                ? [
+                    { label: "Clear the filters", onClick: () => { setGender("all"); setBoughtText(""); setSegment("all"); } },
+                  ]
                 : segment !== "all"
                 ? [{ label: "Show all customers", onClick: () => setSegment("all") }]
                 : [{ label: "Add customer", primary: true, onClick: () => navigate("/customers/add") }]
@@ -354,6 +521,11 @@ export default function ViewCustomersPage() {
                     <Td className="font-medium">
                       {c.name}
                       {c.is_suspended === 1 && <span className="ml-1.5 text-xs font-normal text-red-600">(suspended)</span>}
+                      {isAdmin && genderLabel(c.gender) && (
+                        <span className="ml-2 align-middle">
+                          <Badge label={genderLabel(c.gender)!} />
+                        </span>
+                      )}
                     </Td>
                     <Td>{c.phone ?? "—"}</Td>
                     <Td>
@@ -392,6 +564,7 @@ export default function ViewCustomersPage() {
                     </p>
                     <p className="mt-0.5 text-xs text-gray-500">
                       {c.customer_code}
+                      {isAdmin && genderLabel(c.gender) ? ` · ${genderLabel(c.gender)}` : ""}
                       {c.phone ? ` · ${c.phone}` : ""}
                     </p>
                   </div>
