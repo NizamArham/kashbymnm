@@ -55,7 +55,11 @@ export default function SupplierPaymentsPage() {
   const [showRecord, setShowRecord] = useState(false);
   const [paymentStep, setPaymentStep] = useState<1 | 2>(1);
   const [supplierId, setSupplierId] = useState("");
-  const [purchaseId, setPurchaseId] = useState("");
+  // The bills this payment is for (none = a general payment). A cheque goes against one bill at most; cash, card and bank transfers
+  // can cover several. `purchaseId` / `setPurchaseId` are the single-bill view of it, used by the cheque paths and the resets.
+  const [pickedPurchases, setPickedPurchases] = useState<number[]>([]);
+  const purchaseId = pickedPurchases.length === 1 ? String(pickedPurchases[0]) : "";
+  const setPurchaseId = (v: string) => setPickedPurchases(v ? [Number(v)] : []);
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState("cash");
   const [notes, setNotes] = useState("");
@@ -201,12 +205,26 @@ export default function SupplierPaymentsPage() {
     load();
   }, []);
 
+  // The accounts a bank transfer can go to. Loaded whenever a supplier is chosen — by hand in the dialog or already chosen when
+  // coming from their profile page — so the picker never claims "no account on file" for a supplier that has one.
+  async function loadSupplierBankAccounts(id: string) {
+    setSupplierBankAccounts([]);
+    if (!id) return;
+    try {
+      const full = await api.get<Supplier>(`/suppliers/${id}`);
+      setSupplierBankAccounts(full.bank_accounts ?? []);
+    } catch {
+      // if this fails, the bank-transfer picker just shows empty — the backend still validates for real at submission time either way
+    }
+  }
+
   // Coming from "Record payment" on a supplier's profile page: open the payment dialog with that supplier already chosen.
   useEffect(() => {
     const state = location.state as { paySupplierId?: number } | null;
     if (!state?.paySupplierId || suppliers.length === 0) return;
     if (suppliers.some((s) => s.id === state.paySupplierId)) {
       setSupplierId(String(state.paySupplierId));
+      void loadSupplierBankAccounts(String(state.paySupplierId));
       setShowRecord(true);
       setPaymentStep(1);
     }
@@ -369,12 +387,22 @@ export default function SupplierPaymentsPage() {
       setFormError("Select which bank account this is going to");
       return;
     }
+    if (pickedPurchases.length > 0) {
+      const stillToPay = purchases
+        .filter((p) => pickedPurchases.includes(p.id))
+        .reduce((sum, p) => sum + (p.to_pay ?? Math.max(0, p.total_cost - p.amount_paid)), 0);
+      if (amt > stillToPay + 0.009) {
+        setFormError(`That's more than the Rs. ${stillToPay.toLocaleString()} still to pay on the bills you ticked — lower the amount or tick more bills.`);
+        return;
+      }
+    }
 
     setSubmitting(true);
     try {
       await api.post("/supplier-payments", {
         supplier_id: parseInt(supplierId, 10),
         purchase_id: purchaseId ? parseInt(purchaseId, 10) : undefined,
+        purchase_ids: pickedPurchases.length > 1 ? pickedPurchases : undefined,
         amount: amt,
         method: method || undefined,
         bank_account_id: method === "bank_transfer" ? parseInt(selectedBankAccountId, 10) : undefined,
@@ -504,6 +532,7 @@ export default function SupplierPaymentsPage() {
                       onClick={() => {
                         setMethod("cheque");
                         setChequeSearchError(null);
+                        setPickedPurchases((picked) => picked.slice(0, 1));
                         setPaymentStep(2);
                       }}
                       className="flex flex-col items-center justify-center gap-2 py-6 rounded-xl border border-gray-200 hover:border-gray-900 hover:bg-gray-50 transition"
@@ -524,16 +553,7 @@ export default function SupplierPaymentsPage() {
                           setSupplierId(v);
                           setPurchaseId("");
                           setSelectedBankAccountId("");
-                          setSupplierBankAccounts([]);
-                          if (v) {
-                            try {
-                              const full = await api.get<Supplier>(`/suppliers/${v}`);
-                              setSupplierBankAccounts(full.bank_accounts ?? []);
-                            } catch {
-                              // if this fails, the bank-transfer picker just shows empty — the
-                              // backend still validates for real at submission time either way
-                            }
-                          }
+                          await loadSupplierBankAccounts(v);
                         }}
                         placeholder="— Select —"
                         searchable
@@ -566,26 +586,53 @@ export default function SupplierPaymentsPage() {
                         (p) => String(p.supplier_id) === supplierId && p.payment_status !== "paid" && leftOn(p) > 0
                       );
                       if (!supplierId || outstanding.length === 0) return null;
+                      const toggle = (p: Purchase) => {
+                        const on = pickedPurchases.includes(p.id);
+                        // A cheque is put against one bill; the other methods can cover several.
+                        const next = on ? pickedPurchases.filter((id) => id !== p.id) : method === "cheque" ? [p.id] : [...pickedPurchases, p.id];
+                        setPickedPurchases(next);
+                        if (method !== "cheque") {
+                          const sum = outstanding.filter((x) => next.includes(x.id)).reduce((t, x) => t + leftOn(x), 0);
+                          setAmount(next.length > 0 ? String(Math.round(sum * 100) / 100) : "");
+                        } else if (!on) {
+                          setAmount(String(leftOn(p)));
+                        }
+                      };
                       return (
                         <FormGroup>
-                          <Label>Which purchase is this for? (optional)</Label>
-                          <Dropdown
-                            value={purchaseId}
-                            onChange={(v) => {
-                              setPurchaseId(v);
-                              const match = outstanding.find((p) => String(p.id) === v);
-                              if (match) setAmount(String(leftOn(match)));
-                            }}
-                            placeholder="— General payment, not tied to one purchase —"
-                            options={outstanding.map((p) => ({
-                              value: String(p.id),
-                              label: `${p.purchase_code} — Rs. ${leftOn(p).toLocaleString()} still to pay`,
-                              sublabel:
-                                leftOn(p) < ownLeft(p)
-                                  ? `Rs. ${ownLeft(p).toLocaleString()} on this bill, less Rs. ${(ownLeft(p) - leftOn(p)).toLocaleString()} already paid on other bills`
-                                  : undefined,
-                            }))}
-                          />
+                          <Label>{method === "cheque" ? "Which bill is this for? (optional)" : "Which bills is this for? (optional)"}</Label>
+                          <p className="text-xs text-gray-500 -mt-0.5 mb-1.5">
+                            {method === "cheque"
+                              ? "Tick the bill this cheque pays, or leave it for a general payment."
+                              : "Tick the bills this payment is for — the others stay as they are. Leave none ticked for a general payment."}
+                          </p>
+                          <div className="border border-gray-200 rounded-lg overflow-hidden bg-white divide-y divide-gray-100 max-h-60 overflow-y-auto">
+                            {outstanding.map((p) => {
+                              const on = pickedPurchases.includes(p.id);
+                              return (
+                                <label key={p.id} className={`flex items-start gap-2.5 px-3 py-2 cursor-pointer ${on ? "bg-gray-50" : "hover:bg-gray-50/60"}`}>
+                                  <input
+                                    type="checkbox"
+                                    checked={on}
+                                    onChange={() => toggle(p)}
+                                    className="mt-0.5 h-4 w-4 accent-black flex-shrink-0"
+                                  />
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block text-sm font-medium text-gray-900">
+                                      {p.purchase_code} <span className="font-normal text-gray-500">· {formatDate(p.purchase_date)}</span>
+                                    </span>
+                                    <span className="block text-xs text-gray-500">
+                                      {p.amount_paid > 0
+                                        ? `Part paid · Rs. ${p.amount_paid.toLocaleString()} of Rs. ${p.total_cost.toLocaleString()} paid`
+                                        : `Unpaid · Rs. ${p.total_cost.toLocaleString()}`}
+                                      {leftOn(p) < ownLeft(p) && ` · Rs. ${(ownLeft(p) - leftOn(p)).toLocaleString()} already covered by payments on other bills`}
+                                    </span>
+                                  </span>
+                                  <span className="text-sm font-medium text-gray-900 tabular-nums flex-shrink-0">Rs. {leftOn(p).toLocaleString()}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
                         </FormGroup>
                       );
                     })()}

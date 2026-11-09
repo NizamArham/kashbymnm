@@ -4,6 +4,7 @@ import { db } from "../db/connection";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { nextTransactionCode } from "../lib/codes";
 import { requireAuth, requireRole } from "../lib/auth";
+import { toPayByPurchase } from "../lib/supplierOwing";
 
 export const supplierPaymentsRouter = Router();
 
@@ -13,6 +14,9 @@ supplierPaymentsRouter.use(requireAuth, requireRole("admin"));
 const paymentInput = z.object({
   supplier_id: z.number().int().positive(),
   purchase_id: z.number().int().positive().optional(),
+  // Pay these bills in one payment (oldest first among them), leaving the supplier's other bills as they are. Takes the place of
+  // purchase_id; the payment can't be more than what the bills still need.
+  purchase_ids: z.array(z.number().int().positive()).max(100).optional(),
   amount: z.number().positive(),
   method: z.string().optional(),
   // Only meaningful when method is 'bank_transfer' — which of the
@@ -90,6 +94,70 @@ supplierPaymentsRouter.post(
         .get(data.bank_account_id, data.supplier_id) as any;
       if (!account) throw new ApiError(400, "That bank account isn't on file for this supplier");
       accountNote = ` — ${account.bank_name} ${account.account_number}`;
+    }
+
+    // A payment aimed at several bills is split between them, oldest first, each taking what it still needs — the same figure the
+    // payment dialog shows ("still to pay"). Anything over what they need is refused rather than left floating.
+    const chosen = [...new Set(data.purchase_ids ?? [])];
+    if (chosen.length > 0) {
+      const toPay = toPayByPurchase(data.supplier_id);
+      const bills = db
+        .prepare(
+          `SELECT id, purchase_code, purchase_date, total_cost, amount_paid FROM purchases
+           WHERE supplier_id = ? AND id IN (${chosen.map(() => "?").join(",")})
+           ORDER BY purchase_date, id`
+        )
+        .all(data.supplier_id, ...chosen) as { id: number; purchase_code: string; purchase_date: string; total_cost: number; amount_paid: number }[];
+      if (bills.length !== chosen.length) throw new ApiError(400, "One of those bills isn't this supplier's");
+      const settled = bills.find((b) => (toPay.get(b.id) ?? 0) <= 0.009);
+      if (settled) throw new ApiError(409, `${settled.purchase_code} has nothing left to pay — close this and choose again.`);
+
+      let remaining = data.amount;
+      const slices: { bill: (typeof bills)[number]; amount: number; partial: boolean }[] = [];
+      for (const b of bills) {
+        if (remaining <= 0.009) break;
+        const owed = toPay.get(b.id) ?? 0;
+        const amount = Math.min(owed, remaining);
+        slices.push({ bill: b, amount, partial: amount + 0.009 < Math.max(0, b.total_cost - b.amount_paid) });
+        remaining -= amount;
+      }
+      if (remaining > 0.009) {
+        const needed = Math.round((data.amount - remaining) * 100) / 100;
+        throw new ApiError(409, `That's Rs. ${Math.round(remaining).toLocaleString()} more than the Rs. ${needed.toLocaleString()} still to pay on the bills you picked.`);
+      }
+
+      const id = db.transaction(() => {
+        const created: number[] = [];
+        for (const sl of slices) {
+          const r = db
+            .prepare(
+              `INSERT INTO supplier_payments (supplier_id, purchase_id, amount, method, is_partial, notes)
+               VALUES (?, ?, ?, ?, ?, ?)`
+            )
+            .run(data.supplier_id, sl.bill.id, sl.amount, data.method ?? null, sl.partial ? 1 : 0, `${data.notes ?? ""}${accountNote}`.trim() || null);
+          created.push(Number(r.lastInsertRowid));
+
+          const totalPaid = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS total FROM supplier_payments WHERE purchase_id = ?`).get(sl.bill.id) as { total: number };
+          const status = totalPaid.total >= sl.bill.total_cost && sl.bill.total_cost > 0 ? "paid" : totalPaid.total > 0 ? "partial" : "unpaid";
+          db.prepare(`UPDATE purchases SET amount_paid = ?, payment_status = ? WHERE id = ?`).run(totalPaid.total, status, sl.bill.id);
+        }
+        // One cash-book line for the money that actually left — it is one transfer or one handful of cash, whatever bills it covered.
+        db.prepare(
+          `INSERT INTO cash_book (transaction_code, type, category, payment_method, reference_id, amount, notes)
+           VALUES (?, 'expense', 'supplier_payment', ?, ?, ?, ?)`
+        ).run(
+          nextTransactionCode(),
+          data.method ?? null,
+          created[0],
+          data.amount,
+          `${data.notes ?? "Supplier payment"} — ${slices.map((x) => x.bill.purchase_code).join(", ")}${accountNote}`
+        );
+        return created;
+      })();
+
+      const first = db.prepare(`SELECT * FROM supplier_payments WHERE id = ?`).get(id[0]);
+      res.status(201).json({ ...(first as object), payments: id.length });
+      return;
     }
 
     const runTransaction = db.transaction(() => {
