@@ -59,11 +59,50 @@ function todayIso(): string {
   return `${y}-${m}-${day}`;
 }
 
+interface OpenBill {
+  sale_id: number;
+  invoice: string;
+  date: string;
+  total: number;
+  amount_paid: number;
+  owed: number;
+}
+
+// The customer's open bills, to tick the ones a payment is for ("pay the third bill in full, leave the second part-paid").
+function BillPicker({ bills, picked, onToggle }: { bills: OpenBill[] | null; picked: number[]; onToggle: (saleId: number) => void }) {
+  if (!bills) return <p className="text-xs text-gray-500">Loading bills...</p>;
+  if (bills.length === 0) return <p className="text-xs text-gray-500">No open bills.</p>;
+  return (
+    <div className="border border-gray-200 rounded-lg overflow-hidden bg-white divide-y divide-gray-100">
+      {bills.map((b) => {
+        const on = picked.includes(b.sale_id);
+        return (
+          <label key={b.sale_id} className={`flex items-start gap-2.5 px-3 py-2 cursor-pointer ${on ? "bg-gray-50" : "hover:bg-gray-50/60"}`}>
+            <input type="checkbox" checked={on} onChange={() => onToggle(b.sale_id)} className="mt-0.5 h-4 w-4 accent-black flex-shrink-0" />
+            <span className="min-w-0 flex-1">
+              <span className="block text-xs font-medium text-gray-900">
+                {b.invoice} <span className="font-normal text-gray-500">· {formatDate(b.date)}</span>
+              </span>
+              <span className="block text-xs text-gray-500">
+                {b.amount_paid > 0
+                  ? `Part paid · Rs. ${b.amount_paid.toLocaleString()} of Rs. ${b.total.toLocaleString()} paid`
+                  : `Unpaid · Rs. ${b.total.toLocaleString()}`}
+              </span>
+            </span>
+            <span className="text-xs font-medium text-gray-900 tabular-nums flex-shrink-0">Rs. {b.owed.toLocaleString()}</span>
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
 function PaymentPreviewPane({
   amount,
   loading,
   preview,
   currentBalance,
+  choosing = false,
 }: {
   amount: number;
   loading: boolean;
@@ -72,11 +111,12 @@ function PaymentPreviewPane({
     unapplied: number;
   } | null;
   currentBalance: number;
+  choosing?: boolean;
 }) {
   if (amount <= 0) {
     return (
       <p className="text-xs text-gray-500 leading-relaxed">
-        Enter an amount to see how it covers the customer's oldest unpaid invoices.
+        {choosing ? "Tick the bills this payment is for." : "Enter an amount to see how it covers the customer's oldest unpaid invoices."}
       </p>
     );
   }
@@ -212,6 +252,10 @@ export default function CustomerProfilePage() {
     unapplied: number;
   } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  // Choosing which bills a payment goes to (default: the oldest unpaid ones first).
+  const [openBills, setOpenBills] = useState<OpenBill[] | null>(null);
+  const [choosingBills, setChoosingBills] = useState(false);
+  const [pickedBills, setPickedBills] = useState<number[]>([]);
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
   const [receiptAfterPayment, setReceiptAfterPayment] = useState<{ name: string; phone: string | null; message: string } | null>(null);
@@ -292,13 +336,13 @@ export default function CustomerProfilePage() {
         .post<{
           allocations: { sale_id: number; invoice: string; date: string; owed_before: number; applied: number; new_status: string }[];
           unapplied: number;
-        }>(`/customers/${payingCustomer.id}/payment-preview`, { amount: previewAmount })
+        }>(`/customers/${payingCustomer.id}/payment-preview`, { amount: previewAmount, sale_ids: pickedBills.length > 0 ? pickedBills : undefined })
         .then((result) => setPaymentPreview(result))
         .catch(() => setPaymentPreview(null))
         .finally(() => setPreviewLoading(false));
     }, 400);
     return () => clearTimeout(timeout);
-  }, [paymentAmount, paymentMethod, chequeListTotal, payingCustomer, paymentStep]);
+  }, [paymentAmount, paymentMethod, chequeListTotal, payingCustomer, paymentStep, pickedBills]);
 
   function openPayment(c: Customer) {
     setPayingCustomer(c);
@@ -316,6 +360,29 @@ export default function CustomerProfilePage() {
     setChequeDate("");
     setChequeListError(null);
     setChequeList([]);
+    setChoosingBills(false);
+    setPickedBills([]);
+    setOpenBills(null);
+    api
+      .get<OpenBill[]>(`/customers/${c.id}/open-bills`)
+      .then(setOpenBills)
+      .catch(() => setOpenBills([]));
+  }
+
+  // Ticking a bill sets the amount to what the ticked bills owe (it can be lowered to part-pay the last one); unticking all goes back
+  // to the automatic oldest-first.
+  function togglePickedBill(saleId: number) {
+    const next = pickedBills.includes(saleId) ? pickedBills.filter((id) => id !== saleId) : [...pickedBills, saleId];
+    setPickedBills(next);
+    if (paymentMethod !== "cheque") {
+      const owed = (openBills ?? []).filter((b) => next.includes(b.sale_id)).reduce((sum, b) => sum + b.owed, 0);
+      setPaymentAmount(next.length > 0 ? String(Math.round(owed * 100) / 100) : "");
+    }
+  }
+
+  function toggleChoosingBills() {
+    if (choosingBills) setPickedBills([]);
+    setChoosingBills(!choosingBills);
   }
 
   function chooseMethod(m: PaymentMethod) {
@@ -397,12 +464,21 @@ export default function CustomerProfilePage() {
       return;
     }
 
+    if (pickedBills.length > 0) {
+      const owedOnPicked = (openBills ?? []).filter((b) => pickedBills.includes(b.sale_id)).reduce((sum, b) => sum + b.owed, 0);
+      if (amount > owedOnPicked + 0.009) {
+        setPaymentError(`That's more than the Rs. ${owedOnPicked.toLocaleString()} owed on the bills you ticked — lower the amount or tick more bills.`);
+        return;
+      }
+    }
+
     setPaymentSubmitting(true);
     try {
       const result = await api.post<{ customer: Customer; allocations: any[]; unapplied: number }>(
         `/customers/${payingCustomer.id}/payment`,
         {
           amount: paymentMethod === "cheque" ? undefined : amount,
+          sale_ids: pickedBills.length > 0 ? pickedBills : undefined,
           method: paymentMethod,
           notes: paymentNotes.trim() || undefined,
           deduct_from_store_credit: paymentMethod === "other" && deductFromCredit ? true : undefined,
@@ -1476,12 +1552,30 @@ export default function CustomerProfilePage() {
 
                   <div className="col-span-2 px-5 py-5 bg-gray-50/50 overflow-y-auto space-y-4">
                     <div>
-                      <h3 className="text-sm font-semibold text-gray-900 mb-3">Will apply to</h3>
+                      <div className="flex items-baseline justify-between mb-3">
+                        <h3 className="text-sm font-semibold text-gray-900">Will apply to</h3>
+                        {openBills && openBills.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={toggleChoosingBills}
+                            className="text-xs font-medium text-gray-700 underline underline-offset-2 hover:text-gray-900"
+                          >
+                            {choosingBills ? "Oldest first" : "Choose bills"}
+                          </button>
+                        )}
+                      </div>
+                      {choosingBills && (
+                        <div className="mb-3 space-y-2">
+                          <p className="text-xs text-gray-500">Tick the bills this payment is for. The others stay as they are.</p>
+                          <BillPicker bills={openBills} picked={pickedBills} onToggle={togglePickedBill} />
+                        </div>
+                      )}
                       <PaymentPreviewPane
                         amount={paymentMethod === "cheque" ? chequeListTotal : parseFloat(paymentAmount) || 0}
                         loading={previewLoading}
                         preview={paymentPreview}
                         currentBalance={payingCustomer.balance_due}
+                        choosing={choosingBills && pickedBills.length === 0}
                       />
                     </div>
 

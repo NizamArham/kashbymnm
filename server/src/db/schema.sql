@@ -229,7 +229,10 @@ CREATE TABLE IF NOT EXISTS cheque_receipts (
   -- means it was left blank / made out to "Cash" — most cheques we
   -- actually see are, so that's the default assumption, not a named
   -- payee.
-  payee_name TEXT
+  payee_name TEXT,
+  -- The bills (sale ids, as JSON) this cheque was aimed at when the customer chose which bills to pay; NULL means it went to the
+  -- oldest unpaid ones. Editing the cheque's amount re-applies it to the same bills.
+  sale_scope TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_cheque_receipts_customer ON cheque_receipts(customer_id);

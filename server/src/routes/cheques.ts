@@ -120,7 +120,9 @@ chequesRouter.put(
 
       if (data.amount != null && data.amount !== receipt.amount) {
         reverseChequeAllocation(receipt.amount, receipt.sale_allocations);
-        const { allocations } = computeFifoAllocation(receipt.customer_id, data.amount);
+        // A cheque that was aimed at particular bills stays on those bills; otherwise it goes to the oldest unpaid ones.
+        const scope = receipt.sale_scope ? (JSON.parse(receipt.sale_scope) as number[]) : undefined;
+        const { allocations } = computeFifoAllocation(receipt.customer_id, data.amount, scope);
         if (allocations.length === 0) {
           throw new ApiError(409, "This customer has no outstanding sales to apply the new amount against");
         }

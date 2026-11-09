@@ -16,6 +16,12 @@ import { refundStoreCredit, usableStoreCredit } from "../lib/storeCreditRefund";
 
 export const customersRouter = Router();
 
+// cheque_receipts.sale_scope: the bills a cheque was aimed at (see schema.sql) — added to databases created before it existed.
+{
+  const cols = db.prepare(`PRAGMA table_info(cheque_receipts)`).all() as { name: string }[];
+  if (cols.length > 0 && !cols.some((c) => c.name === "sale_scope")) db.exec(`ALTER TABLE cheque_receipts ADD COLUMN sale_scope TEXT`);
+}
+
 // Both admin and staff can view/create/manage customers — no role
 // restriction needed here beyond being logged in at all.
 customersRouter.use(requireAuth);
@@ -1287,15 +1293,20 @@ customersRouter.get(
 // from the sum across all their sales, not from this one action.
 // Shared by both the preview (dry-run) and the real commit, so the two
 // can never drift out of sync with each other.
-export function computeFifoAllocation(customerId: number, amount: number) {
+//
+// `onlySaleIds` limits it to the bills the customer chose to pay ("settle the third bill, leave the second part-paid"): still oldest
+// first among those, and nothing else is touched.
+export function computeFifoAllocation(customerId: number, amount: number, onlySaleIds?: number[]) {
+  const scoped = onlySaleIds && onlySaleIds.length > 0;
   const outstandingSales = db
     .prepare(
       `SELECT id, invoice, date, total, amount_paid, ${REAL_OWED_SQL} AS real_owed
        FROM sales
        WHERE customer_id = ? AND is_voided = 0 AND status = 'completed' AND payment_status != 'paid'
+       ${scoped ? `AND id IN (${onlySaleIds!.map(() => "?").join(",")})` : ""}
        ORDER BY date ASC, id ASC`
     )
-    .all(customerId) as { id: number; invoice: string; date: string; total: number; amount_paid: number; real_owed: number }[];
+    .all(customerId, ...(scoped ? onlySaleIds! : [])) as { id: number; invoice: string; date: string; total: number; amount_paid: number; real_owed: number }[];
 
   let remaining = amount;
   const allocations: {
@@ -1334,7 +1345,26 @@ export function computeFifoAllocation(customerId: number, amount: number) {
   return { allocations, unapplied: remaining };
 }
 
-const paymentPreviewInput = z.object({ amount: z.number().positive() });
+const paymentPreviewInput = z.object({ amount: z.number().positive(), sale_ids: z.array(z.number().int().positive()).max(200).optional() });
+
+// GET /api/customers/:id/open-bills — the bills this customer still owes on, oldest first, with what is really owed on each. The
+// record-payment dialog lists them so a payment can be aimed at particular bills instead of always going to the oldest.
+customersRouter.get(
+  "/:id/open-bills",
+  asyncHandler(async (req, res) => {
+    const customer = db.prepare(`SELECT id FROM customers WHERE id = ?`).get(req.params.id);
+    if (!customer) throw new ApiError(404, "Customer not found");
+    const rows = db
+      .prepare(
+        `SELECT id AS sale_id, invoice, date, total, amount_paid, ${REAL_OWED_SQL} AS owed
+         FROM sales
+         WHERE customer_id = ? AND is_voided = 0 AND status = 'completed' AND payment_status != 'paid'
+         ORDER BY date ASC, id ASC`
+      )
+      .all(req.params.id) as { sale_id: number; invoice: string; date: string; total: number; amount_paid: number; owed: number }[];
+    res.json(rows.filter((r) => r.owed > 0.009));
+  })
+);
 
 // POST /api/customers/:id/payment-preview — dry run only, no writes. Lets
 // the UI show exactly which sales a payment amount would cover before
@@ -1345,8 +1375,8 @@ customersRouter.post(
     const customer = db.prepare(`SELECT * FROM customers WHERE id = ?`).get(req.params.id);
     if (!customer) throw new ApiError(404, "Customer not found");
 
-    const { amount } = paymentPreviewInput.parse(req.body);
-    const result = computeFifoAllocation(Number(req.params.id), amount);
+    const { amount, sale_ids } = paymentPreviewInput.parse(req.body);
+    const result = computeFifoAllocation(Number(req.params.id), amount, sale_ids);
     res.json(result);
   })
 );
@@ -1383,6 +1413,9 @@ const recordPaymentInput = z.object({
   // entry, since no money changed hands; the credit is spent down the
   // same way checkout does it.
   deduct_from_store_credit: z.boolean().optional(),
+  // Pay these bills only (oldest first among them), leaving the customer's other bills as they are. Left out, the payment goes to
+  // the oldest unpaid bills first. A payment aimed at particular bills can't be more than they owe.
+  sale_ids: z.array(z.number().int().positive()).max(200).optional(),
 });
 
 // POST /api/customers/:id/payment — record a real credit-customer
@@ -1431,7 +1464,20 @@ customersRouter.post(
       }
     }
 
-    const { allocations, unapplied } = computeFifoAllocation(Number(req.params.id), totalAmount);
+    const chosenBills = [...new Set(data.sale_ids ?? [])];
+    const { allocations, unapplied } = computeFifoAllocation(Number(req.params.id), totalAmount, chosenBills);
+
+    if (chosenBills.length > 0) {
+      // Every bill picked must still be one of this customer's open ones, and the payment must fit inside what they owe.
+      const stillOpen = new Set(computeFifoAllocation(Number(req.params.id), Number.MAX_SAFE_INTEGER, chosenBills).allocations.map((a) => a.sale_id));
+      if (chosenBills.some((id) => !stillOpen.has(id))) {
+        throw new ApiError(409, "One of the bills you picked isn't open any more — close this and choose again.");
+      }
+      if (unapplied > 0.009) {
+        const owed = Math.round((totalAmount - unapplied) * 100) / 100;
+        throw new ApiError(409, `That's Rs. ${Math.round(unapplied).toLocaleString()} more than the Rs. ${owed.toLocaleString()} owed on the bills you picked.`);
+      }
+    }
 
     if (allocations.length === 0) {
       throw new ApiError(409, "This customer has no outstanding sales to apply a payment against");
@@ -1460,8 +1506,8 @@ customersRouter.post(
         for (const c of cheques) {
           const receiptResult = db
             .prepare(
-              `INSERT INTO cheque_receipts (cheque_number, bank_name, amount, cheque_date, customer_id, sale_allocations, notes, branch, is_crossed, payee_name)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+              `INSERT INTO cheque_receipts (cheque_number, bank_name, amount, cheque_date, customer_id, sale_allocations, notes, branch, is_crossed, payee_name, sale_scope)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             )
             .run(
               c.cheque_number.trim(),
@@ -1475,7 +1521,8 @@ customersRouter.post(
               }`,
               c.branch?.trim() || null,
               c.is_crossed === false ? 0 : 1,
-              c.payee_name?.trim() || null
+              c.payee_name?.trim() || null,
+              chosenBills.length > 0 ? JSON.stringify(chosenBills) : null
             );
           chequeReceiptIds.push(Number(receiptResult.lastInsertRowid));
         }
