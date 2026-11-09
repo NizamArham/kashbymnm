@@ -48,8 +48,10 @@ export function groupSaleItemsForDisplay(items: SaleItem[], options: { wholesale
   const variants = new Map<string, Set<string>>();
   for (const item of items) {
     const returned = !!item.is_returned;
+    // A wholesale bill is at the agreed price, so it never mentions the list price: the original price is left out of the
+    // grouping and of the rows (no struck-through price, no "Inline Discount" total).
     const key = options.wholesale
-      ? [item.product_id ?? item.product_title ?? "", item.unit_price, item.original_selling_price ?? "", returned].join("::")
+      ? [item.product_id ?? item.product_title ?? "", item.unit_price, returned].join("::")
       : [item.product_id ?? item.product_title ?? "", item.color ?? "", item.size ?? "", item.unit_price, item.original_selling_price ?? "", returned].join("::");
     const existing = groups.get(key);
     if (options.wholesale) {
@@ -73,7 +75,7 @@ export function groupSaleItemsForDisplay(items: SaleItem[], options: { wholesale
         color: options.wholesale ? null : item.color,
         merged_lines: options.wholesale ? 1 : undefined,
         unit_price: item.unit_price,
-        original_selling_price: item.original_selling_price,
+        original_selling_price: options.wholesale ? undefined : item.original_selling_price,
         quantity: item.quantity,
         line_total: item.line_total,
         is_returned: returned,
