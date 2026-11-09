@@ -72,8 +72,23 @@ export interface TabularReportOptions {
   totalSummary?: ReportTotalSummary;
   filename: string;
   // Wide tables (many columns) read better in landscape. Defaults to
-  // portrait, which suits the narrower ledger-style reports.
-  orientation?: "portrait" | "landscape";
+  // portrait, which suits the narrower ledger-style reports. "auto"
+  // picks landscape only when the columns don't fit a portrait page.
+  orientation?: "portrait" | "landscape" | "auto";
+  // When the columns are still too wide for the page, the table is split
+  // sideways into parts (Part 1 of 3, ...), each starting on a fresh
+  // page, and these columns are repeated on every part so each row stays
+  // readable on its own: the first N (a name column, default 1) and the
+  // last N (a TOTAL column, default 0).
+  pinStartColumns?: number;
+  pinEndColumns?: number;
+  // Stretches the columns evenly so the table fills the full width of the
+  // page (never more than 1.6x their given widths) instead of stopping
+  // short of the right margin. Applies to each part of a split table.
+  fillWidth?: boolean;
+  // One short line printed above each part of a split table, after
+  // "Part 1 of 3 · first column to last column" (e.g. what TOTAL means).
+  splitNote?: string;
 }
 
 // Matches the invoice's own convention exactly (Invoice{number}.pdf) —
@@ -154,6 +169,47 @@ function wrapLines(doc: jsPDF, text: string, maxWidth: number): string[] {
   return lines;
 }
 
+const A4_PORTRAIT_WIDTH = 595.28;
+// A table up to this much too wide is squeezed to fit the page instead of
+// being split into parts (a few percent over is not worth a second page).
+const MIN_FIT_SCALE = 0.88;
+const MAX_STRETCH = 1.6;
+
+// Splits a too-wide table into parts that each fit the page: the pinned
+// start/end columns repeat in every part and the columns in between are
+// shared out as evenly as possible. Returns column indexes per part.
+function splitColumns(widths: number[], available: number, pinStart: number, pinEnd: number): number[][] {
+  const n = widths.length;
+  const all = widths.map((_, i) => i);
+  if (widths.reduce((a, b) => a + b, 0) <= available + 0.5) return [all];
+  const start = all.slice(0, pinStart);
+  const end = all.slice(n - pinEnd);
+  const mid = all.slice(pinStart, n - pinEnd);
+  if (mid.length === 0) return [all];
+  const pinnedWidth = [...start, ...end].reduce((sum, i) => sum + widths[i], 0);
+  const room = available - pinnedWidth;
+  const fits = (group: number[]) => group.reduce((sum, i) => sum + widths[i], 0) <= room + 0.5;
+
+  // Greedy first, to learn how many parts are needed...
+  const greedy: number[][] = [];
+  let cur: number[] = [];
+  for (const i of mid) {
+    if (cur.length > 0 && !fits([...cur, i])) {
+      greedy.push(cur);
+      cur = [];
+    }
+    cur.push(i);
+  }
+  if (cur.length > 0) greedy.push(cur);
+
+  // ...then even them out so the last part isn't one or two lonely columns.
+  const per = Math.ceil(mid.length / greedy.length);
+  const even: number[][] = [];
+  for (let k = 0; k < mid.length; k += per) even.push(mid.slice(k, k + per));
+  const groups = even.every(fits) ? even : greedy;
+  return groups.map((g) => [...start, ...g, ...end]);
+}
+
 // Shared template for every "download PDF" report across the app —
 // customer/supplier ledgers, cash book, sale/purchase history, etc.
 // A4 portrait: a big title + subject block on page 1 only, then a small
@@ -161,11 +217,33 @@ function wrapLines(doc: jsPDF, text: string, maxWidth: number): string[] {
 // filter) stamped on every page beneath it, with a paginated table in
 // between and optional summary lines after it.
 export function downloadTabularReport(opts: TabularReportOptions): void {
-  const doc = new jsPDF({ unit: "pt", format: "a4", orientation: opts.orientation ?? "portrait" });
+  const marginX = 40;
+  const naturalWidth = opts.columns.reduce((sum, c) => sum + c.width, 0);
+  const orientation =
+    opts.orientation === "auto"
+      ? naturalWidth * MIN_FIT_SCALE > A4_PORTRAIT_WIDTH - marginX * 2
+        ? "landscape"
+        : "portrait"
+      : opts.orientation ?? "portrait";
+  const doc = new jsPDF({ unit: "pt", format: "a4", orientation });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
-  const marginX = 40;
   const defaultLineWidth = doc.getLineWidth();
+
+  // Wider than the page: squeeze the columns a little if that is enough,
+  // otherwise split the table sideways into parts (see splitColumns).
+  const availableWidth = pageWidth - marginX * 2;
+  let columns = opts.columns;
+  if (naturalWidth > availableWidth && availableWidth / naturalWidth >= MIN_FIT_SCALE) {
+    const k = availableWidth / naturalWidth;
+    columns = columns.map((c) => ({ ...c, width: c.width * k }));
+  }
+  const pinStart = Math.min(opts.pinStartColumns ?? 1, columns.length);
+  const pinEnd = Math.min(opts.pinEndColumns ?? 0, columns.length - pinStart);
+  const parts = splitColumns(columns.map((c) => c.width), availableWidth, pinStart, pinEnd);
+  // What to print after "Generated ... · range" in each page's footer,
+  // by page number (empty unless the table was split into parts).
+  const partLabels: string[] = [];
 
   function drawHeaderFooter(pageNum: number, totalPages: number) {
     doc.setFontSize(9);
@@ -181,7 +259,8 @@ export function downloadTabularReport(opts: TabularReportOptions): void {
 
     doc.setFontSize(8);
     doc.setTextColor(150);
-    doc.text(`Generated ${todayIso()} · ${opts.rangeLabel}`, marginX, pageHeight - 24);
+    const partLabel = partLabels[pageNum - 1];
+    doc.text(`Generated ${todayIso()} · ${opts.rangeLabel}${partLabel ? ` · ${partLabel}` : ""}`, marginX, pageHeight - 24);
     doc.text(`Page ${pageNum} of ${totalPages}`, pageWidth - marginX, pageHeight - 24, { align: "right" });
   }
 
@@ -235,115 +314,152 @@ export function downloadTabularReport(opts: TabularReportOptions): void {
   }
   y += 10;
 
-  const tableWidth = opts.columns.reduce((sum, c) => sum + c.width, 0);
   const rowHeight = 20;
   const lineGap = 11;
   const headerBandBottom = 44;
   const footerBandTop = pageHeight - 40;
-
-  function drawTableHeader(yPos: number): number {
-    doc.setFillColor(245, 245, 245);
-    doc.rect(marginX, yPos, tableWidth, rowHeight, "F");
-    doc.setFontSize(9);
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(80);
-    let x = marginX + 6;
-    for (const col of opts.columns) {
-      const label = fitText(doc, col.label, col.width - 14);
-      if (col.align === "right") {
-        doc.text(label, x + col.width - 12, yPos + 14, { align: "right" });
-      } else if (col.align === "center") {
-        doc.text(label, x + col.width / 2, yPos + 14, { align: "center" });
-      } else {
-        doc.text(label, x, yPos + 14);
-      }
-      x += col.width;
-    }
-    return yPos + rowHeight;
-  }
-
-  y = drawTableHeader(y);
-
+  const oneLine = (label: string) => label.replace(/\n/g, " ");
+  let tableWidth = 0;
   let pageNum = 1;
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
 
-  for (const row of opts.rows) {
-    // First pass: work out how many lines each cell needs (wrapped
-    // columns only — everything else is a single fitted line), set with
-    // the row's real fonts since bold text measures wider than normal.
-    const cellLines: string[][] = opts.columns.map((col, i) => {
-      const style = row.styles?.[i];
-      doc.setFont("helvetica", style?.bold ? "bold" : "normal");
-      const raw = row.cells[i] ?? "";
-      return col.wrap ? wrapLines(doc, raw, col.width - 14) : [fitText(doc, raw, col.width - 14)];
-    });
-    const linesInRow = Math.max(1, ...cellLines.map((lines) => lines.length));
-    const lastMainBaseline = 14 + (linesInRow - 1) * lineGap;
+  parts.forEach((colIdxs, partIdx) => {
+    const baseCols = colIdxs.map((i) => columns[i]);
+    const baseWidth = baseCols.reduce((sum, c) => sum + c.width, 0);
+    const stretch = opts.fillWidth ? Math.max(1, Math.min(MAX_STRETCH, availableWidth / baseWidth)) : 1;
+    const cols = stretch > 1 ? baseCols.map((c) => ({ ...c, width: c.width * stretch })) : baseCols;
+    tableWidth = cols.reduce((sum, c) => sum + c.width, 0);
+    const partLabel = parts.length > 1 ? `Part ${partIdx + 1} of ${parts.length}` : "";
 
-    // The detail line, if any, wraps across the full table width (not
-    // one column) in a smaller italic style, starting just below the
-    // main row's own content.
-    doc.setFont("helvetica", "italic");
-    doc.setFontSize(8.5);
-    const detailLines = row.detail ? wrapLines(doc, row.detail, tableWidth - 12) : [];
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-
-    const detailStartOffset = lastMainBaseline + lineGap + 4;
-    const thisRowHeight = detailLines.length > 0 ? detailStartOffset + (detailLines.length - 1) * lineGap + 6 : lastMainBaseline + 6;
-
-    if (y + thisRowHeight > footerBandTop) {
+    if (partIdx > 0) {
       doc.addPage();
       pageNum++;
       y = headerBandBottom + 10;
-      y = drawTableHeader(y);
     }
+    partLabels[pageNum - 1] = partLabel;
 
-    let x = marginX + 6;
-    for (let i = 0; i < opts.columns.length; i++) {
-      const col = opts.columns[i];
-      const style = row.styles?.[i];
-      setColor(doc, style?.color, 30);
-      doc.setFont("helvetica", style?.bold ? "bold" : "normal");
-      cellLines[i].forEach((lineText, li) => {
-        const ty = y + 14 + li * lineGap;
-        if (col.align === "right") {
-          doc.text(lineText, x + col.width - 12, ty, { align: "right" });
-        } else if (col.align === "center") {
-          doc.text(lineText, x + col.width / 2, ty, { align: "center" });
-        } else {
-          doc.text(lineText, x, ty);
-        }
-        if (style?.strikethrough && lineText) {
-          const w = doc.getTextWidth(lineText);
-          const lineY = ty - 3;
-          const startX = col.align === "right" ? x + col.width - 12 - w : col.align === "center" ? x + col.width / 2 - w / 2 : x;
-          setDrawColorFrom(doc, style?.color, 30);
-          doc.setLineWidth(0.6);
-          doc.line(startX, lineY, startX + w, lineY);
-          doc.setLineWidth(defaultLineWidth);
-        }
-      });
-      x += col.width;
-    }
-
-    if (detailLines.length > 0) {
-      doc.setFont("helvetica", "italic");
-      doc.setFontSize(8.5);
-      doc.setTextColor(130);
-      detailLines.forEach((lineText, li) => {
-        doc.text(lineText, marginX + 6, y + detailStartOffset + li * lineGap);
-      });
+    if (parts.length > 1) {
+      const middle = colIdxs.filter((i) => i >= pinStart && i < columns.length - pinEnd);
+      const span = middle.length > 0 ? `${oneLine(columns[middle[0]].label)} to ${oneLine(columns[middle[middle.length - 1]].label)}` : "";
       doc.setFont("helvetica", "normal");
       doc.setFontSize(9);
+      doc.setTextColor(110);
+      doc.text([partLabel, span, opts.splitNote].filter(Boolean).join(" · "), marginX, y + 4);
+      y += 16;
     }
 
-    doc.setDrawColor(235);
-    doc.line(marginX, y + thisRowHeight, marginX + tableWidth, y + thisRowHeight);
+    // A header label may hold a line break ("28/29\nSLIM") so a narrow
+    // column can stack its label instead of being cut off with "...".
+    const headerLines = Math.max(1, ...cols.map((c) => c.label.split("\n").length));
+    const headerHeight = headerLines > 1 ? 14 + (headerLines - 1) * lineGap + 8 : rowHeight;
 
-    y += thisRowHeight;
-  }
+    function drawTableHeader(yPos: number): number {
+      doc.setFillColor(245, 245, 245);
+      doc.rect(marginX, yPos, tableWidth, headerHeight, "F");
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(80);
+      let hx = marginX + 6;
+      for (const col of cols) {
+        const maxWidth = col.align === "center" ? col.width - 6 : col.width - 14;
+        col.label.split("\n").forEach((part, li) => {
+          const label = fitText(doc, part, maxWidth);
+          const ty = yPos + 14 + li * lineGap;
+          if (col.align === "right") {
+            doc.text(label, hx + col.width - 12, ty, { align: "right" });
+          } else if (col.align === "center") {
+            doc.text(label, hx + col.width / 2, ty, { align: "center" });
+          } else {
+            doc.text(label, hx, ty);
+          }
+        });
+        hx += col.width;
+      }
+      return yPos + headerHeight;
+    }
+
+    y = drawTableHeader(y);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+
+    for (const row of opts.rows) {
+      // First pass: work out how many lines each cell needs (wrapped
+      // columns only — everything else is a single fitted line), set with
+      // the row's real fonts since bold text measures wider than normal.
+      const cellLines: string[][] = cols.map((col, k) => {
+        const style = row.styles?.[colIdxs[k]];
+        doc.setFont("helvetica", style?.bold ? "bold" : "normal");
+        const raw = row.cells[colIdxs[k]] ?? "";
+        return col.wrap ? wrapLines(doc, raw, col.width - 14) : [fitText(doc, raw, col.width - 14)];
+      });
+      const linesInRow = Math.max(1, ...cellLines.map((lines) => lines.length));
+      const lastMainBaseline = 14 + (linesInRow - 1) * lineGap;
+
+      // The detail line, if any, wraps across the full table width (not
+      // one column) in a smaller italic style, starting just below the
+      // main row's own content.
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(8.5);
+      const detailLines = row.detail ? wrapLines(doc, row.detail, tableWidth - 12) : [];
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+
+      const detailStartOffset = lastMainBaseline + lineGap + 4;
+      const thisRowHeight = detailLines.length > 0 ? detailStartOffset + (detailLines.length - 1) * lineGap + 6 : lastMainBaseline + 6;
+
+      if (y + thisRowHeight > footerBandTop) {
+        doc.addPage();
+        pageNum++;
+        partLabels[pageNum - 1] = partLabel;
+        y = headerBandBottom + 10;
+        y = drawTableHeader(y);
+      }
+
+      let x = marginX + 6;
+      for (let k = 0; k < cols.length; k++) {
+        const col = cols[k];
+        const style = row.styles?.[colIdxs[k]];
+        setColor(doc, style?.color, 30);
+        doc.setFont("helvetica", style?.bold ? "bold" : "normal");
+        cellLines[k].forEach((lineText, li) => {
+          const ty = y + 14 + li * lineGap;
+          if (col.align === "right") {
+            doc.text(lineText, x + col.width - 12, ty, { align: "right" });
+          } else if (col.align === "center") {
+            doc.text(lineText, x + col.width / 2, ty, { align: "center" });
+          } else {
+            doc.text(lineText, x, ty);
+          }
+          if (style?.strikethrough && lineText) {
+            const w = doc.getTextWidth(lineText);
+            const lineY = ty - 3;
+            const startX = col.align === "right" ? x + col.width - 12 - w : col.align === "center" ? x + col.width / 2 - w / 2 : x;
+            setDrawColorFrom(doc, style?.color, 30);
+            doc.setLineWidth(0.6);
+            doc.line(startX, lineY, startX + w, lineY);
+            doc.setLineWidth(defaultLineWidth);
+          }
+        });
+        x += col.width;
+      }
+
+      if (detailLines.length > 0) {
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(8.5);
+        doc.setTextColor(130);
+        detailLines.forEach((lineText, li) => {
+          doc.text(lineText, marginX + 6, y + detailStartOffset + li * lineGap);
+        });
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+      }
+
+      doc.setDrawColor(235);
+      doc.line(marginX, y + thisRowHeight, marginX + tableWidth, y + thisRowHeight);
+
+      y += thisRowHeight;
+    }
+  });
 
   if (opts.totalSummary) {
     y += 8;

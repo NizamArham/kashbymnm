@@ -30,7 +30,7 @@ import { groupByProduct, summarizeProductVariants } from "../lib/sizeSort";
 import { createProductSearchIndex, searchProductUnits } from "../lib/productSearch";
 import { GenderNavTabs, GenderNavPanel, GenderNavItem } from "../components/GenderNav";
 import { Button, Card, Input, ErrorText, EmptyState, Modal, Table, Th, Td, Badge, inventoryStatusTone, RowCard, RowCardStats, RowCardStat, ActionMenu, PageHeader } from "../components/ui";
-import { downloadTabularReport, buildReportFilename, todayLongDate } from "../lib/reportPdf";
+import { downloadTabularReport, buildReportFilename, todayLongDate, type ReportCellStyle, type ReportRow } from "../lib/reportPdf";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { readMemory, useRemembered, useRememberedScroll, writeMemory } from "../lib/viewMemory";
 
@@ -90,16 +90,21 @@ function ProductDownloadModal({
       }
       const grandTotal = Object.values(sizeTotals).reduce((a, b) => a + b, 0);
 
-      const pdfRows = colors.map((c) => {
+      // An empty cell reads as a light "-" rather than a 0, so the pieces
+      // that actually exist stand out in the grid.
+      const dimDash: ReportCellStyle = { color: 185 };
+      const qtyCell = (n: number) => (n === 0 ? "-" : String(n));
+      const withDashStyles = (cells: string[], base?: ReportCellStyle): ReportRow["styles"] =>
+        cells.map((t) => (t === "-" ? { ...base, ...dimDash } : base));
+
+      const pdfRows: ReportRow[] = colors.map((c) => {
         const rowTotal = sizes.reduce((sum, s) => sum + grid[c][s], 0);
-        return {
-          cells: [c, ...sizes.map((s) => String(grid[c][s])), String(rowTotal)],
-        };
+        const cells = [c, ...sizes.map((s) => qtyCell(grid[c][s])), qtyCell(rowTotal)];
+        return { cells, styles: withDashStyles(cells) };
       });
 
-      pdfRows.push({
-        cells: ["TOTAL", ...sizes.map((s) => String(sizeTotals[s])), String(grandTotal)],
-      });
+      const totalCells = ["TOTAL", ...sizes.map((s) => qtyCell(sizeTotals[s])), qtyCell(grandTotal)];
+      pdfRows.push({ cells: totalCells, styles: withDashStyles(totalCells, { bold: true }) });
 
       const longestColor = Math.max(...colors.map((c) => c.length), 6);
       const colorColWidth = Math.min(180, Math.max(80, longestColor * 6));
@@ -112,11 +117,17 @@ function ProductDownloadModal({
         ],
         rangeLabel: title,
         orientation: "landscape",
+        // A size like "28/29 SLIM" stacks onto two lines in its header; if
+        // there are more sizes than fit across one page the table carries
+        // on in further parts, repeating Color and TOTAL on each.
         columns: [
           { label: "Color", width: colorColWidth },
-          ...sizes.map((s) => ({ label: s, width: 42, align: "center" as const })),
-          { label: "TOTAL", width: 55, align: "center" as const },
+          ...sizes.map((s) => ({ label: s.replace(" ", "\n"), width: 52, align: "center" as const })),
+          { label: "TOTAL", width: 52, align: "center" as const },
         ],
+        pinEndColumns: 1,
+        fillWidth: true,
+        splitNote: "TOTAL is the whole row, across all sizes",
         rows: pdfRows,
         totalSummary: {
           label: "Grand total",
