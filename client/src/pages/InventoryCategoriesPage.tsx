@@ -33,6 +33,7 @@ import { Button, Card, Input, ErrorText, EmptyState, Modal, Table, Th, Td, Badge
 import { downloadTabularReport, buildReportFilename, todayLongDate, type ReportCellStyle, type ReportRow } from "../lib/reportPdf";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { readMemory, useRemembered, useRememberedScroll, writeMemory } from "../lib/viewMemory";
+import { FilterBreadcrumb } from "../components/FilterBreadcrumb";
 
 interface SelectedFilter {
   gender?: ProductGender;
@@ -749,25 +750,23 @@ export default function InventoryCategoriesPage() {
                 {appliedQuery ? (
                   <span className="text-gray-700">Search results</span>
                 ) : (
-                  <>
-                    {selectedFilter.gender
-                      ? genderGroups.find((g) => g.gender === selectedFilter.gender)?.label
-                      : "All"}
-                    {selectedFilter.category && (
-                      <>
-                        <span className="text-gray-300"> › </span>
-                        {selectedFilter.category}
-                      </>
-                    )}
-                    {selectedFilter.subCategory && (
-                      <>
-                        <span className="text-gray-300"> › </span>
-                        <span className="font-medium text-gray-900">
-                          {selectedFilter.subCategory}
-                        </span>
-                      </>
-                    )}
-                  </>
+                  <FilterBreadcrumb
+                    crumbs={[
+                      { label: "All", onClick: () => selectGender(ALL) },
+                      ...(selectedFilter.gender
+                        ? [
+                            {
+                              label: genderGroups.find((g) => g.gender === selectedFilter.gender)?.label ?? String(selectedFilter.gender),
+                              onClick: () => selectGender(selectedFilter.gender as string),
+                            },
+                          ]
+                        : []),
+                      ...(selectedFilter.category
+                        ? [{ label: selectedFilter.category, onClick: () => selectCategory(selectedFilter.gender ?? ALL, selectedFilter.category as string) }]
+                        : []),
+                      ...(selectedFilter.subCategory ? [{ label: selectedFilter.subCategory }] : []),
+                    ]}
+                  />
                 )}
               </p>
             </div>

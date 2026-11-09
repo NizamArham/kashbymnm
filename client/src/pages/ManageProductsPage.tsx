@@ -41,6 +41,7 @@ import {
 import ProductSalesModal from "../components/ProductSalesModal";
 import ProductsViewToggle from "../components/ProductsViewToggle";
 import { useConfirm } from "../components/Feedback";
+import { FilterBreadcrumb } from "../components/FilterBreadcrumb";
 
 const LOW_STOCK_THRESHOLD = 5;
 const removalReasons: RemovalReason[] = ["Damaged", "Gifted", "Staff Use", "Stolen", "Lost", "Other"];
@@ -1551,19 +1552,34 @@ export default function ManageProductsPage() {
         <Card flatOnPhone className="lg:p-0 lg:overflow-clip">
           <div className="px-1 lg:px-5 py-3.5 lg:border-b lg:border-gray-100 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
             <p className="text-sm text-gray-500 truncate">
-              {selectedFilter.gender ? genderGroups.find((g) => g.gender === selectedFilter.gender)?.label : "All"}
-              {selectedFilter.category && (
-                <>
-                  <span className="text-gray-300"> › </span>
-                  {selectedFilter.category}
-                </>
-              )}
-              {selectedFilter.subCategory && (
-                <>
-                  <span className="text-gray-300"> › </span>
-                  <span className="font-medium text-gray-900">{selectedFilter.subCategory}</span>
-                </>
-              )}
+              {/* A step back keeps the brand filter — it has its own chip with an ✕. */}
+              <FilterBreadcrumb
+                crumbs={[
+                  { label: "All", onClick: () => setSelectedFilter(selectedFilter.brand ? { brand: selectedFilter.brand } : {}) },
+                  ...(selectedFilter.gender
+                    ? [
+                        {
+                          label: genderGroups.find((g) => g.gender === selectedFilter.gender)?.label ?? String(selectedFilter.gender),
+                          onClick: () => setSelectedFilter({ gender: selectedFilter.gender, ...(selectedFilter.brand ? { brand: selectedFilter.brand } : {}) }),
+                        },
+                      ]
+                    : []),
+                  ...(selectedFilter.category
+                    ? [
+                        {
+                          label: selectedFilter.category,
+                          onClick: () =>
+                            setSelectedFilter({
+                              gender: selectedFilter.gender,
+                              category: selectedFilter.category,
+                              ...(selectedFilter.brand ? { brand: selectedFilter.brand } : {}),
+                            }),
+                        },
+                      ]
+                    : []),
+                  ...(selectedFilter.subCategory ? [{ label: selectedFilter.subCategory }] : []),
+                ]}
+              />
               {searchQuery.trim() && <span className="text-gray-400"> · matching “{searchQuery.trim()}”</span>}
             </p>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
