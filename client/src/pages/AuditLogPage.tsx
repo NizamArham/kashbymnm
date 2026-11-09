@@ -48,6 +48,8 @@ const ACTION_META: Record<string, { label: string; icon: typeof AlertTriangle; t
   exchange_not_returned: { label: "Exchange item not returned", icon: Pencil, tone: "warning" },
   exchange_cancelled: { label: "Exchange cancelled", icon: Pencil, tone: "warning" },
   return_pickup_booked: { label: "Recorded a courier return", icon: Pencil, tone: "neutral" },
+  borrowed_item_sold: { label: "Sold a piece not in stock", icon: Pencil, tone: "neutral" },
+  borrowed_item_settled: { label: "Settled a piece not in stock", icon: Pencil, tone: "neutral" },
   return_pickup_requested: { label: "Requested a courier return", icon: Pencil, tone: "neutral" },
   return_pickup_approved: { label: "Approved a courier return", icon: Pencil, tone: "neutral" },
   return_pickup_declined: { label: "Declined a courier return", icon: Pencil, tone: "warning" },

@@ -730,7 +730,7 @@ export default function PosPage() {
     const cost = parseFloat(manualCost);
     const price = parseFloat(manualPrice);
     if (!manualTitle.trim()) return setManualError("Enter the item's name");
-    if (!manualSupplierId) return setManualError("Pick the supplier this piece is borrowed from");
+    if (!manualSupplierId) return setManualError("Pick the supplier this piece comes from");
     if (!qty || qty < 1 || qty > 50) return setManualError("Quantity must be between 1 and 50");
     if (isNaN(cost) || cost < 0) return setManualError("Enter the cost price — what the supplier charges for it");
     if (isNaN(price) || price < 0) return setManualError("Enter the selling price");
@@ -1849,7 +1849,7 @@ export default function PosPage() {
                           {sample.color ?? "—"} / {sample.size ?? "—"} | SKU: {sample.sku}
                         </p>
                         {line.manual && (
-                          <p className="text-xs text-amber-700 mt-0.5">Not in stock · borrowed from {line.manual.supplier_name}</p>
+                          <p className="text-xs text-amber-700 mt-0.5">Not in stock · from {line.manual.supplier_name}</p>
                         )}
                         {hasStaleUnit && (
                           <p className="text-xs text-red-600 mt-0.5 font-medium">No longer in stock — remove before checkout</p>
@@ -2450,7 +2450,7 @@ export default function PosPage() {
           size="md"
           onClose={() => setShowManualItem(false)}
           title="Item not in stock"
-          subtitle="Borrowed or not yet entered — sold now, settled with the supplier at end of day"
+          subtitle="Sold now, settled with the supplier later from the Not in stock page"
           footer={
             <>
               <Button onClick={() => setShowManualItem(false)}>Cancel</Button>
@@ -2706,7 +2706,7 @@ export default function PosPage() {
 
               {cart.some((line) => line.manual) && (
                 <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
-                  Not-in-stock items: confirm each piece is physically here before handing it over. Each one is settled with its supplier at end of day.
+                  Not in stock: confirm each piece is physically here before handing it over. Each one is settled with its supplier from the Not in stock page.
                 </div>
               )}
               <div className="border-t border-gray-100 pt-3 space-y-1.5">
