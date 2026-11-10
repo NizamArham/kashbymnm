@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useRef } from "react";
 import { PageLoader } from "../components/Loader";
-import { Users, Search, Lock, Plus, Star, ChevronRight, Copy, Download, X, SlidersHorizontal } from "lucide-react";
+import { Users, Search, Lock, Plus, Star, ChevronRight, Copy, Download, X, SlidersHorizontal, ChevronDown, ShoppingBag } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Customer } from "../lib/types";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -15,23 +15,21 @@ import { whatsappNumber } from "../lib/phone";
 import { useToast } from "../components/Feedback";
 
 type CustomerSortKey = "priority" | "code" | "name" | "phone" | "loyalty" | "balance" | "last_order";
-// The groups an admin can narrow the list to.
-type Segment = "all" | "owes" | "credit" | "inactive";
-const SEGMENTS: { value: Segment; label: string; hint: string }[] = [
-  { value: "all", label: "All", hint: "Every customer" },
+// What the Filter ticks mean. Ticks in the same group are "either" (Owes me + Has store credit shows both kinds of people); ticks in
+// different groups all have to fit (Owes me + Ladies = the ladies who owe).
+type BalanceKey = "owes" | "credit";
+const BALANCE_OPTIONS: { value: BalanceKey; label: string; hint: string }[] = [
   { value: "owes", label: "Owes me", hint: "Customers with a balance to pay" },
-  { value: "credit", label: "Has credit", hint: "Customers with store credit to spend" },
-  { value: "inactive", label: "Inactive", hint: "No order in the last 60 days (or never)" },
+  { value: "credit", label: "Has store credit", hint: "Customers with store credit to spend" },
 ];
 // Ladies / Men's, for finding the right people to tell about something (the stored values are female / male).
-type GenderFilter = "all" | "female" | "male" | "unspecified";
-const GENDERS: { value: GenderFilter; label: string }[] = [
-  { value: "all", label: "Everyone" },
+type WhoKey = "female" | "male" | "unspecified";
+const WHO_OPTIONS: { value: WhoKey; label: string }[] = [
   { value: "female", label: "Ladies" },
   { value: "male", label: "Men's" },
   { value: "unspecified", label: "Not set" },
 ];
-const genderLabel = (g: string | null | undefined) => (g === "female" ? "Ladies" : g === "male" ? "Men's" : null);
+type Picks = { balance: BalanceKey[]; inactive: boolean; who: WhoKey[] };
 
 // A phone as the +94… number WhatsApp and phone books want.
 const fullNumber = (stored: string) => `+${whatsappNumber(stored)}`;
@@ -48,12 +46,6 @@ function isInactive(c: Customer): boolean {
   const last = new Date(c.last_order_date.slice(0, 10) + "T00:00:00").getTime();
   return Number.isNaN(last) || Date.now() - last > INACTIVE_AFTER_DAYS * 24 * 60 * 60 * 1000;
 }
-const inSegment = (c: Customer, segment: Segment): boolean =>
-  segment === "all" ||
-  (segment === "owes" && (c.balance_due ?? 0) > 0) ||
-  (segment === "credit" && (c.store_credit_balance ?? 0) > 0) ||
-  (segment === "inactive" && isInactive(c));
-
 // Find a customer; clicking one opens their page (/customers/<id>), which is where everything about them lives.
 // A filter that is switched on, as a small tag you can take off.
 function FilterTag({ label, onRemove }: { label: string; onRemove: () => void }) {
@@ -67,18 +59,14 @@ function FilterTag({ label, onRemove }: { label: string; onRemove: () => void })
   );
 }
 
-// One choice inside the filter options, with how many people it would show.
-function FilterChoice({ active, count, title, onClick, children }: { active: boolean; count: number; title?: string; onClick: () => void; children: React.ReactNode }) {
+// One tick box in the Filter drop-down, with how many people it would show.
+function FilterTick({ checked, count, title, onChange, children }: { checked: boolean; count: number; title?: string; onChange: () => void; children: React.ReactNode }) {
   return (
-    <button
-      type="button"
-      title={title}
-      onClick={onClick}
-      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition ${active ? "bg-black text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
-    >
-      {children}
-      <span className={`text-xs tabular-nums ${active ? "text-white/70" : "text-gray-500"}`}>{count}</span>
-    </button>
+    <label title={title} className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-1.5 text-sm text-gray-800 hover:bg-gray-50">
+      <input type="checkbox" checked={checked} onChange={onChange} className="h-4 w-4 rounded border-gray-300 accent-black" />
+      <span className="flex-1">{children}</span>
+      <span className="text-xs tabular-nums text-gray-500">{count}</span>
+    </label>
   );
 }
 
@@ -94,13 +82,17 @@ export default function ViewCustomersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [segment, setSegment] = useState<Segment>("all");
-  const [gender, setGender] = useState<GenderFilter>("all");
-  // The filter options stay folded away until asked for; what is switched on shows as small tags beside the Filter button.
+  // The ticks in the Filter drop-down (admin only).
+  const [balanceSel, setBalanceSel] = useState<BalanceKey[]>([]);
+  const [inactiveOnly, setInactiveOnly] = useState(false);
+  const [whoSel, setWhoSel] = useState<WhoKey[]>([]);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const filterRef = useRef<HTMLDivElement>(null);
   const toast = useToast();
-  // "Bought before": what was typed, and the people who bought something matching it (null = not filtering by it).
-  const [boughtText, setBoughtText] = useState("");
+  // The one search bar also finds people by what they bought: with "Bought item" on, what's typed is an item, brand or category, and the
+  // list narrows to the people who bought something matching it (null = not filtering by it).
+  const [searchBought, setSearchBought] = useState(false);
+  const boughtText = searchBought ? query : "";
   const [bought, setBought] = useState<{ ids: Set<number>; products: number } | null>(null);
   const [boughtError, setBoughtError] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -219,7 +211,7 @@ export default function ViewCustomersPage() {
     // "771234567"), so it isn't filtered again here.
     if (!isAdmin) return customers;
     const trimmed = query.trim().toLowerCase();
-    if (!trimmed) return customers;
+    if (!trimmed || searchBought) return customers;
     return customers.filter(
       (c) =>
         c.name.toLowerCase().includes(trimmed) ||
@@ -227,32 +219,30 @@ export default function ViewCustomersPage() {
         c.phone?.toLowerCase().includes(trimmed) ||
         c.phone2?.toLowerCase().includes(trimmed)
     );
-  }, [customers, query, isAdmin]);
+  }, [customers, query, isAdmin, searchBought]);
 
-  // How many of the searched list fall in each group, and the list narrowed to the chosen one (admin only).
-  // Every filter narrows the same list, and each chip's count follows the other filters: with "Ladies" on, "Owes me" counts the ladies who owe.
-  const passes = (c: Customer, seg: Segment, g: GenderFilter) =>
-    inSegment(c, seg) && (g === "all" || c.gender === g) && (!bought || bought.ids.has(c.id));
-  const segmentCounts = useMemo(() => {
-    const counts: Record<Segment, number> = { all: 0, owes: 0, credit: 0, inactive: 0 };
-    for (const c of filteredCustomers) for (const seg of SEGMENTS) if (passes(c, seg.value, gender)) counts[seg.value]++;
-    return counts;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filteredCustomers, gender, bought]);
-  const genderCounts = useMemo(() => {
-    const counts: Record<GenderFilter, number> = { all: 0, female: 0, male: 0, unspecified: 0 };
+  // The list narrowed by the ticks, and how many people each tick would show with the others as they are (a tick counts people in its
+  // own group on its own, so "Ladies 13" stays 13 even with "Men's" ticked).
+  const picks: Picks = { balance: balanceSel, inactive: inactiveOnly, who: whoSel };
+  const passes = (c: Customer, p: Picks) =>
+    (p.balance.length === 0 || p.balance.some((k) => (k === "owes" ? (c.balance_due ?? 0) > 0 : (c.store_credit_balance ?? 0) > 0))) &&
+    (!p.inactive || isInactive(c)) &&
+    (p.who.length === 0 || p.who.includes(c.gender as WhoKey)) &&
+    (!bought || bought.ids.has(c.id));
+  const tickCounts = useMemo(() => {
+    const counts = { owes: 0, credit: 0, inactive: 0, female: 0, male: 0, unspecified: 0 };
     for (const c of filteredCustomers) {
-      if (!passes(c, segment, "all")) continue;
-      counts.all++;
-      counts[c.gender as GenderFilter]++;
+      for (const k of ["owes", "credit"] as const) if (passes(c, { ...picks, balance: [k] })) counts[k]++;
+      if (passes(c, { ...picks, inactive: true })) counts.inactive++;
+      for (const k of ["female", "male", "unspecified"] as const) if (passes(c, { ...picks, who: [k] })) counts[k]++;
     }
     return counts;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filteredCustomers, segment, bought]);
+  }, [filteredCustomers, balanceSel, inactiveOnly, whoSel, bought]);
   const segmentCustomers = useMemo(
-    () => (isAdmin ? filteredCustomers.filter((c) => passes(c, segment, gender)) : filteredCustomers),
+    () => (isAdmin ? filteredCustomers.filter((c) => passes(c, picks)) : filteredCustomers),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [filteredCustomers, segment, gender, bought, isAdmin]
+    [filteredCustomers, balanceSel, inactiveOnly, whoSel, bought, isAdmin]
   );
   const owedTotal = useMemo(() => segmentCustomers.reduce((sum, c) => sum + Math.max(0, c.balance_due ?? 0), 0), [segmentCustomers]);
   const creditTotal = useMemo(() => segmentCustomers.reduce((sum, c) => sum + Math.max(0, c.store_credit_balance ?? 0), 0), [segmentCustomers]);
@@ -308,7 +298,7 @@ export default function ViewCustomersPage() {
     }
   }
   function downloadContacts() {
-    const label = [genderLabel(gender), boughtText.trim() && `bought ${boughtText.trim()}`].filter(Boolean).join(" ") || "customers";
+    const label = [...WHO_OPTIONS.filter((w) => whoSel.includes(w.value)).map((w) => w.label), boughtText.trim() && `bought ${boughtText.trim()}`].filter(Boolean).join(" ") || "customers";
     const url = URL.createObjectURL(new Blob([vcardOf(contacts)], { type: "text/vcard" }));
     const a = document.createElement("a");
     a.href = url;
@@ -318,21 +308,47 @@ export default function ViewCustomersPage() {
     toast.success(`Downloaded ${contacts.length} contact${contacts.length === 1 ? "" : "s"} — open the file on your phone to add them`);
   }
 
-  // How many of the filters are switched on, and the two ways of changing them.
-  const activeFilters = (segment !== "all" ? 1 : 0) + (gender !== "all" ? 1 : 0) + (boughtText.trim() ? 1 : 0);
-  function chooseSegment(value: Segment) {
-    setSegment(value);
-    // Each group has the order you'd want: biggest debt first, most credit first, longest quiet first.
-    if (value === "owes") setSort("balance", "asc");
-    else if (value === "credit") setSort("balance", "desc");
-    else if (value === "inactive") setSort("last_order", "asc");
+  // How many ticks are on, and the ways of changing them.
+  const activeFilters = balanceSel.length + (inactiveOnly ? 1 : 0) + whoSel.length;
+  // Each kind of list has the order you'd want: biggest debt first, most credit first, longest quiet first.
+  function sortFor(balance: BalanceKey[], inactive: boolean) {
+    if (balance.length === 1 && balance[0] === "owes") setSort("balance", "asc");
+    else if (balance.length === 1 && balance[0] === "credit") setSort("balance", "desc");
+    else if (balance.length === 0 && inactive) setSort("last_order", "asc");
     else setSort("priority", "asc");
   }
-  function clearFilters() {
-    chooseSegment("all");
-    setGender("all");
-    setBoughtText("");
+  const flip = <T,>(list: T[], item: T) => (list.includes(item) ? list.filter((x) => x !== item) : [...list, item]);
+  function toggleBalance(k: BalanceKey) {
+    const next = flip(balanceSel, k);
+    setBalanceSel(next);
+    sortFor(next, inactiveOnly);
   }
+  function toggleInactive() {
+    setInactiveOnly(!inactiveOnly);
+    sortFor(balanceSel, !inactiveOnly);
+  }
+  function clearFilters() {
+    setBalanceSel([]);
+    setInactiveOnly(false);
+    setWhoSel([]);
+    setSort("priority", "asc");
+  }
+  // The drop-down closes when you click anywhere else, or press Escape.
+  useEffect(() => {
+    if (!filtersOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (filterRef.current && !filterRef.current.contains(e.target as Node)) setFiltersOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFiltersOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [filtersOpen]);
 
   return (
     <div>
@@ -350,12 +366,12 @@ export default function ViewCustomersPage() {
       <Card className="mb-5">
         <div className="relative">
           <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-            <Search size={16} className="text-gray-400" />
+            {isAdmin && searchBought ? <ShoppingBag size={16} className="text-gray-700" /> : <Search size={16} className="text-gray-400" />}
           </div>
           <Input
             ref={searchInputRef}
-            className="pl-10"
-            placeholder={isAdmin ? "Search customers..." : "Type part of a name, or a phone number..."}
+            className={isAdmin ? "pl-10 pr-36" : "pl-10"}
+            placeholder={isAdmin ? (searchBought ? "An item, brand or category, e.g. leggings" : "Search customers...") : "Type part of a name, or a phone number..."}
             value={query}
             onChange={(e) => {
               userTyped.current = true;
@@ -367,6 +383,24 @@ export default function ViewCustomersPage() {
               if (e.key === "Enter" && !isAdmin) searchExactly(query);
             }}
           />
+          {/* One bar for both: by default it finds a customer; switched on, the same bar finds who bought an item. */}
+          {isAdmin && (
+            <button
+              type="button"
+              aria-pressed={searchBought}
+              onClick={() => {
+                setSearchBought((on) => !on);
+                searchInputRef.current?.focus();
+              }}
+              title={searchBought ? "Searching by what they bought — click to search by name, code or phone again" : "Search by what they bought, instead of by name"}
+              className={`absolute inset-y-0 right-2 my-auto inline-flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium transition ${
+                searchBought ? "bg-black text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+            >
+              <ShoppingBag size={13} />
+              Bought item
+            </button>
+          )}
         </div>
         {!isAdmin && (
           <div className="mt-3 flex items-center justify-between gap-3">
@@ -390,15 +424,49 @@ export default function ViewCustomersPage() {
       {isAdmin && !loading && customers.length > 0 && (
         <>
           <div className="mb-3 flex flex-wrap items-center gap-2">
-            <Button size="sm" onClick={() => setFiltersOpen((o) => !o)} aria-expanded={filtersOpen} className="inline-flex items-center gap-1.5">
-              <SlidersHorizontal size={14} />
-              Filter
-              {activeFilters > 0 && <span className="rounded-full bg-black px-1.5 text-xs font-medium text-white">{activeFilters}</span>}
-            </Button>
-            {/* What is switched on, each one removable on the spot. */}
-            {segment !== "all" && <FilterTag label={SEGMENTS.find((x) => x.value === segment)!.label} onRemove={() => chooseSegment("all")} />}
-            {gender !== "all" && <FilterTag label={GENDERS.find((x) => x.value === gender)!.label} onRemove={() => setGender("all")} />}
-            {boughtText.trim() && <FilterTag label={`Bought: ${boughtText.trim()}`} onRemove={() => setBoughtText("")} />}
+            <div className="relative" ref={filterRef}>
+              <Button size="sm" onClick={() => setFiltersOpen((o) => !o)} aria-expanded={filtersOpen} aria-haspopup="true" className="inline-flex items-center gap-1.5">
+                <SlidersHorizontal size={14} />
+                Filter
+                {activeFilters > 0 && <span className="rounded-full bg-black px-1.5 text-xs font-medium text-white">{activeFilters}</span>}
+                <ChevronDown size={13} className={`text-gray-500 transition-transform ${filtersOpen ? "rotate-180" : ""}`} />
+              </Button>
+              {filtersOpen && (
+                <div role="group" aria-label="Filter customers" className="absolute left-0 top-full z-40 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-xl border border-gray-200 bg-white p-2 shadow-lg">
+                  <p className="px-2 pb-1 pt-1.5 text-xs font-medium text-gray-500">Balance</p>
+                  {BALANCE_OPTIONS.map((o) => (
+                    <FilterTick key={o.value} checked={balanceSel.includes(o.value)} count={tickCounts[o.value]} title={o.hint} onChange={() => toggleBalance(o.value)}>
+                      {o.label}
+                    </FilterTick>
+                  ))}
+                  <p className="px-2 pb-1 pt-3 text-xs font-medium text-gray-500">Last order</p>
+                  <FilterTick checked={inactiveOnly} count={tickCounts.inactive} title="No order in the last 60 days, or never" onChange={toggleInactive}>
+                    Not ordered in 60 days
+                  </FilterTick>
+                  <p className="px-2 pb-1 pt-3 text-xs font-medium text-gray-500">Who</p>
+                  {WHO_OPTIONS.filter((w) => w.value !== "unspecified" || customers.some((c) => c.gender === "unspecified")).map((w) => (
+                    <FilterTick key={w.value} checked={whoSel.includes(w.value)} count={tickCounts[w.value]} onChange={() => setWhoSel(flip(whoSel, w.value))}>
+                      {w.label}
+                    </FilterTick>
+                  ))}
+                  {activeFilters > 0 && (
+                    <div className="mt-2 border-t border-gray-100 px-2 pt-2">
+                      <button type="button" onClick={clearFilters} className="text-xs text-gray-500 underline hover:text-gray-800">
+                        Clear all ticks
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            {/* What is ticked, each one removable on the spot. */}
+            {BALANCE_OPTIONS.filter((o) => balanceSel.includes(o.value)).map((o) => (
+              <FilterTag key={o.value} label={o.label} onRemove={() => toggleBalance(o.value)} />
+            ))}
+            {inactiveOnly && <FilterTag label="Not ordered in 60 days" onRemove={toggleInactive} />}
+            {WHO_OPTIONS.filter((w) => whoSel.includes(w.value)).map((w) => (
+              <FilterTag key={w.value} label={w.label} onRemove={() => setWhoSel(flip(whoSel, w.value))} />
+            ))}
             {activeFilters > 1 && (
               <button type="button" onClick={clearFilters} className="text-xs text-gray-500 underline hover:text-gray-800">
                 Clear all
@@ -418,63 +486,8 @@ export default function ViewCustomersPage() {
             )}
           </div>
 
-          {filtersOpen && (
-            <Card className="mb-3">
-              <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
-                <div>
-                  <p className="mb-2 text-xs font-medium text-gray-500">Show</p>
-                  <div className="flex flex-wrap gap-2">
-                    {SEGMENTS.map((seg) => (
-                      <FilterChoice key={seg.value} active={segment === seg.value} title={seg.hint} count={segmentCounts[seg.value]} onClick={() => chooseSegment(seg.value)}>
-                        {seg.label}
-                      </FilterChoice>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <p className="mb-2 text-xs font-medium text-gray-500">Who</p>
-                  <div className="flex flex-wrap gap-2">
-                    {GENDERS.filter((g) => g.value !== "unspecified" || customers.some((c) => c.gender === "unspecified")).map((g) => (
-                      <FilterChoice key={g.value} active={gender === g.value} count={genderCounts[g.value]} onClick={() => setGender(g.value)}>
-                        {g.label}
-                      </FilterChoice>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <p className="mb-2 text-xs font-medium text-gray-500">Bought before</p>
-                  <div className="relative">
-                    <Input
-                      value={boughtText}
-                      onChange={(e) => setBoughtText(e.target.value)}
-                      placeholder="e.g. leggings"
-                      aria-label="Only people who bought this before"
-                      className="!py-1.5 !pr-8"
-                    />
-                    {boughtText && (
-                      <button type="button" onClick={() => setBoughtText("")} aria-label="Clear" className="absolute inset-y-0 right-2 flex items-center text-gray-400 hover:text-gray-700">
-                        <X size={14} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-              <div className="mt-4 flex items-center justify-between gap-3 border-t border-gray-100 pt-3">
-                {activeFilters > 0 ? (
-                  <button type="button" onClick={clearFilters} className="text-xs text-gray-500 underline hover:text-gray-800">
-                    Clear filters
-                  </button>
-                ) : (
-                  <span />
-                )}
-                <Button size="sm" variant="primary" onClick={() => setFiltersOpen(false)}>
-                  {activeFilters > 0 ? `Show ${segmentCustomers.length} ${segmentCustomers.length === 1 ? "person" : "people"}` : "Done"}
-                </Button>
-              </div>
-            </Card>
-          )}
-
           {boughtError && <p className="mb-3 text-xs text-red-600">{boughtError}</p>}
+          {searchBought && query.trim().length < 2 && <p className="mb-3 text-xs text-gray-500">Type an item, brand or category (2 letters or more) to see who bought it.</p>}
           {bought && (
             <p className="mb-3 text-xs text-gray-500">
               {bought.ids.size === 0
@@ -490,12 +503,12 @@ export default function ViewCustomersPage() {
               {contacts.length !== segmentCustomers.length && ` · ${contacts.length} with a phone number`}
             </p>
           )}
-          {segment === "owes" && segmentCustomers.length > 0 && (
+          {balanceSel.includes("owes") && segmentCustomers.length > 0 && (
             <p className="mb-3 text-xs text-gray-500">
               {segmentCustomers.length} customer{segmentCustomers.length === 1 ? " owes" : "s owe"} <span className="font-medium text-red-600">Rs. {owedTotal.toLocaleString()}</span> in total
             </p>
           )}
-          {segment === "credit" && segmentCustomers.length > 0 && (
+          {balanceSel.includes("credit") && segmentCustomers.length > 0 && (
             <p className="mb-3 text-xs text-gray-500">
               {segmentCustomers.length} customer{segmentCustomers.length === 1 ? " holds" : "s hold"} <span className="font-medium text-green-700">Rs. {creditTotal.toLocaleString()}</span> in store credit
             </p>
@@ -512,27 +525,33 @@ export default function ViewCustomersPage() {
           <EmptyState
             icon={Users}
             title={
-              query
+              query && !searchBought
                 ? "No matching customers"
-                : bought || gender !== "all"
-                ? "Nobody fits all of those filters"
-                : segment === "owes"
-                ? "Nobody owes you anything right now"
-                : segment === "credit"
-                ? "No customer has store credit"
-                : segment === "inactive"
-                ? "Everyone has ordered recently"
+                : bought || activeFilters > 0
+                ? activeFilters === 1 && !bought
+                  ? balanceSel[0] === "owes"
+                    ? "Nobody owes you anything right now"
+                    : balanceSel[0] === "credit"
+                    ? "No customer has store credit"
+                    : inactiveOnly
+                    ? "Everyone has ordered recently"
+                    : "Nobody fits that filter"
+                  : "Nobody fits all of those filters"
                 : "No customers yet"
             }
             actions={
-              query
+              query && !searchBought
                 ? [{ label: "Clear search", onClick: () => setQuery("") }]
-                : bought || gender !== "all"
+                : bought || activeFilters > 0
                 ? [
-                    { label: "Clear the filters", onClick: () => { setGender("all"); setBoughtText(""); setSegment("all"); } },
+                    {
+                      label: activeFilters === 1 && !bought ? "Show all customers" : "Clear the filters",
+                      onClick: () => {
+                        clearFilters();
+                        if (searchBought) setQuery("");
+                      },
+                    },
                   ]
-                : segment !== "all"
-                ? [{ label: "Show all customers", onClick: () => setSegment("all") }]
                 : [{ label: "Add customer", primary: true, onClick: () => navigate("/customers/add") }]
             }
           />
