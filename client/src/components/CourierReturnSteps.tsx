@@ -1,6 +1,7 @@
 import { ReactNode, useEffect, useMemo, useState } from "react";
 import { api, ApiRequestError } from "../lib/api";
 import { ReturnPickup, ReturnPickupItem } from "../lib/types";
+import { useReturnSplits } from "../lib/returnFlow";
 import { useDeliveryPartners } from "../lib/delivery";
 import { SHARE_OPTIONS } from "../lib/pickupShare";
 import { useAuth } from "../context/AuthContext";
@@ -218,10 +219,20 @@ export function InspectionReportModal({ pickup, onClose, onDone }: { pickup: Ret
 
   const takenBack = arrived.filter((i) => verdicts[i.sale_item_id] !== "not_per_policy");
   const itemsTotal = takenBack.reduce((sum, i) => sum + i.amount, 0);
+  // What part of those items was actually paid for — an order still owed (a credit order, or part paid) has less: what is only owed comes off
+  // the invoice, and only what was paid can go back. The server works it out, in the order the items will be taken back.
+  const splits = useReturnSplits(takenBack.map((i) => i.sale_item_id));
+  const splitRows = takenBack.map((i) => splits?.[i.sale_item_id]);
+  const known = splits !== null && splitRows.every(Boolean);
+  const owedCleared = known ? splitRows.reduce((sum, r) => sum + (r?.owed_cleared ?? 0), 0) : 0;
+  // What can go back before the delivery share: cash for a refund, paid value for store credit. Unknown (not loaded) = the whole price, as before.
+  const backable = known ? splitRows.reduce((sum, r) => sum + (resolution === "refund" ? r!.cash_refundable : r!.paid_part), 0) : itemsTotal;
   const sharePct = Number(share);
   const customerShare = Math.round((pickup.pickup_charge * sharePct) / 100);
-  const heldBack = Math.min(customerShare, itemsTotal);
-  const estimate = itemsTotal - heldBack;
+  const heldBack = Math.min(customerShare, backable);
+  // What is left of the customer's share once the refund can't cover it: added to what they owe.
+  const addedToOwed = known ? Math.max(0, customerShare - heldBack) : 0;
+  const estimate = backable - heldBack;
   const proposedNum = proposed === null ? estimate : Number(proposed) || 0;
   const overMax = proposedNum > estimate + 0.5;
   const lessThanItems = proposed !== null && proposedNum < estimate - 0.5;
@@ -318,7 +329,15 @@ export function InspectionReportModal({ pickup, onClose, onDone }: { pickup: Ret
                 </div>
                 <p className="mt-1.5 text-xs text-gray-500">
                   We paid {money(pickup.pickup_charge)} for the parcel.{" "}
-                  {sharePct === 0 ? "We carry all of it." : sharePct === 100 ? "It comes off what the customer is paid back." : `Half (${money(customerShare)}) comes off what the customer is paid back.`}
+                  {sharePct === 0
+                    ? "We carry all of it."
+                    : sharePct === 100
+                    ? known && backable <= 0.009
+                      ? "It is added to what the customer owes — nothing is paid back to take it from."
+                      : "It comes off what the customer is paid back."
+                    : known && backable <= 0.009
+                    ? `Half (${money(customerShare)}) is added to what the customer owes — nothing is paid back to take it from.`
+                    : `Half (${money(customerShare)}) comes off what the customer is paid back.`}
                 </p>
               </>
             ) : (
@@ -328,11 +347,20 @@ export function InspectionReportModal({ pickup, onClose, onDone }: { pickup: Ret
 
           <FormGroup>
             <Label>Proposed {creditNoun} (Rs.)</Label>
-            <MoneyInput value={proposed ?? String(estimate)} onChange={setProposed} disabled={takenBack.length === 0} aria-label="Proposed amount" />
+            <MoneyInput value={proposed ?? String(estimate)} onChange={setProposed} disabled={takenBack.length === 0 || (known && backable <= 0.009)} aria-label="Proposed amount" />
             <p className="mt-1 text-xs text-gray-500">
               Items {money(itemsTotal)}
-              {heldBack > 0 ? ` less ${money(heldBack)} delivery share` : ""} = {money(estimate)}. Shown for an order paid in full — a refund is never more than was actually paid.
+              {known && owedCleared > 0.009 ? `, of which ${money(owedCleared)} comes off what the customer still owes (nothing was paid for it)` : ""}
+              {heldBack > 0 ? ` less ${money(heldBack)} delivery share` : ""} = {money(estimate)} to pay back. A {creditNoun} is never more than was actually paid.
             </p>
+            {known && owedCleared > 0.009 && backable <= 0.009 && (
+              <p className="mt-1 text-xs text-gray-700">Nothing is paid back: the whole return cancels what they owe, so it completes without a refund.</p>
+            )}
+            {addedToOwed > 0.009 && (
+              <p className="mt-1 text-xs text-gray-700">
+                {money(addedToOwed)} of the customer's delivery share can't be taken off a refund, so it is added to what they owe.
+              </p>
+            )}
             {lessThanItems && <p className="mt-1 text-xs text-gray-600">{money(estimate - proposedNum)} is held back (for damage, say) — say why in the note.</p>}
             {takenBack.length === 0 && <p className="mt-1 text-xs text-gray-500">Nothing is being taken back, so nothing is paid.</p>}
           </FormGroup>

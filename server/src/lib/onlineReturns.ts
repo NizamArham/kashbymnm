@@ -72,6 +72,18 @@ if (!(db.prepare(`PRAGMA table_info(returns)`).all() as { name: string }[]).some
   if (!cols.includes("refund_method")) db.exec(`ALTER TABLE returns ADD COLUMN refund_method TEXT`);
   if (!cols.includes("refund_account_id")) db.exec(`ALTER TABLE returns ADD COLUMN refund_account_id INTEGER REFERENCES customer_bank_accounts(id)`);
 }
+{
+  // How much of a returned item's price came off what the customer still owed instead of being paid back (a credit order, or one part paid) —
+  // no money moved for it, so it is not a refund and not store credit.
+  if (!(db.prepare(`PRAGMA table_info(returns)`).all() as { name: string }[]).some((c) => c.name === "written_off")) {
+    db.exec(`ALTER TABLE returns ADD COLUMN written_off REAL NOT NULL DEFAULT 0`);
+  }
+  // The customer's share of a courier return's delivery charge that the refund couldn't cover (a credit order has nothing to hold it back
+  // from): it is added to what they owe instead.
+  if (!(db.prepare(`PRAGMA table_info(online_returns)`).all() as { name: string }[]).some((c) => c.name === "charged_to_customer")) {
+    db.exec(`ALTER TABLE online_returns ADD COLUMN charged_to_customer REAL NOT NULL DEFAULT 0`);
+  }
+}
 if (!(db.prepare(`PRAGMA table_info(returns)`).all() as { name: string }[]).some((c) => c.name === "inspection_deduction")) {
   // What an inspection held back from a refund / credit beyond the delivery share (a damaged piece, say) — the proposed amount it approved.
   db.exec(`ALTER TABLE returns ADD COLUMN inspection_deduction REAL NOT NULL DEFAULT 0`);

@@ -6,6 +6,7 @@ import { nextTransactionCode } from "../lib/codes";
 import { requireAuth, requireRole, AuthUser } from "../lib/auth";
 import { requireAdminOrApproval, recordedByAdmin, actorOf } from "../lib/approval";
 import { logAudit } from "../lib/auditLog";
+import { returnSplit, creditRedeemedOn, returnSplitsInOrder } from "../lib/returnSplit";
 import { LOYALTY_RATE_PERCENT } from "./sales";
 import { returnsInRange } from "../lib/returnedRevenue";
 import { exchangeQuoteSummary, itemInActiveExchange } from "../lib/exchanges";
@@ -71,7 +72,8 @@ const REQUEST_SELECT = `
          products.id as product_id,
          COALESCE(products.allow_returns, 0) as allow_returns,
          requester.name as requested_by_name, decider.name as decided_by_name,
-         returns.refund_amount,
+         returns.refund_amount, returns.written_off,
+         (SELECT COALESCE(SUM(sct.amount), 0) FROM store_credit_transactions sct WHERE sct.reference_id = return_requests.return_id AND sct.reason = 'return_exchange') AS credit_granted,
          EXISTS (SELECT 1 FROM cash_book cb WHERE cb.category = 'return_refund' AND cb.reference_id = return_requests.return_id) AS refund_paid
   FROM return_requests
   JOIN sale_items ON sale_items.id = return_requests.sale_item_id
@@ -84,13 +86,52 @@ const REQUEST_SELECT = `
   LEFT JOIN returns ON returns.id = return_requests.return_id
 `;
 
+// For a request still waiting: how its price splits between what the customer still owes (comes off the invoice, nothing paid back) and what
+// was paid for (what a refund or store credit can be). Same arithmetic approving it will use — see lib/returnSplit.ts.
+function withSplitPreview<T extends { id: number; status: string; sale_id: number; unit_price: number }>(rows: T[]): T[] {
+  const bySale = new Map<number, T[]>();
+  for (const r of rows) {
+    if (r.status !== "pending") continue;
+    const list = bySale.get(r.sale_id) ?? [];
+    list.push(r);
+    bySale.set(r.sale_id, list);
+  }
+  for (const [saleId, list] of bySale) {
+    list.sort((a, b) => a.id - b.id);
+    const splits = returnSplitsInOrder(saleId, list.map((r) => r.unit_price));
+    list.forEach((r, i) => Object.assign(r, { owed_cleared: splits[i].owedCleared, paid_part: splits[i].paidPart, cash_refundable: splits[i].cashRefundable }));
+  }
+  return rows;
+}
+
+// GET /api/returns/split?sale_item_ids=1,2,3 — the same split for items about to be returned, in the order they will be taken back (the form
+// shows it before anything is sent). Every item must be on the same sale.
+returnsRouter.get(
+  "/split",
+  asyncHandler(async (req, res) => {
+    const ids = String(req.query.sale_item_ids ?? "")
+      .split(",")
+      .map((x) => Number(x))
+      .filter((n) => Number.isInteger(n) && n > 0);
+    if (ids.length === 0) return res.json([]);
+    const items = db
+      .prepare(`SELECT id, sale_id, unit_price FROM sale_items WHERE id IN (${ids.map(() => "?").join(",")})`)
+      .all(...ids) as { id: number; sale_id: number; unit_price: number }[];
+    const byId = new Map(items.map((i) => [i.id, i]));
+    const ordered = ids.map((id) => byId.get(id)).filter((i): i is { id: number; sale_id: number; unit_price: number } => !!i);
+    if (new Set(ordered.map((i) => i.sale_id)).size > 1) throw new ApiError(400, "Those items are from different sales");
+    const splits = ordered.length ? returnSplitsInOrder(ordered[0].sale_id, ordered.map((i) => i.unit_price)) : [];
+    res.json(ordered.map((i, n) => ({ sale_item_id: i.id, unit_price: i.unit_price, owed_cleared: splits[n].owedCleared, paid_part: splits[n].paidPart, cash_refundable: splits[n].cashRefundable })));
+  })
+);
+
 // GET /api/returns/requests — full history, most recent first. Frontend
 // applies its own date-range/quick-filter on top of this.
 returnsRouter.get(
   "/requests",
   asyncHandler(async (_req, res) => {
-    const rows = db.prepare(`${REQUEST_SELECT} ORDER BY return_requests.id DESC`).all();
-    res.json(rows);
+    const rows = db.prepare(`${REQUEST_SELECT} ORDER BY return_requests.id DESC`).all() as any[];
+    res.json(withSplitPreview(rows));
   })
 );
 
@@ -99,8 +140,8 @@ returnsRouter.get(
 returnsRouter.get(
   "/requests/pending",
   asyncHandler(async (_req, res) => {
-    const rows = db.prepare(`${REQUEST_SELECT} WHERE return_requests.status = 'pending' ORDER BY return_requests.id ASC`).all();
-    res.json(rows);
+    const rows = db.prepare(`${REQUEST_SELECT} WHERE return_requests.status = 'pending' ORDER BY return_requests.id ASC`).all() as any[];
+    res.json(withSplitPreview(rows));
   })
 );
 
@@ -110,7 +151,7 @@ returnsRouter.get(
 returnsRouter.get(
   "/approvals",
   asyncHandler(async (_req, res) => {
-    const inStore = db.prepare(`${REQUEST_SELECT} WHERE return_requests.status = 'pending' ORDER BY return_requests.id ASC`).all();
+    const inStore = withSplitPreview(db.prepare(`${REQUEST_SELECT} WHERE return_requests.status = 'pending' ORDER BY return_requests.id ASC`).all() as any[]);
     const courier = listPickups("pending").reverse();
     const courierReports = listPickups("report").reverse();
     const exchangeRows = db
@@ -297,9 +338,10 @@ export type ReturnDecision = z.infer<typeof decisionInput>;
 // so a return means exactly the same thing whichever way it was started.
 // `deduct` is for a return that came back by delivery: that much of the refund (or store credit) is held back as the customer's share
 // of the delivery charge. It never takes more than the item was going to give back.
+// `keepFullCredit` is for a delivery exchange, which turns the old item's whole value into credit and spends it on the replacement straight away.
 // `deferPayout` is for a refund that is paid later (a courier return waiting for the customer's bank details): the return and its
 // refund amount are recorded now, but the cash book entry is made when the refund is actually paid.
-export function approveReturnRequest(requestId: number | string, user: AuthUser, data: ReturnDecision, opts?: { deduct?: number; deferPayout?: boolean; auto?: boolean }) {
+export function approveReturnRequest(requestId: number | string, user: AuthUser, data: ReturnDecision, opts?: { deduct?: number; deferPayout?: boolean; auto?: boolean; keepFullCredit?: boolean }) {
   const request = db.prepare(`SELECT * FROM return_requests WHERE id = ?`).get(requestId) as any;
   if (!request) throw new ApiError(404, "Return request not found");
   if (request.status !== "pending") throw new ApiError(409, `This request has already been ${request.status}.`);
@@ -337,23 +379,12 @@ export function approveReturnRequest(requestId: number | string, user: AuthUser,
     if (!account) throw new ApiError(400, "That bank account isn't on file for this customer");
   }
 
-  // A "refund" only ever gives back money that was actually collected —
-  // sales.amount_paid also counts store credit redeemed toward the sale,
-  // which was never real cash either (same distinction as the void
-  // handler), so that's excluded here too. Whatever fraction of the
-  // sale was never actually paid for is written off the customer's
-  // balance instead (see the sales.total adjustment below) rather than
-  // manufacturing a cash_book expense for money that was never received
-  // — this is exactly what a credit (unpaid) sale needs: the return
-  // reduces what they owe, it doesn't touch cash on hand at all.
-  const creditRedeemedRow = db
-    .prepare(
-      `SELECT COALESCE(SUM(-amount), 0) as total FROM store_credit_transactions
-       WHERE reference_id = ? AND reason = 'redemption'`
-    )
-    .get(saleItem.sale_id) as { total: number };
-  const realCashPaid = Math.max(0, saleItem.amount_paid - creditRedeemedRow.total);
-  const paidFraction = saleItem.total > 0 ? Math.min(1, realCashPaid / saleItem.total) : 0;
+  // A "refund" only ever gives back money that was actually collected, and what the customer still OWES is cleared first: a credit order
+  // (or a part-paid one) returns by cancelling that debt, not by paying anything out. Whatever part of the price only cancelled debt comes off
+  // the sale's total — no cash-book entry for money that never arrived. Store credit works the same way: it is only ever given for the part
+  // that was actually paid. See lib/returnSplit.ts. (sales.amount_paid also counts store credit redeemed toward the sale, which was never
+  // real cash either — same distinction as the void handler — so that part can't go back as cash.)
+  const split = returnSplit(saleItem.unit_price, saleItem, creditRedeemedOn(saleItem.sale_id));
 
   // An online COD order whose parcel never got delivered (packed and called back, refused
   // at the door) collected nothing: there's no money to hand back as credit. Turning it
@@ -368,13 +399,17 @@ export function approveReturnRequest(requestId: number | string, user: AuthUser,
     saleItem.payment_method !== "credit" &&
     !!parcel &&
     parcel.delivery_status !== "delivered" &&
-    realCashPaid <= 0.009;
+    split.cashRefundable <= 0.009;
   const resolution: string = parcelNeverCollected ? "refund" : request.resolution;
 
-  const refundBeforeShare = resolution === "refund" ? Math.round(saleItem.unit_price * paidFraction) : 0;
-  const pickupDeduction = Math.max(0, Math.min(opts?.deduct ?? 0, resolution === "refund" ? refundBeforeShare : saleItem.unit_price));
-  const refund_amount = refundBeforeShare - pickupDeduction;
-  const ledgerWriteOff = resolution === "refund" ? saleItem.unit_price - refundBeforeShare : 0;
+  // What goes back to the customer, before the delivery share is held back from it: cash for a refund, store credit for a credit return.
+  const giveBackBeforeShare =
+    resolution === "refund" ? split.cashRefundable : resolution === "store_credit_exchange" ? (opts?.keepFullCredit ? saleItem.unit_price : split.paidPart) : 0;
+  const pickupDeduction = Math.max(0, Math.min(opts?.deduct ?? 0, giveBackBeforeShare));
+  const refund_amount = resolution === "refund" ? giveBackBeforeShare - pickupDeduction : 0;
+  // What comes off the invoice instead of going back: the debt it cancels (and, for a cash refund, any part that was paid with store credit).
+  const ledgerWriteOff =
+    resolution === "refund" ? saleItem.unit_price - split.cashRefundable : resolution === "store_credit_exchange" && !opts?.keepFullCredit ? split.owedCleared : 0;
   // An immediate exchange creates no new sale for the replacement to
   // earn its own points on, so those stay; a refund or a store-credit
   // return doesn't (the replacement is a separate, new sale).
@@ -384,8 +419,8 @@ export function approveReturnRequest(requestId: number | string, user: AuthUser,
   const runApproval = db.transaction(() => {
     const returnResult = db
       .prepare(
-        `INSERT INTO returns (sale_item_id, condition, resolution, refund_amount, exchange_inventory_id, reason, pickup_deduction, refund_method, refund_account_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO returns (sale_item_id, condition, resolution, refund_amount, exchange_inventory_id, reason, pickup_deduction, written_off, refund_method, refund_account_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         request.sale_item_id,
@@ -395,6 +430,7 @@ export function approveReturnRequest(requestId: number | string, user: AuthUser,
         request.exchange_inventory_id,
         request.reason,
         pickupDeduction,
+        ledgerWriteOff,
         // A refund paid now says how; one paid later (a courier return) is filled in when it is paid.
         resolution === "refund" && refund_amount > 0 && !opts?.deferPayout ? refundMethod : null,
         resolution === "refund" && refund_amount > 0 && !opts?.deferPayout && refundMethod === "bank_transfer" ? data.bank_account_id ?? null : null
@@ -410,29 +446,21 @@ export function approveReturnRequest(requestId: number | string, user: AuthUser,
     const newStatus = isOpenBorrowed ? "removed" : request.condition === "clean" ? "available" : "damaged";
     db.prepare(`UPDATE inventory SET status = ? WHERE id = ?`).run(newStatus, saleItem.inventory_id);
 
-    if (resolution === "refund") {
-      if (refund_amount > 0 && !opts?.deferPayout) {
-        db.prepare(
-          `INSERT INTO cash_book (transaction_code, type, category, payment_method, reference_id, amount, notes)
-           VALUES (?, 'expense', 'return_refund', ?, ?, ?, ?)`
-        ).run(nextTransactionCode(), refundMethod, returnId, refund_amount, `Refund for invoice ${saleItem.invoice}`);
-      }
+    if (resolution === "refund" && refund_amount > 0 && !opts?.deferPayout) {
+      db.prepare(
+        `INSERT INTO cash_book (transaction_code, type, category, payment_method, reference_id, amount, notes)
+         VALUES (?, 'expense', 'return_refund', ?, ?, ?, ?)`
+      ).run(nextTransactionCode(), refundMethod, returnId, refund_amount, `Refund for invoice ${saleItem.invoice}`);
+    }
 
-      // The part of this item that was never actually paid for comes
-      // off the sale's total instead — the customer no longer owes for
-      // an item they no longer have, without inventing a cash outflow
-      // that never happened. Recompute payment_status too, since
-      // shrinking total can turn an unpaid/partial sale fully paid.
-      if (ledgerWriteOff > 0) {
-        const newTotal = saleItem.total - ledgerWriteOff;
-        const newPaymentStatus =
-          newTotal <= 0 || saleItem.amount_paid >= newTotal ? "paid" : saleItem.amount_paid > 0 ? "partial" : "unpaid";
-        db.prepare(`UPDATE sales SET total = ?, payment_status = ? WHERE id = ?`).run(
-          newTotal,
-          newPaymentStatus,
-          saleItem.sale_id
-        );
-      }
+    // The part of this item that was never actually paid for comes off the sale's total instead — the customer no longer owes for an item
+    // they no longer have, without inventing a cash outflow (or store credit) that never happened. Recompute payment_status too, since
+    // shrinking total can turn an unpaid/partial sale fully paid.
+    if (ledgerWriteOff > 0) {
+      const newTotal = saleItem.total - ledgerWriteOff;
+      const newPaymentStatus =
+        newTotal <= 0 || saleItem.amount_paid >= newTotal ? "paid" : saleItem.amount_paid > 0 ? "partial" : "unpaid";
+      db.prepare(`UPDATE sales SET total = ?, payment_status = ? WHERE id = ?`).run(newTotal, newPaymentStatus, saleItem.sale_id);
     }
 
     if (pointsToReverse > 0) {
@@ -459,7 +487,7 @@ export function approveReturnRequest(requestId: number | string, user: AuthUser,
       // source there (see customers.ts / the sale checkout flow).
       const expiryDays = request.credit_expiry_days ?? 45;
       const expiresAt = new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000).toISOString();
-      const creditAmount = saleItem.unit_price - pickupDeduction;
+      const creditAmount = giveBackBeforeShare - pickupDeduction;
       if (creditAmount > 0) {
         db.prepare(
           `INSERT INTO store_credit_transactions (customer_id, amount, reason, reference_id, notes, expires_at)
@@ -492,6 +520,8 @@ export function approveReturnRequest(requestId: number | string, user: AuthUser,
     `${opts?.auto ? "Auto-approved (recorded by admin)" : "Approved"} return on invoice ${saleItem.invoice} — ${
       parcelNeverCollected ? "parcel never collected, nothing paid: written off, no store credit" : request.resolution.replace(/_/g, " ")
     }${refund_amount > 0 ? ` (Rs. ${refund_amount.toLocaleString()} ${opts?.deferPayout ? "refund due" : "refunded"})` : ""}${
+      ledgerWriteOff > 0 && !parcelNeverCollected ? ` — Rs. ${ledgerWriteOff.toLocaleString()} taken off what the customer owes` : ""
+    }${
       pickupDeduction > 0 ? ` — Rs. ${pickupDeduction.toLocaleString()} held back for the delivery charge` : ""
     }`
   );

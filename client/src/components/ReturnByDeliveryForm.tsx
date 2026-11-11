@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, ApiRequestError } from "../lib/api";
 import { Sale } from "../lib/types";
-import { AUTO_APPROVED } from "../lib/returnFlow";
+import { AUTO_APPROVED, onlyCancelsDebt, useReturnSplits } from "../lib/returnFlow";
 import { useAuth } from "../context/AuthContext";
 import { NoReturnsWarning } from "./ReturnRequestPanel";
 import { Button, ErrorText, FormGroup, Label, ReasonPicker, SuccessText } from "./ui";
@@ -31,6 +31,15 @@ export default function ReturnByDeliveryForm({ sale, onBooked }: { sale: Sale; o
   const itemsTotal = chosen.reduce((sum, i) => sum + i.unit_price, 0);
   const noCustomer = !sale.customer_id;
   const noReturns = chosen.filter((i) => i.allow_returns === 0);
+  // An order still owed (a credit order, or part paid): what is only owed comes off the invoice, and only what was paid can go back.
+  const splits = useReturnSplits(chosen.map((i) => i.id));
+  const rows = chosen.map((i) => splits?.[i.id]);
+  const allOwed = chosen.length > 0 && rows.every((r) => onlyCancelsDebt(r));
+  const someOwed = !allOwed && rows.some((r) => (r?.owed_cleared ?? 0) > 0.009);
+  useEffect(() => {
+    if (allOwed && resolution !== "refund") setResolution("refund");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allOwed]);
 
   function toggle(id: number) {
     setTicked((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
@@ -97,7 +106,10 @@ export default function ReturnByDeliveryForm({ sale, onBooked }: { sale: Sale; o
 
       <div className="grid gap-5 md:grid-cols-2">
         <FormGroup>
-          <Label>The customer would like to be paid back as</Label>
+          <Label>{allOwed ? "What happens to what they owe" : "The customer would like to be paid back as"}</Label>
+          {allOwed ? (
+            <div className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-900">Reduce what they owe</div>
+          ) : (
           <div className="flex gap-2">
             {([
               ["refund", "Refund"],
@@ -116,7 +128,16 @@ export default function ReturnByDeliveryForm({ sale, onBooked }: { sale: Sale; o
               </button>
             ))}
           </div>
-          {noCustomer && <p className="mt-1 text-xs text-gray-500">This sale has no customer attached, so store credit isn't available.</p>}
+          )}
+          {noCustomer && !allOwed && <p className="mt-1 text-xs text-gray-500">This sale has no customer attached, so store credit isn't available.</p>}
+          {allOwed && (
+            <p className="mt-1 text-xs text-gray-500">
+              Nothing was paid for {chosen.length === 1 ? "this item" : "these items"}, so nothing is paid back and no store credit is given — {money(rows.reduce((sum, r) => sum + (r?.owed_cleared ?? 0), 0))} comes off what they owe. If the customer pays part of the delivery, that is added to what they owe.
+            </p>
+          )}
+          {someOwed && (
+            <p className="mt-1 text-xs text-gray-500">Part of this is still owed by the customer: that part comes off the invoice, and only the part that was paid is paid back.</p>
+          )}
           <p className="mt-1 text-xs text-gray-500">It's settled after the parcel has been inspected.</p>
         </FormGroup>
 

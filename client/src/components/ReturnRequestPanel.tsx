@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { AlertTriangle } from "lucide-react";
 import { api } from "../lib/api";
 import { ReturnRequest } from "../lib/types";
-import { decidedLine } from "../lib/returnFlow";
+import { decidedLine, onlyCancelsDebt, partlyOwed } from "../lib/returnFlow";
 import { useAdminApproval } from "./AdminApproval";
 import DecisionBox from "./DecisionBox";
 import RefundMethodPicker, { useCustomerBankAccounts } from "./RefundMethodPicker";
@@ -16,19 +16,21 @@ export default function ReturnRequestPanel({ r, onChanged }: { r: ReturnRequest;
   const pending = r.status === "pending";
   const [method, setMethod] = useState<"cash" | "bank_transfer">("cash");
   const [accountId, setAccountId] = useState("");
-  const { accounts, defaultId } = useCustomerBankAccounts(r.customer_id, pending && r.resolution === "refund" && method === "bank_transfer");
+  // An item that was never paid for (a credit order) only cancels what is owed: nothing is paid back, so there is no refund method to choose.
+  const debtOnly = pending && onlyCancelsDebt(r);
+  const { accounts, defaultId } = useCustomerBankAccounts(r.customer_id, pending && r.resolution === "refund" && !debtOnly && method === "bank_transfer");
   useEffect(() => {
     if (method === "bank_transfer") setAccountId((cur) => cur || defaultId);
   }, [method, defaultId]);
 
   async function approve(reason: string) {
-    if (r.resolution === "refund" && method === "bank_transfer" && !accountId) {
+    if (r.resolution === "refund" && !debtOnly && method === "bank_transfer" && !accountId) {
       throw new Error("Select which of the customer's bank accounts to refund into");
     }
     const decision = {
       decision_reason: reason || undefined,
-      payment_method: r.resolution === "refund" ? method : undefined,
-      bank_account_id: r.resolution === "refund" && method === "bank_transfer" ? parseInt(accountId, 10) : undefined,
+      payment_method: r.resolution === "refund" && !debtOnly ? method : undefined,
+      bank_account_id: r.resolution === "refund" && !debtOnly && method === "bank_transfer" ? parseInt(accountId, 10) : undefined,
     };
     await runWithApproval((approval) => api.put(`/returns/requests/${r.id}/approve`, decision, { approval }));
     onChanged();
@@ -56,7 +58,7 @@ export default function ReturnRequestPanel({ r, onChanged }: { r: ReturnRequest;
         </div>
         <div>
           <p className="text-xs text-gray-500">Resolution</p>
-          <p className="capitalize text-gray-900">{r.resolution.replace(/_/g, " ")}</p>
+          <p className={`${debtOnly ? "" : "capitalize "}text-gray-900`}>{debtOnly ? "Reduce what they owe" : r.resolution.replace(/_/g, " ")}</p>
         </div>
         <div>
           <p className="text-xs text-gray-500">Requested by</p>
@@ -68,6 +70,24 @@ export default function ReturnRequestPanel({ r, onChanged }: { r: ReturnRequest;
         <p className="mb-1 text-xs text-gray-500">Reason for return</p>
         <p className="text-sm text-gray-900">{r.reason}</p>
       </div>
+
+      {pending && (onlyCancelsDebt(r) || partlyOwed(r)) && (
+        <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
+          {onlyCancelsDebt(r) ? (
+            <>
+              <p className="font-medium text-gray-900">Rs. {(r.owed_cleared ?? 0).toLocaleString()} comes off what the customer owes on {r.invoice}.</p>
+              <p className="mt-0.5 text-gray-500">Nothing was paid for it, so nothing is paid back and no store credit is given.</p>
+            </>
+          ) : (
+            <>
+              <p className="font-medium text-gray-900">Rs. {(r.owed_cleared ?? 0).toLocaleString()} comes off what the customer still owes; Rs. {(r.paid_part ?? 0).toLocaleString()} was paid for.</p>
+              <p className="mt-0.5 text-gray-500">
+                Only the paid part goes back, as {r.resolution === "refund" ? "a refund" : "store credit"}.
+              </p>
+            </>
+          )}
+        </div>
+      )}
 
       {r.is_admin_override === 1 && pending && <NoReturnsWarning />}
 
@@ -86,16 +106,22 @@ export default function ReturnRequestPanel({ r, onChanged }: { r: ReturnRequest;
           {r.status === "approved" && r.resolution === "refund" && (
             <div>
               <p className="text-xs text-gray-500">Refund amount</p>
-              <p className="font-semibold text-gray-900">Rs. {(r.refund_amount ?? 0).toLocaleString()}</p>
+              <p className="font-semibold text-gray-900">{(r.refund_amount ?? 0) > 0 ? `Rs. ${(r.refund_amount ?? 0).toLocaleString()}` : "Nothing paid back"}</p>
             </div>
           )}
           {r.status === "approved" && r.resolution === "store_credit_exchange" && (
             <div>
               <p className="text-xs text-gray-500">Store credit granted</p>
               <p className="font-semibold text-gray-900">
-                Rs. {r.unit_price.toLocaleString()}
-                {r.credit_expiry_days ? ` — expires in ${r.credit_expiry_days} days` : ""}
+                {(r.credit_granted ?? r.unit_price) > 0 ? `Rs. ${(r.credit_granted ?? r.unit_price).toLocaleString()}` : "None — nothing was paid for it"}
+                {(r.credit_granted ?? r.unit_price) > 0 && r.credit_expiry_days ? ` — expires in ${r.credit_expiry_days} days` : ""}
               </p>
+            </div>
+          )}
+          {r.status === "approved" && (r.written_off ?? 0) > 0 && (
+            <div>
+              <p className="text-xs text-gray-500">Came off what they owe</p>
+              <p className="font-semibold text-gray-900">Rs. {(r.written_off ?? 0).toLocaleString()}</p>
             </div>
           )}
         </div>
@@ -106,7 +132,7 @@ export default function ReturnRequestPanel({ r, onChanged }: { r: ReturnRequest;
           <DecisionBox
             reasonRequired={r.is_admin_override === 1}
             approveExtras={
-              r.resolution === "refund" ? (
+              r.resolution === "refund" && !debtOnly ? (
                 <RefundMethodPicker method={method} onMethod={setMethod} accounts={accounts} accountId={accountId} onAccount={setAccountId} name={`refund-account-${r.id}`} />
               ) : undefined
             }

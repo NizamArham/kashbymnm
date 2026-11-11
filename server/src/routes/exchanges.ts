@@ -3,9 +3,9 @@ import { z } from "zod";
 import { db } from "../db/connection";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth } from "../lib/auth";
-import { approveIfNeeded, arrivalApprovalReasons, actorOf } from "../lib/approval";
+import { approveIfNeeded, arrivalApprovalReasons, actorOf, requireAdminOrApproval } from "../lib/approval";
 import { logAudit } from "../lib/auditLog";
-import { eligibleExchangeItems, exchangeById, exchangeItems } from "../lib/exchanges";
+import { advanceAvailable, eligibleExchangeItems, exchangeById, exchangeItems } from "../lib/exchanges";
 import { refundStoreCredit } from "../lib/storeCreditRefund";
 import { approveReturnRequest } from "./returns";
 import { addPickupCharge } from "./courierReconciliation";
@@ -47,6 +47,43 @@ exchangesRouter.get(
       )
       .all() as any[];
     res.json(rows.map((r) => ({ ...r, items: exchangeItems(r.id) })));
+  })
+);
+
+// POST /api/exchanges/:id/advance-credit — give the customer, now, the store credit that the old items will give when they arrive: the part of
+// their value that is more than what is still owed on the replacement order (for instance when a replacement item was returned in the
+// meantime). It is the shop's call to trust that the items were sent, so it is an admin's (or an admin's password at the till). When the old
+// items are received later, this amount is taken off the credit they give, so it is never given twice.
+exchangesRouter.post(
+  "/:id/advance-credit",
+  requireAdminOrApproval("Giving store credit before the old items arrive"),
+  asyncHandler(async (req, res) => {
+    const exchange = exchangeById(req.params.id) as any;
+    if (!exchange) throw new ApiError(404, "Exchange not found");
+    if (exchange.status !== "awaiting_pickup") throw new ApiError(409, `This exchange is already ${exchange.status.replace(/_/g, " ")}.`);
+    const sale = db.prepare(`SELECT id, invoice, customer_id, is_voided FROM sales WHERE id = ?`).get(exchange.new_sale_id) as any;
+    if (!sale || sale.is_voided) throw new ApiError(409, "The replacement invoice was voided.");
+    if (!sale.customer_id) throw new ApiError(400, "This sale has no customer to give store credit to.");
+    const amount = advanceAvailable(exchange);
+    if (amount <= 0.009) {
+      throw new ApiError(409, "There's nothing to give yet: what is still owed on the replacement order is at least the value of the old items.");
+    }
+    db.transaction(() => {
+      db.prepare(`INSERT INTO store_credit_transactions (customer_id, amount, reason, reference_id, notes) VALUES (?, ?, 'manual_adjustment', NULL, ?)`).run(
+        sale.customer_id,
+        amount,
+        `Advance on exchange ${sale.invoice} — the old items are still with the courier; this is taken off when they arrive`
+      );
+      db.prepare(`UPDATE online_exchanges SET advance_credit = advance_credit + ? WHERE id = ?`).run(amount, exchange.id);
+    })();
+    logAudit(
+      actorOf(req),
+      "store_credit_grant",
+      "customer",
+      sale.customer_id,
+      `Rs. ${amount.toLocaleString()} store credit given in advance on exchange ${sale.invoice} — the old items haven't arrived yet`
+    );
+    res.json(exchangeById(exchange.id));
   })
 );
 
@@ -118,9 +155,10 @@ exchangesRouter.put(
              VALUES (?, 1, ?, 'store_credit_exchange', 45, ?, ?, 0)`
           )
           .run(item.old_sale_item_id, o.outcome, `Online exchange — replacement invoice ${sale.invoice}`, actorOf(req).id);
+        // An exchange spends the old item's whole value on the replacement straight away, so it keeps giving the full value as credit.
         const approved = approveReturnRequest(request.lastInsertRowid as number, actorOf(req), {
           decision_reason: "Collected by the courier with the replacement delivery",
-        }) as any;
+        }, { keepFullCredit: true }) as any;
 
         // This item's value is now store credit — its part goes onto the replacement.
         const current = db.prepare(`SELECT amount_paid, total FROM sales WHERE id = ?`).get(sale.id) as { amount_paid: number; total: number };
@@ -140,6 +178,19 @@ exchangesRouter.put(
           approved.return_id ?? null,
           item.id
         );
+      }
+
+      // Credit already given in advance (before the old items arrived) is taken off what they give now, so it is never given twice.
+      const advance = (db.prepare(`SELECT advance_credit FROM online_exchanges WHERE id = ?`).get(exchange.id) as { advance_credit: number }).advance_credit;
+      if (advance > 0.009 && leftoverCredit > 0.009) {
+        const offset = Math.round(Math.min(advance, leftoverCredit) * 100) / 100;
+        db.prepare(`INSERT INTO store_credit_transactions (customer_id, amount, reason, reference_id, notes) VALUES (?, ?, 'manual_adjustment', NULL, ?)`).run(
+          sale.customer_id,
+          -offset,
+          `Advance already given on exchange ${sale.invoice} — taken off now that the old items have arrived`
+        );
+        db.prepare(`UPDATE online_exchanges SET advance_credit = advance_credit - ? WHERE id = ?`).run(offset, exchange.id);
+        leftoverCredit -= offset;
       }
 
       // The difference, if the replacement cost less: paid out when asked, else it

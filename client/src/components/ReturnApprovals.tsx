@@ -2,7 +2,7 @@ import { useState } from "react";
 import { CheckCircle2, ChevronDown, ChevronRight } from "lucide-react";
 import { api } from "../lib/api";
 import { ReturnApprovals, ReturnPickup, ReturnRequest } from "../lib/types";
-import { FLOW_LABEL, courierStage } from "../lib/returnFlow";
+import { FLOW_LABEL, courierStage, useReturnSplits } from "../lib/returnFlow";
 import { useAdminApproval } from "./AdminApproval";
 import DecisionBox from "./DecisionBox";
 import ReturnRequestPanel, { NoReturnsWarning } from "./ReturnRequestPanel";
@@ -221,9 +221,16 @@ function CourierReportPanel({ p, onChanged }: { p: ReturnPickup; onChanged: () =
   const arrived = p.items.filter((i) => i.status === "awaiting");
   const taken = arrived.filter((i) => i.verdict === "clean" || i.verdict === "damaged" || i.verdict === "missing_parts");
   const itemsTotal = taken.reduce((sum, i) => sum + i.amount, 0);
+  // Only what was actually paid for can go back: an order still owed (a credit order, or part paid) cancels what is owed first.
+  const splits = useReturnSplits(taken.map((i) => i.sale_item_id));
+  const rows = taken.map((i) => splits?.[i.sale_item_id]);
+  const known = splits !== null && rows.every(Boolean);
+  const owedCleared = known ? rows.reduce((sum, r) => sum + (r?.owed_cleared ?? 0), 0) : 0;
+  const backable = known ? rows.reduce((sum, r) => sum + (p.resolution === "refund" ? r!.cash_refundable : r!.paid_part), 0) : itemsTotal;
   const share = Math.round((p.pickup_charge * p.customer_share_pct) / 100);
-  const heldBack = Math.min(share, itemsTotal);
-  const estimate = itemsTotal - heldBack;
+  const heldBack = Math.min(share, backable);
+  const addedToOwed = known ? Math.max(0, share - heldBack) : 0;
+  const estimate = backable - heldBack;
   const payBack = p.report_proposed ?? estimate;
 
   async function approve(reason: string) {
@@ -265,8 +272,12 @@ function CourierReportPanel({ p, onChanged }: { p: ReturnPickup; onChanged: () =
           {p.pickup_charge <= 0 ? "Nothing to share" : p.customer_share_pct === 0 ? "We pay" : p.customer_share_pct === 100 ? `Customer pays (${money(share)} comes off)` : `Half and half (${money(share)} comes off)`}
         </Fact>
         <Fact label={p.resolution === "refund" ? "Proposed refund" : "Proposed store credit"}>
-          <span className="font-semibold">{money(payBack)}</span>
+          <span className="font-semibold">{known && backable <= 0.009 ? "Nothing paid back" : money(payBack)}</span>
           {p.report_proposed !== null && p.report_proposed < estimate - 0.5 && <span className="text-xs text-gray-500"> (items {money(estimate)} — {money(estimate - p.report_proposed)} held back)</span>}
+          {known && owedCleared > 0.009 && (
+            <span className="block text-xs text-gray-500">{money(owedCleared)} comes off what the customer owes — nothing was paid for it.</span>
+          )}
+          {addedToOwed > 0.009 && <span className="block text-xs text-gray-500">{money(addedToOwed)} delivery share is added to what they owe.</span>}
         </Fact>
         <Fact label="Report by">
           {p.report_by_name ?? "—"}

@@ -76,6 +76,11 @@ if (!exchangeColumns.some((c) => c.name === "pickup_booked")) {
   // Set once the courier's pickup charge has been booked against them.
   db.exec(`ALTER TABLE online_exchanges ADD COLUMN pickup_booked INTEGER NOT NULL DEFAULT 0`);
 }
+if (!(db.prepare(`PRAGMA table_info(online_exchanges)`).all() as { name: string }[]).some((c) => c.name === "advance_credit")) {
+  // Store credit already handed to the customer before the old items arrived — the part of their value that is more than what is still owed on
+  // the replacement order. Taken off again from the credit the old items give when they are received, so it is never given twice.
+  db.exec(`ALTER TABLE online_exchanges ADD COLUMN advance_credit REAL NOT NULL DEFAULT 0`);
+}
 if (!(db.prepare(`PRAGMA table_info(deliveries)`).all() as { name: string }[]).some((c) => c.name === "pickup_prepaid")) {
   // The part of the customer's pickup-charge share that was paid up front (a prepaid
   // exchange) instead of at the door — kept apart from fee_paid (the delivery fee) so
@@ -144,8 +149,19 @@ export function exchangeItems(exchangeId: number): ExchangeItemRow[] {
   return db.prepare(`${ITEMS_SQL} WHERE ei.exchange_id = ? ORDER BY ei.id`).all(exchangeId) as ExchangeItemRow[];
 }
 
+// While the old items are still on their way, how much of their value is MORE than what the replacement order still owes — the part that will
+// become store credit when they arrive, and that can be given now if the shop is sure the customer has sent them. Less anything already given.
+export function advanceAvailable(row: { id: number; new_sale_id: number; status: string; advance_credit?: number | null }): number {
+  if (row.status !== "awaiting_pickup") return 0;
+  const pending = (db.prepare(`SELECT COALESCE(SUM(applied_share), 0) AS v FROM online_exchange_items WHERE exchange_id = ? AND status = 'awaiting'`).get(row.id) as { v: number }).v;
+  const sale = db.prepare(`SELECT total, amount_paid FROM sales WHERE id = ?`).get(row.new_sale_id) as { total: number; amount_paid: number } | undefined;
+  if (!sale) return 0;
+  const owedNow = Math.max(0, sale.total - sale.amount_paid);
+  return Math.round(Math.max(0, pending - owedNow - (row.advance_credit ?? 0)) * 100) / 100;
+}
+
 function withItems(row: any) {
-  return row ? { ...row, items: exchangeItems(row.id) } : null;
+  return row ? { ...row, items: exchangeItems(row.id), advance_available: advanceAvailable(row) } : null;
 }
 
 export function exchangeById(id: number | string) {

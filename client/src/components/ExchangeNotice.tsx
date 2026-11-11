@@ -47,6 +47,25 @@ export default function ExchangeNotice({
   className?: string;
 }) {
   const [receiving, setReceiving] = useState(false);
+  // Store credit the old items will give that can be handed over now (their value beyond what the replacement still owes).
+  const { runWithApproval } = useAdminApproval();
+  const [confirmingAdvance, setConfirmingAdvance] = useState(false);
+  const [advanceBusy, setAdvanceBusy] = useState(false);
+  const [advanceError, setAdvanceError] = useState<string | null>(null);
+  const advance = exchange.status === "awaiting_pickup" ? exchange.advance_available ?? 0 : 0;
+  async function giveAdvance() {
+    setAdvanceBusy(true);
+    setAdvanceError(null);
+    try {
+      await runWithApproval((approval) => api.post(`/exchanges/${exchange.id}/advance-credit`, {}, { approval }));
+      setConfirmingAdvance(false);
+      onChanged?.();
+    } catch (err) {
+      setAdvanceError(err instanceof ApiRequestError ? err.message : "That didn't work — try again");
+    } finally {
+      setAdvanceBusy(false);
+    }
+  }
 
   const status = STATUS[exchange.status];
   const stage = exchangeStage({ status: exchange.status, delivery_status: deliveryStatus ?? (delivered ? "delivered" : null) });
@@ -101,6 +120,37 @@ export default function ExchangeNotice({
             ? " The new items are back in stock. Void this invoice to clear what's owed on it — or to refund what the customer already paid."
             : ""}
         </p>
+      )}
+
+      {canAct && advance > 0.009 && (
+        <div className="mt-2.5 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
+          <p>
+            The old items are worth more than what is still owed on the new order: <span className="font-medium text-gray-900">{money(advance)}</span> of their value becomes store credit when they arrive.
+          </p>
+          {!confirmingAdvance ? (
+            <Button className="mt-1.5" onClick={() => setConfirmingAdvance(true)}>
+              Give {money(advance)} store credit now
+            </Button>
+          ) : (
+            <div className="mt-1.5 space-y-1.5">
+              <p className="text-gray-600">
+                The old items haven't arrived yet. When they do, this {money(advance)} is taken off the credit they give, so it is never given twice.
+              </p>
+              <div className="flex gap-2">
+                <Button variant="primary" onClick={giveAdvance} disabled={advanceBusy}>
+                  {advanceBusy ? "Giving…" : "Yes, give it now"}
+                </Button>
+                <Button onClick={() => setConfirmingAdvance(false)} disabled={advanceBusy}>
+                  Not now
+                </Button>
+              </div>
+            </div>
+          )}
+          {advanceError && <p className="mt-1 text-red-600">{advanceError}</p>}
+        </div>
+      )}
+      {exchange.status === "awaiting_pickup" && (exchange.advance_credit ?? 0) > 0.009 && (
+        <p className="mt-1.5 text-xs text-gray-500">{money(exchange.advance_credit ?? 0)} store credit was already given in advance; it is taken off when the old items arrive.</p>
       )}
 
       {canAct && exchange.status === "awaiting_pickup" && delivered && (

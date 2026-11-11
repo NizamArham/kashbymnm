@@ -8,7 +8,9 @@
 // Declined and Cancelled end any of them. A request an admin recorded themselves skips Pending and says AUTO_APPROVED where the
 // decision is shown.
 
-import type { ApprovalState, ReturnPickup, ReturnRequest, SaleExchange } from "./types";
+import { useEffect, useState } from "react";
+import type { ApprovalState, ReturnPickup, ReturnRequest, ReturnSplitRow, SaleExchange } from "./types";
+import { api } from "./api";
 import { formatDate } from "./dates";
 
 export const AUTO_APPROVED = "Auto-approved (recorded by admin)";
@@ -102,4 +104,37 @@ export function decidedLine(auto: boolean, status: "approved" | "declined", by: 
   const when = at ? ` · ${formatDate(at)}` : "";
   if (auto) return `${AUTO_APPROVED}${by ? ` — ${by}` : ""}${when}`;
   return `${status === "approved" ? "Approved" : "Declined"} by ${by ?? "an admin"}${when}`;
+}
+
+// The split for items about to be returned, in the order they will be taken back (one sale's items). See ReturnSplitRow.
+export function fetchReturnSplit(saleItemIds: number[]): Promise<ReturnSplitRow[]> {
+  if (saleItemIds.length === 0) return Promise.resolve([]);
+  return api.get<ReturnSplitRow[]>(`/returns/split?sale_item_ids=${saleItemIds.join(",")}`);
+}
+
+// An item whose whole price is still owed — nothing was paid for it — can only cancel that debt: no cash back, no store credit.
+type SplitLike = { owed_cleared?: number; paid_part?: number } | undefined | null;
+export const onlyCancelsDebt = (s: SplitLike) => !!s && (s.owed_cleared ?? 0) > 0.009 && (s.paid_part ?? 0) <= 0.009;
+// Part of it is still owed and part was paid for.
+export const partlyOwed = (s: SplitLike) => !!s && (s.owed_cleared ?? 0) > 0.009 && (s.paid_part ?? 0) > 0.009;
+
+// The same split as a hook: null until it has loaded (or if it couldn't), else the rows by sale item id. `ids` are the items about to be taken back, in order.
+export function useReturnSplits(ids: number[]): Record<number, ReturnSplitRow> | null {
+  const key = ids.join(",");
+  const [splits, setSplits] = useState<Record<number, ReturnSplitRow> | null>(ids.length === 0 ? {} : null);
+  useEffect(() => {
+    if (ids.length === 0) {
+      setSplits({});
+      return;
+    }
+    let live = true;
+    fetchReturnSplit(ids)
+      .then((rows) => live && setSplits(Object.fromEntries(rows.map((r) => [r.sale_item_id, r]))))
+      .catch(() => live && setSplits(null));
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  return splits;
 }

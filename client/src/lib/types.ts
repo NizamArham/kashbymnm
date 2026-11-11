@@ -268,6 +268,10 @@ export interface SaleExchange {
   item_condition: "clean" | "damaged" | null;
   note: string | null;
   closed_at: string | null;
+  // While the old items are still on their way: how much of their value is more than what the replacement order still owes — store credit
+  // that can be given now instead of when they arrive — and how much has been given already.
+  advance_available?: number;
+  advance_credit?: number;
 }
 
 // A quotation for an exchange by delivery: what was quoted and what the customer has to pay to confirm it.
@@ -490,6 +494,9 @@ export interface Sale {
   // The on-demand fare, when known — null/absent while the order is on hold waiting for it.
   delivery_actual_fare?: number | null;
   delivery_cod_amount?: number | null;
+  // What came off the total because returned items had not been paid for, and the delivery share a courier return added to it.
+  returned_off?: number;
+  return_charge_added?: number;
   // How much of that delivery fee was already paid at checkout.
   delivery_fee_paid?: number | null;
   // For an exchange paid up front: the part of the customer's pickup-charge share that was.
@@ -606,6 +613,24 @@ export interface ReturnRequest {
   refund_amount?: number | null;
   // 1 once a refund for this return has actually been paid (it is in the cash book) — only then is there a payment slip to print.
   refund_paid?: number;
+  // How much of the item's price came off what the customer still owed instead of being paid back (approved returns).
+  written_off?: number | null;
+  // The store credit actually given for it (approved store-credit returns) — only for the part that was paid for.
+  credit_granted?: number;
+  // For a request still waiting: how the price splits between what is only owed (comes off the invoice, nothing paid back) and what was paid for.
+  owed_cleared?: number;
+  paid_part?: number;
+  cash_refundable?: number;
+}
+
+// How an item's price splits when it is returned: the part that only cancels what the customer still owes (nothing was paid for it, so there
+// is nothing to pay back) and the part that was actually paid for — what a refund or store credit can be.
+export interface ReturnSplitRow {
+  sale_item_id: number;
+  unit_price: number;
+  owed_cleared: number;
+  paid_part: number;
+  cash_refundable: number;
 }
 
 export type DeliveryStatus = "pending" | "packed" | "dispatched" | "delivered" | "returned" | "cancelled";

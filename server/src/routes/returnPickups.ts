@@ -343,6 +343,7 @@ function executeReport(pickupId: number, actor: AuthUser, opts: { auto: boolean;
   const waiting = pickup.items.filter((i: any) => i.status === "awaiting");
   let pool = Math.max(0, customerShareOf(pickup.pickup_charge, pickup.customer_share_pct) - pickup.share_used);
   let heldBack = 0;
+  let charged = 0;
   let refundDue = 0;
   let creditGiven = 0;
   let took = 0;
@@ -381,7 +382,11 @@ function executeReport(pickupId: number, actor: AuthUser, opts: { auto: boolean;
       pool -= ret.pickup_deduction;
       heldBack += ret.pickup_deduction;
       if (ret.resolution === "refund") refundDue += ret.refund_amount;
-      else creditGiven += item.amount - ret.pickup_deduction;
+      else {
+        // The credit actually granted: only for the part that was paid for (a credit order has none — it comes off what they owe).
+        const granted = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS amount FROM store_credit_transactions WHERE reference_id = ? AND reason = 'return_exchange'`).get(ret.id) as { amount: number };
+        creditGiven += granted.amount;
+      }
       took++;
       db.prepare(`UPDATE online_return_items SET status = 'received', item_condition = ?, return_id = ?, deduction = ? WHERE id = ?`).run(
         item.verdict === "clean" ? "clean" : "damaged",
@@ -389,6 +394,21 @@ function executeReport(pickupId: number, actor: AuthUser, opts: { auto: boolean;
         ret.pickup_deduction,
         item.id
       );
+    }
+    // The customer's share of the delivery charge is held back from what they are paid back. When that can't cover all of it — a credit order
+    // has nothing paid to hold it back from — what is left is added to what they owe instead, so the shop doesn't quietly pay it.
+    if (took > 0 && pool > 0.009) {
+      const charge = Math.round(pool * 100) / 100;
+      const sale = db.prepare(`SELECT total, amount_paid FROM sales WHERE id = ?`).get(pickup.sale_id) as { total: number; amount_paid: number };
+      const newTotal = sale.total + charge;
+      db.prepare(`UPDATE sales SET total = ?, payment_status = ? WHERE id = ?`).run(
+        newTotal,
+        sale.amount_paid >= newTotal ? "paid" : sale.amount_paid > 0 ? "partial" : "unpaid",
+        pickup.sale_id
+      );
+      db.prepare(`UPDATE online_returns SET charged_to_customer = charged_to_customer + ? WHERE id = ?`).run(charge, pickup.id);
+      charged = charge;
+      pool -= charge;
     }
     // The inspection may propose paying back less than everything the items come to (a damaged piece, say): the difference is held back
     // from the refund / credit. More than the items allow is refused.
@@ -425,10 +445,10 @@ function executeReport(pickupId: number, actor: AuthUser, opts: { auto: boolean;
     const finished = !(pickup.resolution === "refund" && refundDue > 0);
     db.prepare(
       `UPDATE online_returns
-       SET share_used = share_used + ?, status = ?, stage = ?, report_status = 'approved', report_decided_by = ?, report_decided_at = ${NOW},
+       SET share_used = share_used + ? + ?, status = ?, stage = ?, report_status = 'approved', report_decided_by = ?, report_decided_at = ${NOW},
            report_decision_reason = ?, report_auto_approved = ?, refund_due = ?, closed_at = CASE WHEN ? = 1 THEN ${NOW} ELSE NULL END
        WHERE id = ?`
-    ).run(heldBack, took > 0 ? "received" : "not_returned", finished ? "completed" : "refund_due", actor.id, opts.reason ?? null, opts.auto ? 1 : 0, refundDue, finished ? 1 : 0, pickup.id);
+    ).run(heldBack, charged, took > 0 ? "received" : "not_returned", finished ? "completed" : "refund_due", actor.id, opts.reason ?? null, opts.auto ? 1 : 0, refundDue, finished ? 1 : 0, pickup.id);
   })();
 
   logAudit(
@@ -440,7 +460,7 @@ function executeReport(pickupId: number, actor: AuthUser, opts: { auto: boolean;
       waiting.length - took ? `, ${waiting.length - took} not` : ""
     }${refundDue > 0 ? `; Rs. ${refundDue.toLocaleString()} refund due` : ""}${creditGiven > 0 ? `; Rs. ${creditGiven.toLocaleString()} store credit granted` : ""}${
       heldBack > 0 ? `; Rs. ${heldBack.toLocaleString()} held back for the delivery charge` : ""
-    }`
+    }${charged > 0 ? `; Rs. ${charged.toLocaleString()} delivery charge added to what the customer owes` : ""}`
   );
 }
 

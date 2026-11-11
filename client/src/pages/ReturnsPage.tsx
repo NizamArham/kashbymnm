@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { PageLoader } from "../components/Loader";
 import { RotateCcw, AlertTriangle, ChevronDown, ChevronRight, Download, Search } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
-import { Sale, ReturnRequest, ReturnApprovals, Customer } from "../lib/types";
+import { Sale, ReturnRequest, ReturnApprovals, Customer, ReturnSplitRow } from "../lib/types";
 import { findCustomers, CASHIER_SEARCH_MIN_CHARS } from "../lib/customerSearch";
 import { countOpenPickups } from "../lib/returnsCounts";
 import { useAuth } from "../context/AuthContext";
@@ -14,7 +14,7 @@ import ReturnApprovalList from "../components/ReturnApprovals";
 import ReturnRequestPanel from "../components/ReturnRequestPanel";
 import { RefundSlipMenu } from "../components/RefundSlipButton";
 import RefundMethodPicker, { useCustomerBankAccounts } from "../components/RefundMethodPicker";
-import { AUTO_APPROVED, FLOW_LABEL, inStoreStage } from "../lib/returnFlow";
+import { AUTO_APPROVED, FLOW_LABEL, inStoreStage, fetchReturnSplit, onlyCancelsDebt, partlyOwed } from "../lib/returnFlow";
 import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
 import { useSortableData } from "../lib/useSortableData";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
@@ -193,7 +193,34 @@ function RequestReturnTab({ onRequested, waiting, onGoTo }: { onRequested: () =>
 
   const [selectedItemIds, setSelectedItemIds] = useState<Set<number>>(new Set());
   const [lineConfigs, setLineConfigs] = useState<Record<number, ReturnLineConfig>>({});
-  const hasRefundLine = Array.from(selectedItemIds).some((id) => lineConfigs[id]?.resolution === "refund");
+  // How each ticked item's price splits between what the customer still owes (comes off the invoice — nothing paid back, no store credit) and
+  // what was actually paid for. Worked out by the server, in the order the items will be taken back.
+  const [splits, setSplits] = useState<Record<number, ReturnSplitRow>>({});
+  const tickedKey = Array.from(selectedItemIds).join(",");
+  useEffect(() => {
+    const ids = Array.from(selectedItemIds);
+    if (ids.length === 0) {
+      setSplits({});
+      return;
+    }
+    let live = true;
+    fetchReturnSplit(ids)
+      .then((rows) => live && setSplits(Object.fromEntries(rows.map((r) => [r.sale_item_id, r]))))
+      .catch(() => live && setSplits({}));
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tickedKey]);
+  // An item whose price is all still owed can only cancel that debt, so it is always the "refund" path (which pays nothing out).
+  useEffect(() => {
+    for (const id of selectedItemIds) {
+      if (onlyCancelsDebt(splits[id]) && lineConfigs[id]?.resolution !== "refund") updateLine(id, { resolution: "refund" });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [splits]);
+  // Only an item with something actually paid for can be refunded in cash or bank (so only then is a refund method needed).
+  const hasRefundLine = Array.from(selectedItemIds).some((id) => lineConfigs[id]?.resolution === "refund" && !onlyCancelsDebt(splits[id]));
   const { accounts: refundAccounts, defaultId: defaultRefundAccount } = useCustomerBankAccounts(
     sale?.customer_id,
     isAdmin && hasRefundLine && refundMethod === "bank_transfer"
@@ -599,6 +626,7 @@ function RequestReturnTab({ onRequested, waiting, onGoTo }: { onRequested: () =>
                 const checked = selectedItemIds.has(item.id);
                 const alreadyReturned = (item.is_returned ?? 0) > 0;
                 const cfg = lineConfigs[item.id] ?? defaultLineConfig();
+                const split = splits[item.id];
                 const isFinalSale = item.allow_returns === 0;
 
                 return (
@@ -653,18 +681,42 @@ function RequestReturnTab({ onRequested, waiting, onGoTo }: { onRequested: () =>
                               ]}
                             />
                           </FormGroup>
-                          <FormGroup>
-                            <Label>Resolution</Label>
-                            <Dropdown
-                              value={cfg.resolution}
-                              onChange={(v) => updateLine(item.id, { resolution: v as ReturnLineConfig["resolution"] })}
-                              options={[
-                                { value: "refund", label: "Cash refund" },
-                                { value: "store_credit_exchange", label: "Exchange" },
-                              ]}
-                            />
-                          </FormGroup>
+                          {onlyCancelsDebt(split) ? (
+                            <FormGroup>
+                              <Label>Resolution</Label>
+                              <div className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-900">Reduce what they owe</div>
+                            </FormGroup>
+                          ) : (
+                            <FormGroup>
+                              <Label>{partlyOwed(split) ? `How the Rs. ${split!.paid_part.toLocaleString()} paid goes back` : "Resolution"}</Label>
+                              <Dropdown
+                                value={cfg.resolution}
+                                onChange={(v) => updateLine(item.id, { resolution: v as ReturnLineConfig["resolution"] })}
+                                options={[
+                                  { value: "refund", label: "Cash refund" },
+                                  { value: "store_credit_exchange", label: "Exchange" },
+                                ]}
+                              />
+                            </FormGroup>
+                          )}
                         </div>
+
+                        {onlyCancelsDebt(split) && (
+                          <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700">
+                            <p className="font-medium text-gray-900">
+                              Rs. {split!.owed_cleared.toLocaleString()} comes off what {sale.customer_id ? "they owe" : "is owed"} on {sale.invoice}.
+                            </p>
+                            <p className="mt-0.5 text-gray-500">Nothing was paid for this item, so nothing is paid back and no store credit is given. The invoice goes down by that amount.</p>
+                          </div>
+                        )}
+                        {partlyOwed(split) && (
+                          <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700">
+                            <p className="font-medium text-gray-900">
+                              Rs. {split!.owed_cleared.toLocaleString()} of this comes off what they still owe — it's taken off the invoice, not paid back.
+                            </p>
+                            <p className="mt-0.5 text-gray-500">The other Rs. {split!.paid_part.toLocaleString()} was paid for, so that is what the choice above applies to.</p>
+                          </div>
+                        )}
 
                         {cfg.resolution === "store_credit_exchange" && (
                           <>
