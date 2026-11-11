@@ -1,19 +1,22 @@
 import { useEffect, useState, FormEvent } from "react";
 import { PageLoader } from "../components/Loader";
-import { useNavigate } from "react-router-dom";
-import { Truck, ChevronDown, ChevronRight, ChevronUp, Plus } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Truck, ChevronDown, ChevronRight, ChevronUp, Plus, Wallet } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { Supplier } from "../lib/types";
 import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Table, Th, Td, SortHeader, EmptyState, HelpHint, Modal, RowCard, RowCardStats, RowCardStat } from "../components/ui";
 import { CityPicker } from "../components/CityPicker";
+import SupplierPaymentsPage from "./SupplierPaymentsPage";
 import { useSortableData } from "../lib/useSortableData";
 
 type SupplierSortKey = "priority" | "code" | "name" | "phone" | "city" | "balance";
 
 // All the suppliers at a glance, with what you owe each. A supplier's details, purchases, payments and bank accounts are on their own
-// page — click a row to open it.
+// page — click a row to open it. The "Payments" tab is every payment made to any supplier, and "Record payment" pays one.
 export default function SuppliersPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab: "suppliers" | "payments" = searchParams.get("tab") === "payments" ? "payments" : "suppliers";
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -102,21 +105,47 @@ export default function SuppliersPage() {
     <div>
       <PageHeader
         title="Suppliers"
-        subtitle="Click any supplier to open their page."
+        subtitle={tab === "payments" ? "Every payment made to a supplier." : "Click any supplier to open their page."}
         action={
-          <button
-            onClick={() => {
-              setShowAddModal(true);
-              setFormError(null);
-              setFormSuccess(null);
-            }}
-            className="flex items-center gap-2 px-4 py-2.5 bg-black text-white rounded-xl text-sm font-medium hover:bg-gray-800 transition"
-          >
-            <Plus size={16} />
-            Add supplier
-          </button>
+          <div className="flex items-center gap-2">
+            <Button onClick={() => setSearchParams({ tab: "payments", record: "1" })} className="inline-flex items-center gap-1.5">
+              <Wallet size={14} />
+              Record payment
+            </Button>
+            <button
+              onClick={() => {
+                setShowAddModal(true);
+                setFormError(null);
+                setFormSuccess(null);
+              }}
+              className="flex items-center gap-2 px-4 py-2.5 bg-black text-white rounded-xl text-sm font-medium hover:bg-gray-800 transition"
+            >
+              <Plus size={16} />
+              Add supplier
+            </button>
+          </div>
         }
       />
+
+      {/* Same tab bar as a supplier's own page. */}
+      <div className="mb-4 flex gap-1 overflow-x-auto border-b border-gray-200 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {(
+          [
+            { key: "suppliers", label: "Suppliers" },
+            { key: "payments", label: "Payments" },
+          ] as const
+        ).map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setSearchParams(t.key === "suppliers" ? {} : { tab: t.key }, { replace: true })}
+            className={`-mb-px flex-shrink-0 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition ${
+              tab === t.key ? "border-black text-gray-900" : "border-transparent text-gray-500 hover:text-gray-800"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
 
       {showAddModal && (
         <form onSubmit={handleAdd}>
@@ -155,7 +184,9 @@ export default function SuppliersPage() {
 
       {error && <ErrorText>{error}</ErrorText>}
 
-      {loading ? (
+      {tab === "payments" ? (
+        <SupplierPaymentsPage />
+      ) : loading ? (
         <PageLoader />
       ) : suppliers.length === 0 ? (
         <EmptyState icon={Truck} title="No suppliers yet" actions={[{ label: "Add supplier", primary: true, onClick: () => setShowAddModal(true) }]} />

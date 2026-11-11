@@ -240,7 +240,7 @@ export default function SupplierProfilePage() {
                 <Button
                   variant="primary"
                   title="Record payment"
-                  onClick={() => navigate("/supplier-payments", { state: { paySupplierId: supplier.id } })}
+                  onClick={() => navigate("/suppliers?tab=payments", { state: { paySupplierId: supplier.id } })}
                   className="inline-flex items-center gap-1.5"
                 >
                   <Wallet size={16} />

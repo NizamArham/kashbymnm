@@ -411,7 +411,7 @@ export default function DashboardPage() {
 
               {owingSuppliers.length > 0 && (
                 <button
-                  onClick={() => navigate("/supplier-payments")}
+                  onClick={() => navigate("/suppliers")}
                   className="w-full flex items-center justify-between py-2.5 text-left hover:bg-gray-50 -mx-2 px-2 rounded transition"
                 >
                   <span className="text-sm text-gray-700">

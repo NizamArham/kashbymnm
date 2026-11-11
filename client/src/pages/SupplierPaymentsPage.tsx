@@ -1,30 +1,26 @@
-import { useState, useEffect, useMemo, Fragment } from "react";
+import { useState, useEffect } from "react";
 import { PageLoader } from "../components/Loader";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import { Plus } from "lucide-react";
 import {
   Landmark,
-  X,
   ArrowLeft,
   Building2,
   FileText,
   Wallet,
   CreditCard,
-  ChevronDown,
-  ChevronRight,
   Download,
 } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { SupplierPayment, SupplierBalance, Supplier, Purchase, BankAccount } from "../lib/types";
 import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
-import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Table, Th, Td, Dropdown, EmptyState, DateRangePicker, DatePicker, HelpHint, TabToggle, Modal, MoneyInput } from "../components/ui";
+import { Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, Table, Th, Td, Dropdown, EmptyState, DateRangePicker, DatePicker, HelpHint, TabToggle, Modal, MoneyInput } from "../components/ui";
 import { formatDate, formatDateTime } from "../lib/dates";
-
-type ExpandedTab = "activity";
 
 export default function SupplierPaymentsPage() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [balances, setBalances] = useState<SupplierBalance[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [purchases, setPurchases] = useState<Purchase[]>([]);
@@ -44,13 +40,6 @@ export default function SupplierPaymentsPage() {
   const paymentsPageSize = dateStart || dateEnd ? 50 : 5;
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
-
-  // Which supplier's row is expanded to show their full running ledger.
-  const [expandedSupplierId, setExpandedSupplierId] = useState<number | null>(null);
-  const [expandedTab, setExpandedTab] = useState<ExpandedTab>("activity");
-  const [ledgerEntries, setLedgerEntries] = useState<any[]>([]);
-  const [ledgerLoading, setLedgerLoading] = useState(false);
-  const [ledgerError, setLedgerError] = useState<string | null>(null);
 
   const [showRecord, setShowRecord] = useState(false);
   const [paymentStep, setPaymentStep] = useState<1 | 2>(1);
@@ -228,39 +217,21 @@ export default function SupplierPaymentsPage() {
       setShowRecord(true);
       setPaymentStep(1);
     }
-    navigate(location.pathname, { replace: true, state: {} });
+    navigate(location.pathname + location.search, { replace: true, state: {} });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [suppliers]);
 
-  // Two-tier ordering, most actionable first:
-  //   1. Owing  — you still owe this supplier money (balance_owed > 0)
-  //   2. Settled — nothing outstanding
-  // Stable within each tier, preserving the API's original order.
-  const sortedBalances = useMemo(() => {
-    function tier(b: SupplierBalance): number {
-      return (b.balance_owed ?? 0) > 0 ? 0 : 1;
-    }
-    return [...balances].sort((a, b) => tier(a) - tier(b));
-  }, [balances]);
+  // The Suppliers page's "Record payment" button: open the dialog, then drop the flag so a refresh doesn't open it again.
+  useEffect(() => {
+    if (searchParams.get("record") !== "1") return;
+    setShowRecord(true);
+    setPaymentStep(1);
+    const next = new URLSearchParams(searchParams);
+    next.delete("record");
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
-  async function toggleSupplierExpand(supplierId: number) {
-    if (expandedSupplierId === supplierId) {
-      setExpandedSupplierId(null);
-      return;
-    }
-    setExpandedSupplierId(supplierId);
-    setExpandedTab("activity");
-    setLedgerLoading(true);
-    setLedgerError(null);
-    try {
-      const result = await api.get<{ entries: any[] }>(`/supplier-payments/ledger/${supplierId}`);
-      setLedgerEntries(result.entries);
-    } catch (err) {
-      setLedgerError(err instanceof ApiRequestError ? err.message : "Failed to load this supplier's ledger");
-    } finally {
-      setLedgerLoading(false);
-    }
-  }
 
   async function handleChequeSearch() {
     setChequeSearchError(null);
@@ -427,28 +398,8 @@ export default function SupplierPaymentsPage() {
     }
   }
 
-  const totalOwed = balances.reduce((sum, b) => sum + b.balance_owed, 0);
-
   return (
     <div>
-      <PageHeader
-        title="Supplier payments"
-        subtitle="Balance owed is calculated live from purchases minus payments made."
-        action={
-          !showRecord && (
-            <Button
-              variant="primary"
-              onClick={() => {
-                setShowRecord(true);
-                setPaymentStep(1);
-              }}
-            >
-              Record payment
-            </Button>
-          )
-        }
-      />
-
       {error && <ErrorText>{error}</ErrorText>}
 
       {showRecord && (
@@ -888,126 +839,6 @@ export default function SupplierPaymentsPage() {
         <PageLoader />
       ) : (
         <>
-          <p className="text-xs text-gray-500 mb-3">Total owed across all suppliers: Rs. {totalOwed.toLocaleString()}</p>
-
-          <Card className="p-0 overflow-clip mb-5">
-            <Table>
-              <thead>
-                <tr>
-                  <Th className="w-8"></Th>
-                  <Th>Code</Th>
-                  <Th>Supplier</Th>
-                  <Th align="right">Balance owed</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedBalances.map((b) => {
-                  const isExpanded = expandedSupplierId === b.id;
-                  return (
-                    <Fragment key={b.id}>
-                      <tr onClick={() => toggleSupplierExpand(b.id)} className="cursor-pointer hover:bg-gray-50">
-                        <Td className="w-8">
-                          {isExpanded ? <ChevronDown size={14} className="text-gray-400" /> : <ChevronRight size={14} className="text-gray-400" />}
-                        </Td>
-                        <Td>{b.supplier_code}</Td>
-                        <Td className="font-medium">{b.name}</Td>
-                        <Td align="right" className={b.balance_owed > 0 ? "font-medium" : ""}>Rs. {b.balance_owed.toLocaleString()}</Td>
-                      </tr>
-                      {isExpanded && (
-                        <tr>
-                          <Td colSpan={4} className="bg-gray-50">
-                            <div className="py-3 px-1">
-                              <div className="flex items-center justify-between mb-4">
-                                <div>
-                                  <h2 className="text-base font-semibold text-gray-900">{b.name}</h2>
-                                  <p className="text-xs text-gray-500">{b.supplier_code}</p>
-                                </div>
-                                <button onClick={() => setExpandedSupplierId(null)} aria-label="Close" title="Close" className="text-gray-400 hover:text-gray-600">
-                                  <X size={18} />
-                                </button>
-                              </div>
-
-                              <div className="flex items-center gap-1 border-b border-gray-200 mb-4">
-                                <button
-                                  onClick={() => setExpandedTab("activity")}
-                                  className={`px-3 py-1.5 text-xs font-medium rounded-t-lg transition ${
-                                    expandedTab === "activity"
-                                      ? "bg-white border border-b-white border-gray-200 text-gray-900 -mb-px"
-                                      : "text-gray-500 hover:text-gray-800"
-                                  }`}
-                                >
-                                  Recent Activity
-                                </button>
-                              </div>
-
-                              {expandedTab === "activity" && (
-                                <div className="bg-white rounded-xl p-4">
-                                  <div className="flex items-center justify-between mb-3">
-                                    <h3 className="text-sm font-semibold text-gray-900">Recent activity</h3>
-                                    {ledgerEntries.length > 0 && (
-                                      <button
-                                        onClick={() => navigate(`/suppliers/${b.id}?tab=payments`)}
-                                        className="text-xs text-gray-500 hover:text-gray-800 underline"
-                                      >
-                                        View all ({ledgerEntries.length})
-                                      </button>
-                                    )}
-                                  </div>
-
-                                  {ledgerLoading ? (
-                                    <PageLoader />
-                                  ) : ledgerError ? (
-                                    <ErrorText>{ledgerError}</ErrorText>
-                                  ) : ledgerEntries.length === 0 ? (
-                                    <p className="text-sm text-gray-500">No activity recorded for this supplier yet.</p>
-                                  ) : (
-                                    <div className="rounded-xl overflow-hidden">
-                                      <table className="w-full text-sm">
-                                        <thead>
-                                          <tr className="bg-gray-50">
-                                            <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">Date</th>
-                                            <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">Event</th>
-                                            <th className="text-right px-3 py-2 text-xs font-medium text-gray-500">Amount</th>
-                                            <th className="text-right px-3 py-2 text-xs font-medium text-gray-500">Running balance</th>
-                                          </tr>
-                                        </thead>
-                                        <tbody>
-                                          {[...ledgerEntries]
-                                            .reverse()
-                                            .slice(0, 3)
-                                            .map((entry, i) => (
-                                              <tr key={i} className={i % 2 === 1 ? "bg-gray-50/50" : ""}>
-                                                <td className="px-3 py-2 border-t border-gray-50 text-gray-500">{formatDate(entry.date)}</td>
-                                                <td className="px-3 py-2 border-t border-gray-50 text-gray-900">{entry.label}</td>
-                                                <td
-                                                  className={`px-3 py-2 border-t border-gray-50 text-right whitespace-nowrap font-medium ${
-                                                    entry.type === "purchase" ? "text-gray-900" : "text-green-600"
-                                                  }`}
-                                                >
-                                                  {entry.type === "purchase" ? "+" : "-"} Rs. {entry.amount.toLocaleString()}
-                                                </td>
-                                                <td className="px-3 py-2 border-t border-gray-50 text-right whitespace-nowrap text-gray-500">
-                                                  Rs. {entry.running_balance.toLocaleString()}
-                                                </td>
-                                              </tr>
-                                            ))}
-                                        </tbody>
-                                      </table>
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          </Td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </Table>
-          </Card>
-
           <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
             <h2 className="text-base font-semibold text-gray-900">Payment log</h2>
             <div className="flex items-center gap-2">

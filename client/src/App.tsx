@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate, useParams } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import AppShell from "./components/AppShell";
@@ -31,7 +31,6 @@ import ProfilePage from "./pages/ProfilePage";
 import AttendancePage from "./pages/AttendancePage";
 import StaffPage from "./pages/StaffPage";
 import AddStaffPage from "./pages/AddStaffPage";
-import SupplierPaymentsPage from "./pages/SupplierPaymentsPage";
 import ChequesPage from "./pages/ChequesPage";
 import CouriersPage from "./pages/CourierReconciliationPage";
 import CourierOrderHistoryPage from "./pages/CourierOrderHistoryPage";
@@ -63,6 +62,12 @@ function ToCustomerTab({ tab }: { tab: string }) {
 function ToSupplierPayments() {
   const { id } = useParams();
   return <Navigate to={`/suppliers/${id}?tab=payments`} replace />;
+}
+
+// Paying suppliers is on the Suppliers page now (its Payments tab, and "Record payment"); the old address leads there.
+function ToSuppliersPayments() {
+  const location = useLocation();
+  return <Navigate to="/suppliers?tab=payments" replace state={location.state} />;
 }
 
 export default function App() {
@@ -175,7 +180,7 @@ export default function App() {
           path="/supplier-payments"
           element={
             <ProtectedRoute adminOnly>
-              <SupplierPaymentsPage />
+              <ToSuppliersPayments />
             </ProtectedRoute>
           }
         />

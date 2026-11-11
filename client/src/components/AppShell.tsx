@@ -18,7 +18,6 @@ import {
   X,
   ShoppingBag,
   FolderOpen,
-  CreditCard,
   UserCog,
   SlidersHorizontal,
   Clock,
@@ -151,10 +150,6 @@ export default function AppShell() {
       icon: Package,
       path: "/purchases",
       adminOnly: true,
-      subItems: [
-        { id: "purchases", label: "Purchases", path: "/purchases", icon: Package },
-        { id: "supplier-payments", label: "Supplier Payments", path: "/supplier-payments", icon: CreditCard },
-      ],
     },
     {
       id: "finance",
@@ -215,7 +210,7 @@ export default function AppShell() {
     const isOnPos = on("/pos", "/sales", "/promotions", "/quotations");
     const isOnInventory = on("/inventory", "/products");
     const isOnDirectory = on("/customers", "/staff", "/suppliers");
-    const isOnPurchases = on("/purchases", "/supplier-payments");
+    const isOnPurchases = on("/purchases");
     const isOnFinance = on("/cash-book", "/cheques");
     const isOnDeliveries = on("/deliveries", "/couriers", "/waybill-generator", "/delivery-partners");
     const isOnAdmin = on("/attendance", "/settings", "/audit-log");
