@@ -22,6 +22,16 @@ import { pickupsForSale } from "../lib/onlineReturns";
 import { assertNotHeldByAnother, endOfDay, holdEndOf, holdUnits, releaseHold } from "../lib/stockHolds";
 import { LIVE_COD_SQL } from "../lib/deliveryCod";
 
+// What came off an invoice's total because items were taken back that had not been paid for (nothing paid back), and what a courier return's
+// delivery share added to it — so the printed invoice can say why its total is not the subtotal. Returns from before written_off was recorded
+// are worked out the same way: a refund that gave back less than the item's price had the difference taken off.
+const RETURNED_OFF_SQL = `
+  (SELECT COALESCE(SUM(CASE WHEN r.written_off > 0 THEN r.written_off
+                            WHEN r.resolution = 'refund' THEN MAX(0, si.unit_price - r.refund_amount - r.pickup_deduction - r.inspection_deduction)
+                            ELSE 0 END), 0)
+   FROM returns r JOIN sale_items si ON si.id = r.sale_item_id WHERE si.sale_id = sales.id) AS returned_off,
+  (SELECT COALESCE(SUM(o.charged_to_customer), 0) FROM online_returns o WHERE o.sale_id = sales.id) AS return_charge_added`;
+
 export const salesRouter = Router();
 
 // POS is used by both admin and staff — just needs login, no role restriction.
@@ -449,7 +459,7 @@ salesRouter.get(
       .prepare(
         `SELECT sales.*, customers.name as customer_name, customers.customer_code, customers.phone as customer_phone,
                 deliveries.delivery_partner, delivery_partners.kind as delivery_partner_kind,
-                deliveries.delivery_status as delivery_status, ${LIVE_COD_SQL} as delivery_cod_amount,
+                deliveries.delivery_status as delivery_status, ${LIVE_COD_SQL} as delivery_cod_amount, ${RETURNED_OFF_SQL},
                 (SELECT MAX(hi.held_until) FROM inventory hi
                   WHERE hi.held_for_sale_id = sales.id AND hi.held_until > datetime('now', '+330 minutes')) AS hold_until,
                 ${SALE_EXCHANGE_FLAGS_SQL}
@@ -613,7 +623,7 @@ salesRouter.get(
                 delivery_partners.kind as delivery_partner_kind,
                 deliveries.delivery_fee, deliveries.is_free_delivery as delivery_is_free,
                 deliveries.delivery_paid_by, deliveries.actual_fare as delivery_actual_fare,
-                deliveries.rider_direct as delivery_rider_direct, ${LIVE_COD_SQL} as delivery_cod_amount,
+                deliveries.rider_direct as delivery_rider_direct, ${LIVE_COD_SQL} as delivery_cod_amount, ${RETURNED_OFF_SQL},
                 deliveries.fee_paid as delivery_fee_paid, deliveries.pickup_prepaid as delivery_pickup_prepaid, deliveries.delivery_status,
                 deliveries.tracking_number as delivery_tracking_number, deliveries.waybill_number as delivery_waybill_number,
                 deliveries.packed_at as delivery_packed_at, deliveries.dispatched_at as delivery_dispatched_at,

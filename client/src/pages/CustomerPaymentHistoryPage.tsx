@@ -13,13 +13,13 @@ import { formatDate, formatTime } from "../lib/dates";
 
 interface LedgerEntry {
   date: string;
-  type: "sale" | "payment" | "cheque" | "credit" | "refund" | "returned" | "deduction";
+  type: "sale" | "payment" | "cheque" | "credit" | "refund" | "returned" | "deduction" | "charge";
   // What the Type column shows. A store credit granted for a return is
   // its own kind so returns stand out from other credit.
   // "courier": a COD order the courier delivered and collected — paid, with the
   // courier until they pay it over.
   // "on_delivery": a COD order still on its way — paid at the door, not owed on account.
-  kind: "sale" | "payment" | "cheque" | "credit" | "return" | "refund" | "deduction" | "courier" | "on_delivery" | "exchange";
+  kind: "sale" | "payment" | "cheque" | "credit" | "return" | "refund" | "deduction" | "charge" | "courier" | "on_delivery" | "exchange";
   // The row's short main text; label is the same thing as a sentence.
   title: string;
   label: string;
@@ -51,6 +51,7 @@ const PILL: Record<LedgerEntry["kind"], { text: string; tone: BadgeTone }> = {
   return: { text: "Return", tone: "outline" },
   refund: { text: "Paid out", tone: "outline" },
   deduction: { text: "Deducted", tone: "outline" },
+  charge: { text: "Charge", tone: "neutral" },
   credit: { text: "Credit", tone: "outline" },
   courier: { text: "With courier", tone: "success" },
   on_delivery: { text: "On delivery", tone: "outline" },
@@ -226,6 +227,8 @@ export default function CustomerPaymentHistoryPage({ customerId }: { customerId?
     const firstShown = filteredEntries.length > 0 ? allEntries.indexOf(filteredEntries[0]) : -1;
     const broughtForward = firstShown > 0 ? allEntries[firstShown - 1].running_balance : null;
     // (Statement figures are plain numbers — the column headings say Rs.)
+    // The PDF's font has no long dash (it just disappears), so the PDF text uses a plain hyphen.
+    const pdfText = (text: string) => text.replace(/[\u2013\u2014]/g, "-");
     const rows = [
       ...(broughtForward !== null
         ? [{ cells: ["", "Balance brought forward", "", "", balanceText(broughtForward, false).text], styles: [undefined, { bold: true }, undefined, undefined, { bold: true }] }]
@@ -236,10 +239,10 @@ export default function CustomerPaymentHistoryPage({ customerId }: { customerId?
         const isSale = entry.kind === "sale";
         const detailParts = [
           entry.transaction_code ? `Transaction ID ${entry.transaction_code}` : "",
-          ...(entry.details ?? []).map((line) => (isSale ? `Note: ${line}` : line)),
+          ...(entry.details ?? []).map((line) => pdfText(isSale ? `Note: ${line}` : line)),
         ].filter(Boolean);
         return {
-          cells: [entry.date.slice(0, 10), entry.title, PILL[entry.kind].text, entry.amount_label ? `${num(entry.amount)} ${entry.amount_label}` : signedAmount(entry.effect, true), balanceText(entry.running_balance, false).text],
+          cells: [entry.date.slice(0, 10), pdfText(entry.title), PILL[entry.kind].text, entry.amount_label ? `${num(entry.amount)} ${entry.amount_label}` : signedAmount(entry.effect, true), balanceText(entry.running_balance, false).text],
           styles: [undefined, undefined, undefined, undefined, undefined],
           ...(detailParts.length > 0 ? { detail: detailParts.join(isSale ? "\n" : "   |   ") } : {}),
         };
@@ -256,8 +259,8 @@ export default function CustomerPaymentHistoryPage({ customerId }: { customerId?
       rangeLabel: rangeLabelFor(startDate, endDate),
       columns: [
         { label: "Date", width: 62 },
-        { label: "Description", width: 208, wrap: true },
-        { label: "Type", width: 52 },
+        { label: "Description", width: 200, wrap: true },
+        { label: "Type", width: 60 },
         { label: "Amount (Rs.)", width: 90, align: "right" },
         { label: "Balance (Rs.)", width: 103, align: "right" },
       ],
@@ -529,8 +532,8 @@ export default function CustomerPaymentHistoryPage({ customerId }: { customerId?
             </tbody>
           </Table>
           <p className="text-xs text-gray-500 px-4 py-3 border-t border-gray-100">
-            <strong className="font-medium text-gray-500">+</strong> adds to what they owe (a sale) · <strong className="font-medium text-gray-500">−</strong> takes
-            away from it (a payment, or store credit for a return) · a return paid back in money reads <strong className="font-medium text-gray-500">Returned</strong> (what the goods came to — the shop owes them that), then what is <strong className="font-medium text-gray-500">deducted</strong> (the delivery charge), then <strong className="font-medium text-gray-500">Paid out</strong> (with a printable receipt), and the balance is settled · <strong className="font-medium text-gray-500">Balance</strong> = what's owed after counting that credit.
+            <strong className="font-medium text-gray-500">+</strong> adds to what they owe (a sale, or a charge) · <strong className="font-medium text-gray-500">−</strong> takes
+            away from it (a payment, or a return) · a return paid back in money shows <strong className="font-medium text-gray-500">−</strong> what the goods came to (the shop owes them that), <strong className="font-medium text-gray-500">+</strong> the delivery charge deducted, then <strong className="font-medium text-gray-500">+</strong> the money paid out (with a printable receipt), and the balance is settled · <strong className="font-medium text-gray-500">Balance</strong> = what's owed after counting that credit.
           </p>
         </Card>
       )}

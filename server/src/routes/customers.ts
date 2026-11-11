@@ -114,21 +114,10 @@ const ON_DELIVERY_SQL = `(CASE WHEN ${IS_COD_ORDER_SQL} AND EXISTS (
     SELECT 1 FROM deliveries od WHERE od.sale_id = sales.id AND od.delivery_status IN ('pending', 'packed', 'dispatched')
   ) THEN ${COD_TOWARD_SALE_SQL} ELSE 0 END)`;
 
-// An online exchange still waiting for the old item to come back: the item's
-// value comes off this order once it's collected, so until then that part is
-// neither owed nor paid — it's exchange credit pending return. (If the item never
-// comes back the exchange is closed and the part becomes owed.)
-const EXCHANGE_PENDING_SQL = `MAX(0, MIN(
-  COALESCE((
-    SELECT SUM(ei.applied_share) FROM online_exchange_items ei JOIN online_exchanges px ON px.id = ei.exchange_id
-    WHERE px.new_sale_id = sales.id AND px.status = 'awaiting_pickup' AND ei.status = 'awaiting'
-  ), 0),
-  sales.total - sales.amount_paid - ${WITH_COURIER_SQL} - ${ON_DELIVERY_SQL}
-))`;
-
-// What the customer really owes on a sale: what's unpaid, less any part of it a
-// COD is about to collect or has just collected, and any exchange credit pending.
-const REAL_OWED_SQL = `(sales.total - sales.amount_paid - ${WITH_COURIER_SQL} - ${ON_DELIVERY_SQL} - ${EXCHANGE_PENDING_SQL})`;
+// What the customer really owes on a sale: what's unpaid, less any part of it a COD is about to collect or has just collected.
+// An exchange whose old items haven't come back is NOT netted off: until the items are received and checked the replacement order is
+// owed in full, and the statement carries one short line saying what clears (or becomes store credit) when they arrive.
+const REAL_OWED_SQL = `(sales.total - sales.amount_paid - ${WITH_COURIER_SQL} - ${ON_DELIVERY_SQL})`;
 
 export const CALC_SUBQUERY = `
   customers.bonus_points +
@@ -706,10 +695,12 @@ customersRouter.get(
     // A prepaid online order's payment also covered its delivery fee,
     // which was never part of the sale's own total — so that slice of
     // the payment isn't settling any debt shown here.
+    // The same goes for the customer's share of an exchange's return pickup charge, when it was paid up front with the order.
     const feePaidRows = db
-      .prepare(`SELECT sale_id, SUM(fee_paid) as fee FROM deliveries WHERE fee_paid > 0 GROUP BY sale_id`)
-      .all() as { sale_id: number; fee: number }[];
+      .prepare(`SELECT sale_id, SUM(fee_paid) as fee, SUM(pickup_prepaid) as pickup FROM deliveries WHERE fee_paid > 0 OR pickup_prepaid > 0 GROUP BY sale_id`)
+      .all() as { sale_id: number; fee: number; pickup: number }[];
     const feeLeft = new Map(feePaidRows.map((r) => [r.sale_id, r.fee]));
+    const pickupLeft = new Map(feePaidRows.map((r) => [r.sale_id, r.pickup]));
     const ledgerSaleIds = new Set(sales.map((s) => s.id));
     // How much of each sale's amount_paid the lines below actually
     // account for (cash taken at/after checkout, store credit spent on
@@ -732,7 +723,7 @@ customersRouter.get(
 
     type LedgerEntry = {
       date: string;
-      type: "sale" | "payment" | "cheque" | "credit" | "refund" | "returned" | "deduction";
+      type: "sale" | "payment" | "cheque" | "credit" | "refund" | "returned" | "deduction" | "charge";
       label: string;
       amount: number;
       effect: number;
@@ -795,15 +786,124 @@ customersRouter.get(
       };
     };
 
+    // Returns that only cancelled what was owed (nothing paid for the item, so nothing was paid back) and the customer's share of a courier
+    // return's delivery charge that was added to what they owe both change sales.total. The statement shows the sale as it was billed and each of
+    // these as its own row, so a return never just makes an invoice quietly smaller. (Returns from before written_off was recorded: a refund
+    // that gave back less than the item's price had the difference taken off the invoice, which is worked out the same way.)
+    type DebtReturn = { return_id: number; sale_id: number; invoice: string; date: string; title: string; written_off: number; reason: string | null; by_courier: boolean };
+    const debtReturns: DebtReturn[] = [];
+    const chargedBySale = new Map<number, { amount: number; date: string; invoice: string }>();
+    if (sales.length > 0) {
+      const ids = sales.map((x) => x.id);
+      const marks = ids.map(() => "?").join(",");
+      const rows = db
+        .prepare(
+          `SELECT r.id AS return_id, r.resolution, r.return_date, r.refund_amount, r.pickup_deduction, r.inspection_deduction, r.written_off,
+                  si.sale_id, si.unit_price, sl.invoice, COALESCE(p.product_title, si.product_snapshot, 'item') AS title, rq.reason,
+                  EXISTS (SELECT 1 FROM online_return_items oi WHERE oi.return_id = r.id) AS by_courier
+           FROM returns r
+           JOIN sale_items si ON si.id = r.sale_item_id
+           JOIN sales sl ON sl.id = si.sale_id
+           LEFT JOIN inventory i ON i.id = si.inventory_id
+           LEFT JOIN products p ON p.id = i.product_id
+           LEFT JOIN return_requests rq ON rq.return_id = r.id
+           WHERE si.sale_id IN (${marks}) ORDER BY r.id`
+        )
+        .all(...ids) as any[];
+      for (const r of rows) {
+        const derived = r.resolution === "refund" ? Math.max(0, r.unit_price - r.refund_amount - r.pickup_deduction - r.inspection_deduction) : 0;
+        const writtenOff = Math.round((r.written_off > 0 ? r.written_off : derived) * 100) / 100;
+        if (writtenOff <= 0.009) continue;
+        debtReturns.push({ return_id: r.return_id, sale_id: r.sale_id, invoice: r.invoice, date: r.return_date, title: r.title, written_off: writtenOff, reason: r.reason ?? null, by_courier: !!r.by_courier });
+      }
+      for (const o of db
+        .prepare(
+          `SELECT o.sale_id, o.charged_to_customer, COALESCE(o.report_decided_at, o.closed_at, o.report_at) AS at, sl.invoice
+           FROM online_returns o JOIN sales sl ON sl.id = o.sale_id WHERE o.charged_to_customer > 0 AND o.sale_id IN (${marks}) ORDER BY o.id`
+        )
+        .all(...ids) as { sale_id: number; charged_to_customer: number; at: string | null; invoice: string }[]) {
+        const prev = chargedBySale.get(o.sale_id);
+        chargedBySale.set(o.sale_id, { amount: (prev?.amount ?? 0) + o.charged_to_customer, date: o.at ?? prev?.date ?? "", invoice: o.invoice });
+      }
+    }
+    const writtenOffBySale = new Map<number, number>();
+    for (const d of debtReturns) writtenOffBySale.set(d.sale_id, (writtenOffBySale.get(d.sale_id) ?? 0) + d.written_off);
+    // The sale as it was billed: today's total with the returned part put back and the added delivery share taken out.
+    const billedTotal = (sl: { id: number; total: number }) => Math.round((sl.total + (writtenOffBySale.get(sl.id) ?? 0) - (chargedBySale.get(sl.id)?.amount ?? 0)) * 100) / 100;
+
+    // A payment made through the shop can include the delivery fee and the customer's share of an exchange's return pickup charge. Neither is part of
+    // the invoice, so each is its own charge row on the statement (dated with its order) and the payment shows in full — the three always net to what
+    // came off the invoice. How much of a payment went to each comes from the delivery record, never more than the payment itself.
+    const saleById = new Map<number, { invoice: string; date: string }>(sales.map((x) => [x.id, { invoice: x.invoice, date: x.date }]));
+    const chargeRows: LedgerEntry[] = [];
+    const salePaymentRows: LedgerEntry[] = salePayments.map((p) => {
+      const deliveryPart = Math.min(feeLeft.get(p.reference_id) ?? 0, p.amount);
+      if (deliveryPart > 0) feeLeft.set(p.reference_id, (feeLeft.get(p.reference_id) ?? 0) - deliveryPart);
+      const pickupPart = Math.min(pickupLeft.get(p.reference_id) ?? 0, p.amount - deliveryPart);
+      if (pickupPart > 0) pickupLeft.set(p.reference_id, (pickupLeft.get(p.reference_id) ?? 0) - pickupPart);
+      explain(p.reference_id, p.amount - deliveryPart - pickupPart);
+      const sale = saleById.get(p.reference_id);
+      const addCharge = (kind: string, amount: number) =>
+        chargeRows.push({
+          date: sale?.date ?? p.entry_date,
+          type: "charge" as const,
+          label: `${kind} (${sale?.invoice ?? "order"})`,
+          title: `${kind} — ${sale?.invoice ?? "order"}`,
+          amount,
+          effect: amount,
+          sale_id: p.reference_id,
+          sale_invoice: sale?.invoice,
+        });
+      if (deliveryPart > 0) addCharge("Delivery charge", deliveryPart);
+      if (pickupPart > 0) addCharge("Return pickup charge", pickupPart);
+      return {
+        date: p.entry_date,
+        type: "payment" as const,
+        label: p.notes || `Payment${p.payment_method ? ` (${methodLabel(p.payment_method)})` : ""}`,
+        amount: p.amount,
+        effect: -p.amount,
+        transaction_code: p.transaction_code,
+        sale_id: p.reference_id,
+      };
+    });
+
     const entries: LedgerEntry[] = [
       ...sales.map((s) => ({
         date: s.date,
         type: "sale" as const,
         label: `Sale ${s.invoice}`,
-        amount: s.total,
-        effect: s.total,
+        amount: billedTotal(s),
+        effect: billedTotal(s),
         sale_id: s.id,
         sale_invoice: s.invoice,
+      })),
+      ...chargeRows,
+      // A return that only cancelled what was owed: no money moved, so it is a row that takes that much off — not a refund or a credit.
+      ...debtReturns.map((d) => ({
+        date: d.date,
+        type: "returned" as const,
+        label: `Returned ${d.invoice} — ${d.title}`,
+        title: `Returned ${d.invoice} — ${d.title}`,
+        details: [
+          `${d.by_courier ? "Sent back by courier" : "Taken back"} from ${d.invoice}${d.reason ? ` · ${d.reason.replace(/^Courier return — /, "")}` : ""}`,
+          `Rs. ${d.written_off.toLocaleString()} came off what they owed — it hadn't been paid for, so nothing is paid back`,
+        ],
+        amount: d.written_off,
+        effect: -d.written_off,
+        sale_id: d.sale_id,
+        sale_invoice: d.invoice,
+      })),
+      // The customer's share of a courier return's delivery charge, added because a refund couldn't carry it.
+      ...Array.from(chargedBySale, ([saleId, c]) => ({
+        date: c.date,
+        type: "deduction" as const,
+        label: `Paid for courier — delivery charge added to what they owe (${c.invoice})`,
+        title: `Paid for courier — delivery charge (${c.invoice})`,
+        details: [`The customer's share of what it cost to send items back, added because there was no refund to take it from`],
+        amount: c.amount,
+        effect: c.amount,
+        sale_id: saleId,
+        sale_invoice: c.invoice,
       })),
       ...payments.map((p) => ({
         date: p.entry_date,
@@ -813,21 +913,7 @@ customersRouter.get(
         effect: -p.amount,
         transaction_code: p.transaction_code,
       })),
-      ...salePayments.map((p) => {
-        const deliveryPart = Math.min(feeLeft.get(p.reference_id) ?? 0, p.amount);
-        if (deliveryPart > 0) feeLeft.set(p.reference_id, (feeLeft.get(p.reference_id) ?? 0) - deliveryPart);
-        const baseLabel = p.notes || `Payment${p.payment_method ? ` (${methodLabel(p.payment_method)})` : ""}`;
-        explain(p.reference_id, p.amount - deliveryPart);
-        return {
-          date: p.entry_date,
-          type: "payment" as const,
-          label: deliveryPart > 0 ? `${baseLabel} (incl. Rs. ${deliveryPart.toLocaleString()} delivery fee)` : baseLabel,
-          amount: p.amount,
-          effect: -(p.amount - deliveryPart),
-          transaction_code: p.transaction_code,
-          sale_id: p.reference_id,
-        };
-      }),
+      ...salePaymentRows,
       // A cheque still in_hand or otherwise not yet cleared/bounced is
       // shown as settling the balance right away — matching the app's
       // own design (a received cheque marks the sale paid immediately,
@@ -885,7 +971,6 @@ customersRouter.get(
         title: `Returned ${inv} — ${itemWhat(r.items)}`,
         details: [`Taken back from ${inv}${r.reason ? ` · ${r.reason}` : ""}`, ...(r.paid ? [] : [`Refund of Rs. ${r.refund_total.toLocaleString()} approved — waiting to be paid out`])],
         amount: r.returned_value,
-        amount_label: "returned",
         effect: -r.returned_value,
         sale_id: r.sale_id,
         sale_invoice: r.invoices[0],
@@ -898,7 +983,6 @@ customersRouter.get(
           title: `Paid for courier — delivery charge (${inv})`,
           details: [`The customer's share of what it cost to send ${itemWhat(r.items)} back, held back from the refund`],
           amount: r.delivery_share,
-          amount_label: "paid for courier",
           effect: r.delivery_share,
           sale_id: r.sale_id,
           sale_invoice: r.invoices[0],
@@ -912,7 +996,6 @@ customersRouter.get(
           title: `Held back after inspection (${inv})`,
           details: [`Taken off the refund for ${itemWhat(r.items)} when the parcel was inspected`],
           amount: r.inspection_hold,
-          amount_label: "held back",
           effect: r.inspection_hold,
           sale_id: r.sale_id,
           sale_invoice: r.invoices[0],
@@ -931,7 +1014,6 @@ customersRouter.get(
           ...(r.transaction_codes.length > 1 ? [`Transaction IDs ${r.transaction_codes.join(", ")}`] : []),
         ],
         amount: r.total,
-        amount_label: "paid out",
         effect: r.total,
         transaction_code: r.transaction_codes[0] ?? null,
         refund_key: r.key,
@@ -1063,34 +1145,45 @@ customersRouter.get(
       });
     }
 
-    // Exchange credit pending: the replacement order is billed in full, and the old
-    // item's value comes off it once the courier has brought the item back.
+    // An exchange whose old items haven't come back: the replacement order stays owed in full, and one short line at the end of the statement
+    // names the items and says what happens when they arrive — all worked out from the exchange and the order as they stand now.
     const pendingExchanges = (
       db
         .prepare(
-          `SELECT sales.id, sales.invoice, sales.date, ROUND(${EXCHANGE_PENDING_SQL}, 2) AS amount
+          `SELECT sales.id, sales.invoice, MAX(0, ROUND(${REAL_OWED_SQL}, 2)) AS unpaid,
+                  COALESCE((SELECT SUM(ei.applied_share) FROM online_exchange_items ei JOIN online_exchanges px ON px.id = ei.exchange_id
+                            WHERE px.new_sale_id = sales.id AND px.status = 'awaiting_pickup' AND ei.status = 'awaiting'), 0) AS credit_total,
+                  COALESCE((SELECT SUM(px.advance_credit) FROM online_exchanges px WHERE px.new_sale_id = sales.id AND px.status = 'awaiting_pickup'), 0) AS advance
            FROM sales
-           WHERE sales.customer_id = ? AND sales.is_voided = 0 AND sales.status = 'completed' AND ${EXCHANGE_PENDING_SQL} > 0.009
+           WHERE sales.customer_id = ? AND sales.is_voided = 0 AND sales.status = 'completed'
+             AND EXISTS (SELECT 1 FROM online_exchange_items ei JOIN online_exchanges px ON px.id = ei.exchange_id
+                         WHERE px.new_sale_id = sales.id AND px.status = 'awaiting_pickup' AND ei.status = 'awaiting')
            ORDER BY sales.date, sales.id`
         )
-        .all(req.params.id) as { id: number; invoice: string; date: string; amount: number }[]
+        .all(req.params.id) as { id: number; invoice: string; unpaid: number; credit_total: number; advance: number }[]
     ).map((x) => {
-      const waiting = ((exchangeForSale(x.id)?.items ?? []) as { status: string; title: string | null; old_invoice: string }[]).filter((i) => i.status === "awaiting");
-      return {
-        ...x,
-        old_invoice: Array.from(new Set(waiting.map((i) => i.old_invoice))).join(", "),
-        old_item_title: waiting.length === 1 ? waiting[0].title : waiting.length > 1 ? `${waiting.length} old items` : null,
-      };
+      const waiting = ((exchangeForSale(x.id)?.items ?? []) as { status: string; title: string | null; size: string | null; applied_share: number }[]).filter((i) => i.status === "awaiting");
+      return { ...x, waiting_items: waiting.map((i) => ({ name: `${i.title ?? "Item"}${i.size ? ` (${i.size})` : ""}`, worth: i.applied_share })) };
     });
+    const lastDate = entries.reduce((latest, e) => (e.date > latest ? e.date : latest), "");
     for (const x of pendingExchanges) {
+      const rupees = (n: number) => `Rs. ${n.toLocaleString()}`;
+      const plural = x.waiting_items.length !== 1;
+      const clears = Math.min(x.unpaid, x.credit_total);
+      const toCredit = Math.max(0, x.credit_total - clears);
+      const outcome = [
+        ...(clears > 0.5 ? [`${rupees(clears)} comes off the balance`] : []),
+        ...(toCredit > 0.5 ? [`${rupees(toCredit)} becomes store credit${x.advance > 0.5 ? ` (${rupees(Math.min(x.advance, toCredit))} already given)` : ""}`] : []),
+      ];
       entries.push({
-        date: x.date,
+        date: lastDate,
         type: "payment" as const,
-        label: `Exchange credit pending return — ${x.old_item_title ?? "item"} from ${x.old_invoice} (${x.invoice})`,
-        title: `Exchange credit — waiting for ${x.old_item_title ?? "the old item"}`,
-        details: [`${x.invoice} replaces an item from ${x.old_invoice}; its value comes off once the courier brings the old item back`],
-        amount: x.amount,
-        effect: -x.amount,
+        label: `Exchange — ${plural ? "old items" : "old item"} on the way back (${x.invoice})`,
+        title: `Exchange — ${plural ? "old items" : "old item"} on the way back`,
+        details: [x.waiting_items.map((i) => `${i.name} ${i.worth.toLocaleString()}`).join("  ·  "), ...(outcome.length > 0 ? [`Once received and checked: ${outcome.join(" and ")}`] : [])].filter(Boolean),
+        amount: x.credit_total,
+        amount_label: "pending",
+        effect: 0,
         sale_id: x.id,
         sale_invoice: x.invoice,
         exchange_pending: true,

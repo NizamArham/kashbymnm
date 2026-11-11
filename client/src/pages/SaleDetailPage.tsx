@@ -26,6 +26,7 @@ import ConfirmCodModal from "../components/ConfirmCodModal";
 import { useAdminApproval } from "../components/AdminApproval";
 import { useConfirm } from "../components/Feedback";
 import { formatDate, formatDateTime } from "../lib/dates";
+import { billedTotal, hasReturnAdjustment } from "../lib/billedTotal";
 
 export default function SaleDetailPage() {
   const { confirm: confirmDialog } = useConfirm();
@@ -603,7 +604,9 @@ export default function SaleDetailPage() {
               </div>
               <div>
                 <p className="text-xs text-gray-500">Total</p>
-                <p className="text-gray-900 font-medium">Rs. {sale.total.toLocaleString()}</p>
+                {/* After a return the bill keeps its own total; the new figure is said underneath. */}
+                <p className="text-gray-900 font-medium">Rs. {(hasReturnAdjustment(sale) ? billedTotal(sale) : sale.total).toLocaleString()}</p>
+                {hasReturnAdjustment(sale) && <p className="text-xs text-gray-500">Rs. {sale.total.toLocaleString()} after return</p>}
               </div>
             </div>
             {sale.is_voided ? (
@@ -662,10 +665,16 @@ export default function SaleDetailPage() {
             </Table>
           </Card>
 
-          <div className="flex justify-end mt-3 text-sm text-gray-600 gap-6">
-            <span>Subtotal: Rs. {sale.subtotal.toLocaleString()}</span>
+          <div className="flex flex-wrap justify-end mt-3 text-sm text-gray-600 gap-x-6 gap-y-1">
+            {/* With items taken back, the bill's own total stays on show: it is the subtotal itself when there is no discount. */}
+            <span className={hasReturnAdjustment(sale) && sale.discount <= 0 ? "font-semibold text-gray-900" : ""}>
+              {hasReturnAdjustment(sale) && sale.discount <= 0 ? "Bill total" : "Subtotal"}: Rs. {sale.subtotal.toLocaleString()}
+            </span>
             {sale.discount > 0 && <span>Discount: -Rs. {sale.discount.toLocaleString()}</span>}
-            <span className="font-semibold text-gray-900">Total: Rs. {sale.total.toLocaleString()}</span>
+            {sale.discount > 0 && hasReturnAdjustment(sale) && <span className="font-semibold text-gray-900">Bill total: Rs. {billedTotal(sale).toLocaleString()}</span>}
+            {(sale.returned_off ?? 0) > 0 && <span title="Items taken back that had not been paid for: they come off the total, and nothing is paid back">Returned (not paid for): -Rs. {sale.returned_off!.toLocaleString()}</span>}
+            {(sale.return_charge_added ?? 0) > 0 && <span>Return delivery charge: +Rs. {sale.return_charge_added!.toLocaleString()}</span>}
+            <span className="font-semibold text-gray-900">{hasReturnAdjustment(sale) ? "Total after return" : "Total"}: Rs. {sale.total.toLocaleString()}</span>
           </div>
           <DeliveryChargeSummary sale={sale} className="justify-end mt-2" />
         </>

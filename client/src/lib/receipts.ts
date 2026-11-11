@@ -6,6 +6,7 @@ import { waybillShopCode } from "./delivery";
 import { api } from "./api";
 import { whatsappNumber } from "./phone";
 import { previewPdf } from "./pdfPreview";
+import { billedTotal, hasReturnAdjustment } from "./billedTotal";
 
 // ---------------------------------------------------------------------
 // Shared helpers
@@ -530,7 +531,9 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
   doc.setFontSize(9.5);
   doc.setTextColor(90);
   y += 6;
-  doc.text("Subtotal", totalsX, y);
+  // A sale with items taken back keeps the bill's own total in view: "Bill total" (the subtotal itself when there is no discount), then what came off.
+  const adjusted = hasReturnAdjustment(sale);
+  doc.text(adjusted && sale.discount <= 0 ? "Bill total" : "Subtotal", totalsX, y);
   doc.text(amountOnly(sale.subtotal), rightX, y, { align: "right" });
   y += 6;
 
@@ -548,6 +551,24 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
     }
   }
 
+  // Items taken back that had not been paid for come off the total (nothing is paid back), and a courier return's delivery share can be added —
+  // said here so the total adds up from the subtotal.
+  if (adjusted && sale.discount > 0) {
+    doc.text("Bill total", totalsX, y);
+    doc.text(amountOnly(billedTotal(sale)), rightX, y, { align: "right" });
+    y += 6;
+  }
+  if ((sale.returned_off ?? 0) > 0) {
+    doc.text("Returned items (not paid for)", totalsX, y);
+    doc.text(`- ${amountOnly(sale.returned_off!)}`, rightX, y, { align: "right" });
+    y += 6;
+  }
+  if ((sale.return_charge_added ?? 0) > 0) {
+    doc.text("Return delivery charge", totalsX, y);
+    doc.text(`+ ${amountOnly(sale.return_charge_added!)}`, rightX, y, { align: "right" });
+    y += 6;
+  }
+
   y += 2;
   doc.setDrawColor(200);
   doc.line(totalsX, y, rightX, y);
@@ -558,7 +579,7 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
   // most still stands out without going back to bold.
   doc.setFontSize(10);
   doc.setTextColor(20);
-  doc.text("Total", totalsX, y);
+  doc.text(adjusted ? "Total after return" : "Total", totalsX, y);
   doc.setFontSize(12);
   doc.text(amountLKR(sale.total), rightX, y, { align: "right" });
   doc.setFontSize(10);
@@ -937,7 +958,8 @@ export function generateThermalPdf(sale: Sale): jsPDF {
   y += 5;
 
   doc.setFontSize(8);
-  doc.text("Subtotal", marginX, y);
+  const adjusted = hasReturnAdjustment(sale);
+  doc.text(adjusted && sale.discount <= 0 ? "Bill total" : "Subtotal", marginX, y);
   doc.text(money(sale.subtotal), widthMm - marginX, y, { align: "right" });
   y += 4.5;
 
@@ -953,9 +975,25 @@ export function generateThermalPdf(sale: Sale): jsPDF {
     }
   }
 
+  if (adjusted && sale.discount > 0) {
+    doc.text("Bill total", marginX, y);
+    doc.text(money(billedTotal(sale)), widthMm - marginX, y, { align: "right" });
+    y += 4.5;
+  }
+  if ((sale.returned_off ?? 0) > 0) {
+    doc.text("Returned (not paid for)", marginX, y);
+    doc.text(`-${money(sale.returned_off!)}`, widthMm - marginX, y, { align: "right" });
+    y += 4.5;
+  }
+  if ((sale.return_charge_added ?? 0) > 0) {
+    doc.text("Return delivery charge", marginX, y);
+    doc.text(`+${money(sale.return_charge_added!)}`, widthMm - marginX, y, { align: "right" });
+    y += 4.5;
+  }
+
   doc.setFont("courier", "bold");
   doc.setFontSize(10);
-  doc.text("TOTAL", marginX, y);
+  doc.text(adjusted ? "AFTER RETURN" : "TOTAL", marginX, y);
   doc.text(money(sale.total), widthMm - marginX, y, { align: "right" });
   y += 6;
 
@@ -1137,12 +1175,16 @@ export function buildWhatsAppMessage(sale: Sale, businessInfo?: BusinessInfo | n
     lines.push(`${item.product_title ?? "Item"}${detail ? ` (${detail})` : ""} x${item.quantity} — ${money(item.line_total)}${wasNote}`);
   }
   lines.push("");
-  lines.push(`Subtotal: ${money(sale.subtotal)}`);
+  const adjusted = hasReturnAdjustment(sale);
+  lines.push(`${adjusted && sale.discount <= 0 ? "Bill total" : "Subtotal"}: ${money(sale.subtotal)}`);
   if (sale.discount > 0) {
     const couponNote = sale.coupon_code ? ` (${sale.coupon_code})` : "";
     lines.push(`Discounts & Coupons: -${money(sale.discount)}${couponNote}`);
+    if (adjusted) lines.push(`Bill total: ${money(billedTotal(sale))}`);
   }
-  lines.push(`*Total: ${money(sale.total)}*`);
+  if ((sale.returned_off ?? 0) > 0) lines.push(`Returned items (not paid for): -${money(sale.returned_off!)}`);
+  if ((sale.return_charge_added ?? 0) > 0) lines.push(`Return delivery charge: +${money(sale.return_charge_added!)}`);
+  lines.push(`*${adjusted ? "Total after return" : "Total"}: ${money(sale.total)}*`);
   if (isQuotation) {
     const quote = exchangeQuoteView(sale);
     if (quote) {

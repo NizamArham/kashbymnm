@@ -20,6 +20,7 @@ import { useAuth } from "../context/AuthContext";
 import { useAdminApproval } from "../components/AdminApproval";
 import { useConfirm } from "../components/Feedback";
 import { formatDateTime } from "../lib/dates";
+import { billedTotal, hasReturnAdjustment } from "../lib/billedTotal";
 
 // Two separate questions, each answered on its own: WHEN (the period, or a custom date range) and
 // WHAT KIND of sale. They used to share one row of tabs, so picking "Voided" forgot the period.
@@ -1026,7 +1027,11 @@ export default function SaleHistoryPage() {
                         <CustomerName sale={sale} />
                       </Td>
                       <Td>{sale.sale_type === "online" ? "Online" : "In-Store"}</Td>
-                      <Td align="right">Rs. {sale.total.toLocaleString()}</Td>
+                      <Td align="right">
+                        Rs. {sale.total.toLocaleString()}
+                        {/* The total is what's left after a return; the bill's own total is said underneath so the old figure isn't lost. */}
+                        {hasReturnAdjustment(sale) && <div className="text-xs text-gray-400">billed Rs. {billedTotal(sale).toLocaleString()}</div>}
+                      </Td>
                       <Td align="right">Rs. {sale.amount_paid.toLocaleString()}</Td>
                       <Td>
                         <div className="capitalize">{salePaymentLabel(sale)}</div>
@@ -1119,7 +1124,7 @@ export default function SaleHistoryPage() {
                   </div>
 
                   <RowCardStats>
-                    <RowCardStat label="Total" value={`Rs. ${sale.total.toLocaleString()}`} />
+                    <RowCardStat label="Total" value={hasReturnAdjustment(sale) ? <>Rs. {sale.total.toLocaleString()} <span className="text-xs font-normal text-gray-400">(billed Rs. {billedTotal(sale).toLocaleString()})</span></> : `Rs. ${sale.total.toLocaleString()}`} />
                     <RowCardStat label="Paid" value={`Rs. ${sale.amount_paid.toLocaleString()}`} />
                     <RowCardStat label="Payment" value={<span className="capitalize">{salePaymentLabel(sale)}</span>} />
                   </RowCardStats>
