@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { PageLoader } from "../components/Loader";
-import { Banknote, Check, Plus, Pencil, Trash2, X, Download } from "lucide-react";
+import { Banknote, Check, Plus, Pencil, Trash2, X, Download, Eye } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
-import { Supplier } from "../lib/types";
+import { Supplier, BusinessInfo, ChequeInfo } from "../lib/types";
+import ChequePreviewModal from "../components/ChequePreviewModal";
 import { downloadTabularReport, buildReportFilename, todayLongDate, rangeLabelFor } from "../lib/reportPdf";
-import { PageHeader, Card, Table, Th, Td, SortHeader, Button, EmptyState, ErrorText, Badge, RowActions, TabToggle, Input, Label, FormGroup, Dropdown, DatePicker, DateRangePicker, Modal, MoneyInput } from "../components/ui";
+import { PageHeader, Card, Table, Th, Td, SortHeader, Button, EmptyState, ErrorText, Badge, ActionMenu, TabToggle, Input, Label, FormGroup, Dropdown, DatePicker, DateRangePicker, Modal, MoneyInput } from "../components/ui";
 import { useSortableData } from "../lib/useSortableData";
 import { useConfirm } from "../components/Feedback";
 import { formatDate } from "../lib/dates";
@@ -32,6 +33,17 @@ interface ChequeRow {
   branch: string | null;
   is_crossed: number;
   payee_name: string | null;
+  account_holder_name: string | null;
+}
+
+// The cheque a confirmation is about, in a few plain words — so a mis-tap on the wrong row is obvious before anything is recorded.
+interface ChequeBrief {
+  number: string;
+  bank: string;
+  amount: number;
+  date: string;
+  partyLabel: string;
+  party: string;
 }
 
 interface IssuedChequeRow {
@@ -45,6 +57,8 @@ interface IssuedChequeRow {
   supplier_name: string;
   status: "pending" | "cleared" | "bounced";
   bounced_reason: string | null;
+  cleared_at?: string | null;
+  bounced_at?: string | null;
   branch: string | null;
   is_crossed: number;
   payee_name: string | null;
@@ -83,6 +97,9 @@ export default function ChequesPage() {
   const [cheques, setCheques] = useState<ChequeRow[]>([]);
   const [issuedCheques, setIssuedCheques] = useState<IssuedChequeRow[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  // The cheque being looked at, drawn like the real thing (front and back) — the same preview as on a supplier's statement.
+  const [preview, setPreview] = useState<{ cheque: ChequeInfo; supplierName: string } | null>(null);
+  const [businessInfo, setBusinessInfo] = useState<BusinessInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -178,6 +195,25 @@ export default function ChequesPage() {
   const [bouncingIsIssued, setBouncingIsIssued] = useState(false);
   const [bounceReason, setBounceReason] = useState("");
   const [bounceSubmitting, setBounceSubmitting] = useState(false);
+  // "Yes, it really cleared / bounced" must be ticked before the confirm button works, so one stray tap can't record it.
+  const [clearConfirmed, setClearConfirmed] = useState(false);
+  const [bounceConfirmed, setBounceConfirmed] = useState(false);
+  useEffect(() => setClearConfirmed(false), [clearingId]);
+  useEffect(() => setBounceConfirmed(false), [bouncingId]);
+
+  function chequeBrief(id: number | null, isIssued: boolean): ChequeBrief | null {
+    if (id === null) return null;
+    if (isIssued) {
+      const c = issuedCheques.find((x) => x.id === id);
+      return c ? { number: c.cheque_number, bank: c.bank_name, amount: c.amount, date: c.cheque_date, partyLabel: "To supplier", party: c.supplier_name } : null;
+    }
+    const c = cheques.find((x) => x.id === id);
+    return c
+      ? { number: c.cheque_number, bank: c.bank_name, amount: c.amount, date: c.cheque_date, partyLabel: "From", party: `${c.customer_name} (${c.customer_code})` }
+      : null;
+  }
+  // Dated after today (shop's local date): it can't normally have cleared yet.
+  const todayLocal = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   const [actionError, setActionError] = useState<string | null>(null);
 
   // Issuing a self-written cheque directly to a supplier — no customer
@@ -236,6 +272,57 @@ export default function ChequesPage() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
+
+  useEffect(() => {
+    api
+      .get<BusinessInfo | null>("/business-info")
+      .then(setBusinessInfo)
+      .catch(() => setBusinessInfo(null));
+  }, []);
+
+  // Open a cheque as a picture of the real thing. One we hold that was already handed on to a supplier reads like the
+  // supplier's statement does ("transferred"); one we still hold shows who it came from and that we hold it ("received").
+  function viewReceived(c: ChequeRow) {
+    const handedOn = !!c.transferred_to_supplier_name;
+    setPreview({
+      supplierName: c.transferred_to_supplier_name ?? "",
+      cheque: {
+        source: handedOn ? "transferred" : "received",
+        cheque_number: c.cheque_number,
+        bank_name: c.bank_name,
+        amount: c.amount,
+        cheque_date: c.cheque_date,
+        status: c.status,
+        date_received: c.date_received,
+        from_customer_name: c.customer_name,
+        from_customer_code: c.customer_code,
+        transfer_date: c.transfer_date ?? undefined,
+        branch: c.branch,
+        is_crossed: c.is_crossed,
+        payee_name: c.payee_name,
+        account_holder_name: c.account_holder_name,
+        settled_at: c.status === "cleared" ? c.cleared_at : c.status === "bounced" ? c.bounced_at : null,
+      },
+    });
+  }
+  function viewIssued(c: IssuedChequeRow) {
+    setPreview({
+      supplierName: c.supplier_name,
+      cheque: {
+        source: "issued",
+        cheque_number: c.cheque_number,
+        bank_name: c.bank_name,
+        amount: c.amount,
+        cheque_date: c.cheque_date,
+        date_issued: c.date_issued,
+        status: c.status,
+        branch: c.branch,
+        is_crossed: c.is_crossed,
+        payee_name: c.payee_name,
+        settled_at: c.status === "cleared" ? c.cleared_at ?? null : c.status === "bounced" ? c.bounced_at ?? null : null,
+      },
+    });
+  }
 
   async function handleClear(id: number, isIssued: boolean) {
     setActionError(null);
@@ -363,7 +450,9 @@ export default function ChequesPage() {
   }
 
   async function handleDeleteCheque(id: number, isIssued: boolean) {
-    if (!(await confirmDialog({ title: "Delete this cheque?", message: "This can't be undone.", confirmLabel: "Delete", danger: true }))) return;
+    const brief = chequeBrief(id, isIssued);
+    const what = brief ? `Cheque ${brief.number} (Rs. ${brief.amount.toLocaleString()}, ${brief.partyLabel.toLowerCase()} ${brief.party})` : "This cheque";
+    if (!(await confirmDialog({ title: "Delete this cheque?", message: `${what} will be deleted. This can't be undone.`, confirmLabel: "Delete", danger: true }))) return;
     setActionError(null);
     setDeletingId(id);
     try {
@@ -567,34 +656,36 @@ export default function ChequesPage() {
                       )}
                     </Td>
                     <Td className="text-right">
-                      {c.status === "pending" && (
-                        <RowActions
-                          actions={[
-                            { label: "Edit", icon: <Pencil size={14} />, onClick: () => openEdit(c.id, true, c) },
-                            { label: "Delete", icon: <Trash2 size={14} />, tone: "bad", disabled: deletingId === c.id, onClick: () => handleDeleteCheque(c.id, true) },
-                            {
-                              label: "Mark cleared",
-                              icon: <Check size={14} />,
-                              tone: "good",
-                              onClick: () => {
-                                setClearingId(c.id);
-                                setClearingIsIssued(true);
-                                setClearMethod("bank_transfer");
-                              },
-                            },
-                            {
-                              label: "Mark bounced",
-                              icon: <X size={14} />,
-                              tone: "bad",
-                              onClick: () => {
-                                setBouncingId(c.id);
-                                setBouncingIsIssued(true);
-                                setBounceReason("");
-                              },
-                            },
-                          ]}
-                        />
-                      )}
+                      <ActionMenu
+                        items={[
+                          { label: "View cheque", icon: <Eye size={14} />, onClick: () => viewIssued(c) },
+                          ...(c.status === "pending"
+                            ? [
+                                {
+                                  label: "Mark cleared",
+                                  icon: <Check size={14} />,
+                                  onClick: () => {
+                                    setClearingId(c.id);
+                                    setClearingIsIssued(true);
+                                    setClearMethod("bank_transfer");
+                                  },
+                                },
+                                { label: "Edit", icon: <Pencil size={14} />, onClick: () => openEdit(c.id, true, c) },
+                                {
+                                  label: "Mark bounced",
+                                  icon: <X size={14} />,
+                                  danger: true,
+                                  onClick: () => {
+                                    setBouncingId(c.id);
+                                    setBouncingIsIssued(true);
+                                    setBounceReason("");
+                                  },
+                                },
+                                { label: "Delete", icon: <Trash2 size={14} />, danger: true, onClick: () => (deletingId === c.id ? undefined : handleDeleteCheque(c.id, true)) },
+                              ]
+                            : []),
+                        ]}
+                      />
                     </Td>
                   </tr>
                 ))}
@@ -638,6 +729,9 @@ export default function ChequesPage() {
                   <Td align="right">Rs. {c.amount.toLocaleString()}</Td>
                   <Td>
                     {c.customer_name} ({c.customer_code})
+                    {c.account_holder_name && c.account_holder_name.trim().toLowerCase() !== c.customer_name.trim().toLowerCase() && (
+                      <div className="text-xs text-gray-500 mt-0.5">Account holder: {c.account_holder_name}</div>
+                    )}
                     {c.transferred_to_supplier_name && (
                       <div className="text-xs text-gray-500 mt-0.5">→ given to {c.transferred_to_supplier_name}</div>
                     )}
@@ -649,44 +743,53 @@ export default function ChequesPage() {
                     )}
                   </Td>
                   <Td className="text-right">
-                    {(c.status === "in_hand" || c.status === "given_to_supplier" || c.status === "deposited") && (
-                      <RowActions
-                        actions={[
-                          ...(c.status === "in_hand"
-                            ? [
-                                { label: "Edit", icon: <Pencil size={14} />, onClick: () => openEdit(c.id, false, c) },
-                                { label: "Delete", icon: <Trash2 size={14} />, tone: "bad" as const, disabled: deletingId === c.id, onClick: () => handleDeleteCheque(c.id, false) },
-                              ]
-                            : []),
-                          {
-                            label: "Mark cleared",
-                            icon: <Check size={14} />,
-                            tone: "good" as const,
-                            onClick: () => {
-                              setClearingId(c.id);
-                              setClearingIsIssued(false);
-                              setClearMethod("bank_transfer");
-                            },
-                          },
-                          {
-                            label: "Mark bounced",
-                            icon: <X size={14} />,
-                            tone: "bad" as const,
-                            onClick: () => {
-                              setBouncingId(c.id);
-                              setBouncingIsIssued(false);
-                              setBounceReason("");
-                            },
-                          },
-                        ]}
-                      />
-                    )}
+                    <ActionMenu
+                      items={[
+                        { label: "View cheque", icon: <Eye size={14} />, onClick: () => viewReceived(c) },
+                        ...(c.status === "in_hand" || c.status === "given_to_supplier" || c.status === "deposited"
+                          ? [
+                              {
+                                label: "Mark cleared",
+                                icon: <Check size={14} />,
+                                onClick: () => {
+                                  setClearingId(c.id);
+                                  setClearingIsIssued(false);
+                                  setClearMethod("bank_transfer");
+                                },
+                              },
+                              ...(c.status === "in_hand" ? [{ label: "Edit", icon: <Pencil size={14} />, onClick: () => openEdit(c.id, false, c) }] : []),
+                              {
+                                label: "Mark bounced",
+                                icon: <X size={14} />,
+                                danger: true,
+                                onClick: () => {
+                                  setBouncingId(c.id);
+                                  setBouncingIsIssued(false);
+                                  setBounceReason("");
+                                },
+                              },
+                              ...(c.status === "in_hand"
+                                ? [{ label: "Delete", icon: <Trash2 size={14} />, danger: true, onClick: () => (deletingId === c.id ? undefined : handleDeleteCheque(c.id, false)) }]
+                                : []),
+                            ]
+                          : []),
+                      ]}
+                    />
                   </Td>
                 </tr>
               ))}
             </tbody>
           </Table>
         </Card>
+      )}
+
+      {preview && (
+        <ChequePreviewModal
+          cheque={preview.cheque}
+          supplierName={preview.supplierName}
+          businessName={businessInfo?.business_name || "M&M Clothing"}
+          onClose={() => setPreview(null)}
+        />
       )}
 
       {clearingId !== null && (
@@ -704,13 +807,18 @@ export default function ChequesPage() {
           footer={
             <>
               <Button onClick={() => setClearingId(null)}>Cancel</Button>
-              <Button variant="primary" onClick={() => handleClear(clearingId, clearingIsIssued)} disabled={clearSubmitting}>
+              <Button variant="primary" onClick={() => handleClear(clearingId, clearingIsIssued)} disabled={clearSubmitting || !clearConfirmed}>
                 {clearSubmitting ? "Saving..." : "Confirm cleared"}
               </Button>
             </>
           }
         >
-          <p className="text-sm text-gray-600 mb-3">Confirm this cheque has cleared.</p>
+          <ChequeSummaryBox cheque={chequeBrief(clearingId, clearingIsIssued)} />
+          {(chequeBrief(clearingId, clearingIsIssued)?.date ?? "") > todayLocal && (
+            <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              This cheque is dated {formatDate(chequeBrief(clearingId, clearingIsIssued)!.date)}, which hasn't come yet. Only go on if the bank has really cleared it.
+            </p>
+          )}
 {(() => {
                 const cheque = cheques.find((c) => c.id === clearingId);
                 const wasTransferred = clearingIsIssued || !!cheque?.transferred_to_supplier_name;
@@ -732,6 +840,10 @@ export default function ChequesPage() {
                   </>
                 );
               })()}
+          <label className="mt-3 flex items-center gap-2 text-sm text-gray-700">
+            <input type="checkbox" checked={clearConfirmed} onChange={(e) => setClearConfirmed(e.target.checked)} className="rounded border-gray-300" />
+            Yes, this cheque has cleared
+          </label>
         </Modal>
       )}
 
@@ -744,16 +856,21 @@ export default function ChequesPage() {
           footer={
             <>
               <Button onClick={() => setBouncingId(null)}>Cancel</Button>
-              <Button variant="danger" onClick={() => handleBounce(bouncingId, bouncingIsIssued)} disabled={bounceSubmitting}>
+              <Button variant="danger" onClick={() => handleBounce(bouncingId, bouncingIsIssued)} disabled={bounceSubmitting || !bounceConfirmed}>
                 {bounceSubmitting ? "Saving..." : "Confirm bounced"}
               </Button>
             </>
           }
         >
+              <ChequeSummaryBox cheque={chequeBrief(bouncingId, bouncingIsIssued)} />
               <FormGroup>
                 <Label>Reason</Label>
                 <Input value={bounceReason} onChange={(e) => setBounceReason(e.target.value)} />
               </FormGroup>
+              <label className="mt-3 flex items-center gap-2 text-sm text-gray-700">
+                <input type="checkbox" checked={bounceConfirmed} onChange={(e) => setBounceConfirmed(e.target.checked)} className="rounded border-gray-300" />
+                Yes, this cheque bounced
+              </label>
         </Modal>
       )}
 
@@ -877,6 +994,23 @@ export default function ChequesPage() {
               {editError && <ErrorText>{editError}</ErrorText>}
         </Modal>
       )}
+    </div>
+  );
+}
+
+function ChequeSummaryBox({ cheque }: { cheque: ChequeBrief | null }) {
+  if (!cheque) return null;
+  return (
+    <div className="mb-3 rounded-xl border border-gray-200 bg-gray-50 px-3.5 py-2.5">
+      <div className="flex items-baseline justify-between gap-3">
+        <p className="text-sm font-medium text-gray-900">
+          Cheque {cheque.number} <span className="font-normal text-gray-500">· {cheque.bank}</span>
+        </p>
+        <p className="text-sm font-semibold text-gray-900">Rs. {cheque.amount.toLocaleString()}</p>
+      </div>
+      <p className="mt-0.5 text-xs text-gray-500">
+        {cheque.partyLabel} {cheque.party} · dated {formatDate(cheque.date)}
+      </p>
     </div>
   );
 }

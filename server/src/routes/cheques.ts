@@ -93,6 +93,7 @@ const editReceiptInput = z.object({
   branch: z.string().optional(),
   is_crossed: z.boolean().optional(),
   payee_name: z.string().optional(),
+  account_holder_name: z.string().trim().max(120).optional(),
 });
 
 // PUT /api/cheques/:id — fix a mistake on a received cheque. Only
@@ -137,7 +138,7 @@ chequesRouter.put(
       }
 
       db.prepare(
-        `UPDATE cheque_receipts SET cheque_number = ?, bank_name = ?, cheque_date = ?, amount = ?, sale_allocations = ?, branch = ?, is_crossed = ?, payee_name = ? WHERE id = ?`
+        `UPDATE cheque_receipts SET cheque_number = ?, bank_name = ?, cheque_date = ?, amount = ?, sale_allocations = ?, branch = ?, is_crossed = ?, payee_name = ?, account_holder_name = ? WHERE id = ?`
       ).run(
         data.cheque_number?.trim() ?? receipt.cheque_number,
         data.bank_name?.trim() ?? receipt.bank_name,
@@ -147,6 +148,7 @@ chequesRouter.put(
         data.branch !== undefined ? data.branch.trim() || null : receipt.branch,
         data.is_crossed !== undefined ? (data.is_crossed ? 1 : 0) : receipt.is_crossed,
         data.payee_name !== undefined ? data.payee_name.trim() || null : receipt.payee_name,
+        data.account_holder_name !== undefined ? data.account_holder_name.trim() || null : receipt.account_holder_name,
         req.params.id
       );
     });

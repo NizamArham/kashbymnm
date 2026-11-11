@@ -232,7 +232,10 @@ CREATE TABLE IF NOT EXISTS cheque_receipts (
   payee_name TEXT,
   -- The bills (sale ids, as JSON) this cheque was aimed at when the customer chose which bills to pay; NULL means it went to the
   -- oldest unpaid ones. Editing the cheque's amount re-applies it to the same bills.
-  sale_scope TEXT
+  sale_scope TEXT,
+  -- Whose bank account the cheque is drawn on, as printed on it — usually the customer, but not always (someone else's cheque).
+  -- NULL means it is the customer's own name.
+  account_holder_name TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_cheque_receipts_customer ON cheque_receipts(customer_id);

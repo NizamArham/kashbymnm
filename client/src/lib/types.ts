@@ -778,7 +778,8 @@ export interface SupplierBalance {
 // instead of depositing it ("transferred", carrying the customer it came
 // from too).
 export interface ChequeInfo {
-  source: "issued" | "transferred";
+  // "received" is a customer's cheque we are still holding (in hand, deposited, cleared or bounced) — not yet handed to a supplier.
+  source: "issued" | "transferred" | "received";
   cheque_number: string;
   bank_name: string;
   amount: number;
@@ -795,6 +796,8 @@ export interface ChequeInfo {
   // Who the cheque was actually made out to, exactly as written. Null
   // means it was made out to "Cash".
   payee_name: string | null;
+  // Whose bank account a customer's cheque is drawn on, as printed on it. Null means the customer's own name.
+  account_holder_name?: string | null;
   // When the bank cleared or bounced it; null while it is still pending.
   settled_at?: string | null;
 }

@@ -17,10 +17,12 @@ import { refundStoreCredit, usableStoreCredit } from "../lib/storeCreditRefund";
 
 export const customersRouter = Router();
 
-// cheque_receipts.sale_scope: the bills a cheque was aimed at (see schema.sql) — added to databases created before it existed.
+// cheque_receipts.sale_scope (the bills a cheque was aimed at) and .account_holder_name (whose account it is drawn on) — see
+// schema.sql; added to databases created before they existed.
 {
   const cols = db.prepare(`PRAGMA table_info(cheque_receipts)`).all() as { name: string }[];
   if (cols.length > 0 && !cols.some((c) => c.name === "sale_scope")) db.exec(`ALTER TABLE cheque_receipts ADD COLUMN sale_scope TEXT`);
+  if (cols.length > 0 && !cols.some((c) => c.name === "account_holder_name")) db.exec(`ALTER TABLE cheque_receipts ADD COLUMN account_holder_name TEXT`);
 }
 
 // Both admin and staff can view/create/manage customers — no role
@@ -1472,6 +1474,8 @@ const chequeItemInput = z.object({
   // Exactly who the cheque was made out to. Left unset/blank means it
   // was made out to "Cash".
   payee_name: z.string().optional(),
+  // Whose bank account the cheque is drawn on, as printed on it. Left blank means the customer's own name.
+  account_holder_name: z.string().trim().max(120).optional(),
 });
 
 const recordPaymentInput = z.object({
@@ -1584,8 +1588,8 @@ customersRouter.post(
         for (const c of cheques) {
           const receiptResult = db
             .prepare(
-              `INSERT INTO cheque_receipts (cheque_number, bank_name, amount, cheque_date, customer_id, sale_allocations, notes, branch, is_crossed, payee_name, sale_scope)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+              `INSERT INTO cheque_receipts (cheque_number, bank_name, amount, cheque_date, customer_id, sale_allocations, notes, branch, is_crossed, payee_name, sale_scope, account_holder_name)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             )
             .run(
               c.cheque_number.trim(),
@@ -1600,7 +1604,8 @@ customersRouter.post(
               c.branch?.trim() || null,
               c.is_crossed === false ? 0 : 1,
               c.payee_name?.trim() || null,
-              chosenBills.length > 0 ? JSON.stringify(chosenBills) : null
+              chosenBills.length > 0 ? JSON.stringify(chosenBills) : null,
+              c.account_holder_name?.trim() || null
             );
           chequeReceiptIds.push(Number(receiptResult.lastInsertRowid));
         }

@@ -152,7 +152,9 @@ export default function ChequePreviewModal({
   // Exactly who the cheque was made out to — "Cash" is the honest
   // default, not a named party we'd otherwise have to guess at.
   const payeeName = cheque.payee_name?.trim() || "Cash";
-  const accountName = cheque.source === "issued" ? businessName : cheque.from_customer_name ?? "Customer";
+  // The account the cheque is drawn on: ours when we wrote it; otherwise the account holder saved with it (a customer's cheque
+  // can be drawn on someone else's account), falling back to the customer's name.
+  const accountName = cheque.source === "issued" ? businessName : cheque.account_holder_name?.trim() || cheque.from_customer_name || "Customer";
   const isCrossed = !!cheque.is_crossed;
   // Only a cheque the bank has actually settled carries a seal.
   const stamped = cheque.status === "cleared" || cheque.status === "bounced";
@@ -358,6 +360,31 @@ export default function ChequePreviewModal({
                         Pay to {supplierName} only — {businessName}
                       </p>
                     </div>
+                  </div>
+                ) : cheque.source === "received" ? (
+                  <div className="flex-1 flex flex-col justify-center gap-3">
+                    <div className="flex items-center justify-between border-b border-gray-200 pb-2.5">
+                      <div className="min-w-0">
+                        <p className="text-[9px] text-gray-400 uppercase tracking-wide">Received from</p>
+                        <p className="text-sm text-gray-900 font-medium truncate">
+                          {cheque.from_customer_name}
+                          {cheque.from_customer_code && (
+                            <span className="text-gray-400 font-normal"> ({cheque.from_customer_code})</span>
+                          )}
+                        </p>
+                      </div>
+                      {cheque.date_received && (
+                        <p className="text-xs text-gray-500 flex-shrink-0 ml-3">{formatDateDisplay(cheque.date_received)}</p>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="min-w-0">
+                        <p className="text-[9px] text-gray-400 uppercase tracking-wide">Held by</p>
+                        <p className="text-sm text-gray-900 font-medium truncate">{businessName}</p>
+                      </div>
+                      <p className="text-xs text-gray-500 flex-shrink-0 ml-3">{STATUS_LABELS[cheque.status] ?? cheque.status}</p>
+                    </div>
+                    <p className="text-left text-[10px] text-gray-400 mt-1">Not endorsed to anyone.</p>
                   </div>
                 ) : (
                   <div className="flex-1 flex flex-col justify-center gap-3">

@@ -232,6 +232,8 @@ export default function CustomerProfilePage() {
   // the business by name — default to Cash, not a forced name.
   const [chequePayCash, setChequePayCash] = useState(true);
   const [chequePayeeName, setChequePayeeName] = useState("");
+  // Whose bank account the cheque is drawn on (blank = the customer's own name).
+  const [chequeHolderName, setChequeHolderName] = useState("");
   const [chequeAmount, setChequeAmount] = useState("");
   const [chequeDate, setChequeDate] = useState("");
   const [chequeListError, setChequeListError] = useState<string | null>(null);
@@ -241,6 +243,7 @@ export default function CustomerProfilePage() {
     branch: string;
     is_crossed: boolean;
     payee_name: string;
+    account_holder_name: string;
     amount: number;
     cheque_date: string;
     received_date: string;
@@ -356,6 +359,7 @@ export default function CustomerProfilePage() {
     setChequeNumber("");
     setChequeBankName("");
     setChequePayeeName("");
+    setChequeHolderName("");
     setChequeAmount("");
     setChequeDate("");
     setChequeListError(null);
@@ -429,6 +433,7 @@ export default function CustomerProfilePage() {
         branch: chequeBranch.trim(),
         is_crossed: chequeIsCrossed,
         payee_name: chequePayCash ? "" : chequePayeeName.trim(),
+        account_holder_name: chequeHolderName.trim(),
         amount: amt,
         cheque_date: chequeDate,
         received_date: todayIso(),
@@ -441,6 +446,7 @@ export default function CustomerProfilePage() {
     setChequeIsCrossed(true);
     setChequePayCash(true);
     setChequePayeeName("");
+    setChequeHolderName("");
     setChequeAmount("");
     setChequeDate("");
   }
@@ -490,6 +496,7 @@ export default function CustomerProfilePage() {
                   branch: c.branch || undefined,
                   is_crossed: c.is_crossed,
                   payee_name: c.payee_name,
+                  account_holder_name: c.account_holder_name || undefined,
                   amount: c.amount,
                   cheque_date: c.cheque_date,
                   received_date: c.received_date,
@@ -1495,25 +1502,37 @@ export default function CustomerProfilePage() {
                             placeholder="Cheque date"
                           />
                           <MoneyInput placeholder="Amount" value={chequeAmount} onChange={setChequeAmount} />
-                          <label className="flex items-center gap-1.5 text-xs text-gray-600 self-center pl-1">
-                            <input
-                              type="checkbox"
-                              checked={chequeIsCrossed}
-                              onChange={(e) => setChequeIsCrossed(e.target.checked)}
-                              className="rounded border-gray-300"
-                            />
-                            Crossed cheque
-                          </label>
+                          <Input
+                            placeholder="Account holder name"
+                            aria-label="Account holder name"
+                            title="Whose bank account the cheque is drawn on, as printed on it"
+                            value={chequeHolderName}
+                            onChange={(e) => setChequeHolderName(e.target.value)}
+                          />
+                          {payingCustomer && (
+                            <p className="col-span-2 -mt-1 text-xs text-gray-500">Leave the account holder blank if it is {payingCustomer.name}'s own account.</p>
+                          )}
                           <div className="col-span-2">
                             <Label>Payable to</Label>
-                            <TabToggle
-                              value={chequePayCash ? "cash" : "name"}
-                              onChange={(v) => setChequePayCash(v === "cash")}
-                              options={[
-                                { value: "cash", label: "Cash" },
-                                { value: "name", label: "A specific name" },
-                              ]}
-                            />
+                            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+                              <TabToggle
+                                value={chequePayCash ? "cash" : "name"}
+                                onChange={(v) => setChequePayCash(v === "cash")}
+                                options={[
+                                  { value: "cash", label: "Cash" },
+                                  { value: "name", label: "A specific name" },
+                                ]}
+                              />
+                              <label className="flex items-center gap-1.5 text-xs text-gray-600">
+                                <input
+                                  type="checkbox"
+                                  checked={chequeIsCrossed}
+                                  onChange={(e) => setChequeIsCrossed(e.target.checked)}
+                                  className="rounded border-gray-300"
+                                />
+                                Crossed cheque
+                              </label>
+                            </div>
                           </div>
                           <div className="col-span-2">
                             <Input
@@ -1605,13 +1624,18 @@ export default function CustomerProfilePage() {
                               >
                                 <div className="flex items-baseline justify-between gap-3">
                                   <p className="text-sm font-medium text-gray-900 truncate">
-                                    {c.payee_name}
+                                    Pay {c.payee_name || "Cash"}
                                   </p>
                                   <p className="text-sm font-semibold text-gray-900 tabular-nums flex-shrink-0">
                                     {c.amount.toLocaleString()}/-
                                   </p>
                                 </div>
 
+                                {c.account_holder_name && (
+                                  <p className="mt-0.5 text-xs text-gray-500 truncate" title="Account holder">
+                                    Account: {c.account_holder_name}
+                                  </p>
+                                )}
                                 <div className="flex items-center justify-between gap-3 mt-1.5">
                                   <div className="flex items-center gap-2 text-xs text-gray-500 truncate min-w-0">
                                     <span className="truncate">#{c.cheque_number}</span>

@@ -314,7 +314,7 @@ supplierPaymentsRouter.get(
         .prepare(
           `SELECT cheque_receipts.cheque_number, cheque_receipts.bank_name, cheque_receipts.amount,
                   cheque_receipts.cheque_date, cheque_receipts.status, cheque_receipts.date_received,
-                  cheque_receipts.branch, cheque_receipts.is_crossed, cheque_receipts.payee_name,
+                  cheque_receipts.branch, cheque_receipts.is_crossed, cheque_receipts.payee_name, cheque_receipts.account_holder_name,
                   CASE cheque_receipts.status WHEN 'cleared' THEN cheque_receipts.cleared_at WHEN 'bounced' THEN cheque_receipts.bounced_at END AS settled_at,
                   customers.name as from_customer_name, customers.customer_code as from_customer_code,
                   cheque_transfers.date_given as transfer_date
@@ -334,6 +334,7 @@ supplierPaymentsRouter.get(
             branch: string | null;
             is_crossed: number;
             payee_name: string | null;
+            account_holder_name: string | null;
             settled_at: string | null;
             from_customer_name: string;
             from_customer_code: string;
@@ -383,6 +384,8 @@ supplierPaymentsRouter.get(
       branch: string | null;
       is_crossed: number;
       payee_name: string | null;
+      // Whose bank account a customer's cheque is drawn on (null = the customer's own name).
+      account_holder_name?: string | null;
       // When the bank cleared or bounced it (null while it is still pending).
       settled_at: string | null;
     };
