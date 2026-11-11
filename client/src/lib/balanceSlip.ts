@@ -1,6 +1,6 @@
 import jsPDF from "jspdf";
 import { api } from "./api";
-import { BusinessInfo } from "./types";
+import { BusinessInfo, ExchangeOutcome } from "./types";
 import { NAME_LOGO_PNG_BASE64, NAME_LOGO_ASPECT_RATIO } from "./logoAsset";
 import { shopBankDetails, amountOnly, amountLKR } from "./receipts";
 import { previewPdf } from "./pdfPreview";
@@ -11,6 +11,8 @@ interface AmountDue {
   owed: number;
   store_credit: number;
   amount_to_pay: number;
+  // Exchanges whose old items are still on their way back (empty when there are none).
+  exchange_outcomes?: ExchangeOutcome[];
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -38,6 +40,7 @@ function localDateStamp(d: Date): string {
 // and the same "Pay Here" bank block.
 export function generateBalanceSlip(due: AmountDue, businessInfo: BusinessInfo | null, now = new Date()): jsPDF {
   const { customer, invoices, owed, store_credit, amount_to_pay } = due;
+  const exchangeOutcomes = due.exchange_outcomes ?? [];
   const creditApplied = Math.min(store_credit, owed);
   const creditLeft = Math.max(0, store_credit - creditApplied);
   const businessName = businessInfo?.business_name || "M&M Clothing";
@@ -132,7 +135,7 @@ export function generateBalanceSlip(due: AmountDue, businessInfo: BusinessInfo |
 
   // Totals, right-aligned like the invoice's.
   const payHereRoom = amount_to_pay > 0 ? 36 : 0;
-  if (y + 50 + (creditApplied > 0 ? 6 : 0) + (creditLeft > 0 ? 6 : 0) + payHereRoom > 270) {
+  if (y + 50 + (creditApplied > 0 ? 6 : 0) + (creditLeft > 0 ? 6 : 0) + payHereRoom + exchangeOutcomes.length * 24 > 270) {
     doc.addPage();
     y = 20;
   }
@@ -163,6 +166,20 @@ export function generateBalanceSlip(due: AmountDue, businessInfo: BusinessInfo |
     doc.setTextColor(90);
     doc.text("Store Credit Left", totalsX, y);
     doc.text(amountOnly(creditLeft), rightX, y, { align: "right" });
+  }
+
+  // Old items from an exchange that are still on their way back: said under the totals, so the amount due isn't read as the last word — what
+  // clears it (and what becomes store credit) once they are received and checked.
+  for (const outcome of exchangeOutcomes) {
+    const note = doc.splitTextToSize(`${outcome.lead}. ${outcome.text}.`, 60) as string[];
+    y += 7;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(90);
+    note.forEach((line, i) => {
+      if (i > 0) y += 4;
+      doc.text(line, totalsX, y);
+    });
   }
 
   // The invoice's own "Pay Here" block, as-is — plus the customer code as

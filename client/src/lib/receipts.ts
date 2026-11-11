@@ -518,7 +518,8 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
   const notice = delivery ? null : deliveryNotice(sale);
   const deliveryRoom =
     (delivery ? 7 + (delivery.note ? 4.5 : 0) + (delivery.payable !== null ? 7 : 0) + 7 + (delivery.exchange ? 18 + (delivery.prepaid > 0 ? 7 : 0) : 0) : notice ? 7 : 0) +
-    (quote ? 40 : 0);
+    (quote ? 40 : 0) +
+    (sale.exchange_outcome ? 22 : 0);
 
   if (y + 46 + paymentLines * 6.5 + creditSources.length * 4.5 + deliveryRoom > 270) {
     doc.addPage();
@@ -717,6 +718,20 @@ export function generateA4Pdf(sale: Sale, businessInfo?: BusinessInfo | null): j
     doc.text(notice.value, rightX, y, { align: "right" });
   }
 
+  // An exchange whose old items haven't come back: said at the foot of the totals what clears (and what becomes store credit) once they arrive.
+  if (sale.exchange_outcome) {
+    const note = doc.splitTextToSize(`${sale.exchange_outcome.lead}. ${sale.exchange_outcome.text}.`, 60) as string[];
+    y += 6;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(90);
+    note.forEach((line, i) => {
+      if (i > 0) y += 4;
+      doc.text(line, totalsX, y);
+    });
+    doc.setFontSize(9.5);
+  }
+
   if (totalSavings > 0) {
     y += 6;
     doc.setFontSize(9.5);
@@ -870,7 +885,8 @@ export function generateThermalPdf(sale: Sale): jsPDF {
     40 +
     (breakdown.storeCredit > 0 || breakdown.showBalance ? 12 : 0) +
     breakdown.creditSources.length * 6 +
-    (deliveryBreakdown(sale) ? 22 + (deliveryBreakdown(sale)!.exchange ? 10 : 0) : deliveryNotice(sale) ? 6 : 0);
+    (deliveryBreakdown(sale) ? 22 + (deliveryBreakdown(sale)!.exchange ? 10 : 0) : deliveryNotice(sale) ? 6 : 0) +
+    (sale.exchange_outcome ? 18 : 0);
 
   const doc = new jsPDF({ unit: "mm", format: [widthMm, estimatedHeight] });
   let y = 8;
@@ -1127,6 +1143,16 @@ export function generateThermalPdf(sale: Sale): jsPDF {
     }
   }
 
+  // An exchange whose old items haven't come back: what clears (and what becomes store credit) once they arrive.
+  if (sale.exchange_outcome) {
+    doc.setFont("courier", "normal");
+    doc.setFontSize(6.5);
+    const note = doc.splitTextToSize(`${sale.exchange_outcome.lead}. ${sale.exchange_outcome.text}.`, contentWidth) as string[];
+    doc.text(note, marginX, y);
+    y += note.length * 3 + 2;
+    doc.setFontSize(7);
+  }
+
   doc.line(marginX, y, widthMm - marginX, y);
   y += 5;
 
@@ -1234,6 +1260,7 @@ export function buildWhatsAppMessage(sale: Sale, businessInfo?: BusinessInfo | n
       const notice = deliveryNotice(sale);
       if (notice) lines.push(`Delivery fee: ${notice.value}`);
     }
+    if (sale.exchange_outcome) lines.push("", `_${sale.exchange_outcome.lead}. ${sale.exchange_outcome.text}._`);
     lines.push("");
     lines.push("Thank you for shopping with us!");
   }

@@ -274,6 +274,20 @@ export interface SaleExchange {
   advance_credit?: number;
 }
 
+// An exchange whose old items haven't come back: what they are worth, and — once they are received and checked — how much of it clears what the
+// customer still owes and how much becomes store credit. Worked out on the server; `lead` and `text` are the two sentences printed on bills and slips.
+export interface ExchangeOutcome {
+  invoice: string;
+  waiting_items: { name: string; worth: number }[];
+  waiting_value: number;
+  owed_now: number;
+  clears: number;
+  to_credit: number;
+  advance_given: number;
+  lead: string;
+  text: string;
+}
+
 // A quotation for an exchange by delivery: what was quoted and what the customer has to pay to confirm it.
 export interface ExchangeQuote {
   old_sale_item_ids: number[];
@@ -436,6 +450,8 @@ export interface SalePaymentEntry {
 export interface Sale {
   id: number;
   invoice: string;
+  // Set while an exchange's old items are still on their way back.
+  exchange_outcome?: ExchangeOutcome | null;
   customer_id: number | null;
   customer_name?: string;
   customer_code?: string;

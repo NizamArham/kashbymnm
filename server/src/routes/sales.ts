@@ -18,6 +18,7 @@ import {
   exchangeQuoteSummary,
   exchangesOutOfSale,
 } from "../lib/exchanges";
+import { exchangeOutcomeForSale } from "../lib/exchangeOutcome";
 import { pickupsForSale } from "../lib/onlineReturns";
 import { assertNotHeldByAnother, endOfDay, holdEndOf, holdUnits, releaseHold } from "../lib/stockHolds";
 import { LIVE_COD_SQL } from "../lib/deliveryCod";
@@ -693,6 +694,8 @@ salesRouter.get(
       items,
       delivery_address,
       exchange: exchangeForSale(sale.id),
+      // For an exchange still waiting on its old items: what they clear and what becomes store credit once they arrive (printed on the bill).
+      exchange_outcome: exchangeOutcomeForSale(sale.id),
       exchange_quote: sale.status === "quotation" ? exchangeQuoteSummary(sale) : null,
       // For a payment request: when the hold on its pieces ends (null if it isn't holding any).
       hold_until: sale.status === "quotation" ? holdEndOf(sale.id) : null,
