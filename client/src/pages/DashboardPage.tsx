@@ -138,6 +138,8 @@ export default function DashboardPage() {
   const [chartPeriod, setChartPeriod] = useState<"year" | "month">("year");
   const [loading, setLoading] = useState(true);
 
+  // What's wrong with the automatic daily backup, if anything — it stays quiet when all is well.
+  const [backupProblem, setBackupProblem] = useState<string | null>(null);
   const [chequeReminders, setChequeReminders] = useState<{
     to_deposit: ChequeReminder[];
     to_pay: ChequeReminder[];
@@ -213,6 +215,15 @@ export default function DashboardPage() {
           if (!cancelled) setCourierOwed(r);
         })
         .catch(() => {});
+      api
+        .get<{ enabled: boolean; newest_at: string | null; last_error: string | null }>("/backup/status")
+        .then((b) => {
+          if (cancelled || !b.enabled) return;
+          const days = b.newest_at ? Math.floor((Date.now() - new Date(b.newest_at).getTime()) / 86400000) : 0;
+          if (b.last_error) setBackupProblem("The automatic backup failed — your data isn't being saved");
+          else if (days >= 2) setBackupProblem(`No automatic backup for ${days} days`);
+        })
+        .catch(() => {});
     }
 
     return () => {
@@ -278,6 +289,7 @@ export default function DashboardPage() {
   const hasLowStock = lowStockProducts !== null && lowStockProducts > 0;
 
   const needsAttentionCount =
+    (backupProblem ? 1 : 0) +
     (approvalsWaiting > 0 ? 1 : 0) +
     (hasParcels ? 1 : 0) +
     (hasCourierOwed ? 1 : 0) +
@@ -378,6 +390,16 @@ export default function DashboardPage() {
                     Couriers owe you — <span className="tabular-nums">Rs. {courierOwed.total.toLocaleString()}</span>
                     <span className="text-gray-400"> ({courierOwed.couriers} courier{courierOwed.couriers === 1 ? "" : "s"})</span>
                   </span>
+                  <ArrowRight size={14} className="text-gray-400" />
+                </button>
+              )}
+
+              {backupProblem && (
+                <button
+                  onClick={() => navigate("/settings/general")}
+                  className="w-full flex items-center justify-between py-2.5 text-left hover:bg-gray-50 -mx-2 px-2 rounded transition"
+                >
+                  <span className="text-sm text-red-600">{backupProblem}</span>
                   <ArrowRight size={14} className="text-gray-400" />
                 </button>
               )}

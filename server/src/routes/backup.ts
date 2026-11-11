@@ -6,6 +6,7 @@ import nodemailer from "nodemailer";
 import { db } from "../db/connection";
 import { ApiError, asyncHandler } from "../lib/errors";
 import { requireAuth, requireRole } from "../lib/auth";
+import { backupStatus, runBackup } from "../lib/autoBackup";
 
 export const backupRouter = Router();
 
@@ -90,5 +91,24 @@ backupRouter.post(
     }
 
     res.json({ sent_to: recipients });
+  })
+);
+
+// GET /api/backup/status — the automatic daily backup: where it goes, how many copies are kept, when the newest was made, and any failure.
+backupRouter.get("/status", (_req, res) => {
+  res.json(backupStatus());
+});
+
+// POST /api/backup/run — make today's automatic copy now (it does nothing if today's is already there).
+backupRouter.post(
+  "/run",
+  asyncHandler(async (_req, res) => {
+    let result: "made" | "already_done" | "off";
+    try {
+      result = await runBackup();
+    } catch (err) {
+      throw new ApiError(500, `The backup didn't work: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    res.json({ result, ...backupStatus() });
   })
 );

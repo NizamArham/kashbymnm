@@ -32,6 +32,7 @@ import { exchangesRouter } from "./routes/exchanges";
 import { returnPickupsRouter } from "./routes/returnPickups";
 import { manualItemsRouter } from "./routes/manualItems";
 import { startCourierSync } from "./lib/courierSync";
+import { startAutoBackup } from "./lib/autoBackup";
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -101,4 +102,5 @@ app.listen(Number(PORT), HOST, () => {
   console.log(`M&M Clothing server running at http://localhost:${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/api/health`);
   startCourierSync();
+  startAutoBackup();
 });

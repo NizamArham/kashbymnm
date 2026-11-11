@@ -3,11 +3,24 @@ import { PageLoader } from "../components/Loader";
 import { Building2, MapPin, Phone, Mail, Globe, Landmark, Pencil, Keyboard, DatabaseBackup, Download, Send } from "lucide-react";
 import { api, ApiRequestError, downloadFile } from "../lib/api";
 import { BusinessInfo } from "../lib/types";
+import { formatDateTime } from "../lib/dates";
 import { NAV_SHORTCUTS } from "../lib/navShortcuts";
 import { PageHeader, Card, Input, Label, FormGroup, ErrorText, SuccessText, Button, TabToggle } from "../components/ui";
 import ReturnSplitSettings from "../components/ReturnSplitSettings";
 
 type SettingsTab = "business" | "returns" | "reference" | "backup";
+
+interface AutoBackupStatus {
+  enabled: boolean;
+  folder: string | null;
+  kind: "icloud" | "custom" | "local" | "off";
+  keep_days: number;
+  count: number;
+  newest_file: string | null;
+  newest_at: string | null;
+  last_error: string | null;
+  last_error_at: string | null;
+}
 
 interface ShortcutEntry {
   keys: string;
@@ -77,6 +90,10 @@ export default function GeneralSettingsPage() {
   const [emailingBackup, setEmailingBackup] = useState(false);
   const [backupEmailError, setBackupEmailError] = useState<string | null>(null);
   const [backupEmailSuccess, setBackupEmailSuccess] = useState<string | null>(null);
+  // The automatic daily backup: where it goes, how many copies there are, when the newest was made, and any failure.
+  const [autoBackup, setAutoBackup] = useState<AutoBackupStatus | null>(null);
+  const [autoBackupRunning, setAutoBackupRunning] = useState(false);
+  const [autoBackupError, setAutoBackupError] = useState<string | null>(null);
 
   useEffect(() => {
     api
@@ -150,6 +167,25 @@ export default function GeneralSettingsPage() {
   }
 
   const address = [saved.address_line1, saved.address_line2, saved.city].filter(Boolean).join(", ");
+
+  useEffect(() => {
+    if (tab !== "backup") return;
+    api.get<AutoBackupStatus>("/backup/status").then(setAutoBackup).catch(() => setAutoBackup(null));
+  }, [tab]);
+
+  async function handleRunBackup() {
+    setAutoBackupError(null);
+    setAutoBackupRunning(true);
+    try {
+      await api.post("/backup/run");
+      setAutoBackup(await api.get<AutoBackupStatus>("/backup/status"));
+    } catch (err) {
+      setAutoBackupError(err instanceof ApiRequestError ? err.message : "The backup didn't work");
+      api.get<AutoBackupStatus>("/backup/status").then(setAutoBackup).catch(() => {});
+    } finally {
+      setAutoBackupRunning(false);
+    }
+  }
 
   async function handleDownloadBackup() {
     setConfirmingBackup(false);
@@ -465,6 +501,39 @@ export default function GeneralSettingsPage() {
         <p className="text-xs text-gray-500 mb-4">
           A full snapshot of everything in Kash — products, sales, customers, all of it. Worth grabbing one regularly.
         </p>
+
+        {autoBackup && (
+          <div className="flex items-center justify-between gap-4 py-3 border-t border-gray-100">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-gray-900">Automatic daily backup</p>
+              {!autoBackup.enabled ? (
+                <p className="text-xs text-amber-700">Off — nothing is being backed up automatically.</p>
+              ) : (
+                <>
+                  <p className="text-xs text-gray-500">
+                    {autoBackup.kind === "icloud"
+                      ? "Saved to iCloud Drive › Kash Backups"
+                      : autoBackup.kind === "local"
+                      ? "Saved on this computer only (no iCloud Drive found) — not safe if the computer is lost"
+                      : `Saved to ${autoBackup.folder}`}
+                    {" · "}the last {autoBackup.keep_days} days are kept.
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    {autoBackup.newest_at ? `Newest copy: ${formatDateTime(autoBackup.newest_at)} · ${autoBackup.count} saved.` : "No copy yet — the first one is made a minute after the server starts."}
+                  </p>
+                </>
+              )}
+              {autoBackup.last_error && <p className="text-xs text-red-600">The last attempt failed: {autoBackup.last_error}</p>}
+              {autoBackupError && <p className="text-xs text-red-600">{autoBackupError}</p>}
+            </div>
+            {autoBackup.enabled && (
+              <Button onClick={handleRunBackup} disabled={autoBackupRunning} className="inline-flex items-center gap-1.5 flex-shrink-0">
+                <DatabaseBackup size={14} />
+                {autoBackupRunning ? "Saving..." : "Back up now"}
+              </Button>
+            )}
+          </div>
+        )}
 
         <div className="flex items-center justify-between py-3 border-t border-gray-100">
           <div>
