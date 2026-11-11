@@ -1204,6 +1204,8 @@ customersRouter.get(
       final_balance: runningBalance,
       // Refunds approved for returns but not yet paid out: they show in the balance as a credit, which is money to hand back, not store credit.
       refund_owed: Math.round(refundOwed * 100) / 100,
+      // Exchanges whose old items haven't come back: the figures behind the "on the way back" line, for the statement's closing summary.
+      exchange_outcomes: pendingExchanges.map((p) => p.outcome),
       // COD still to be collected at the door (orders not yet delivered).
       on_delivery: onWay.map((o) => ({ sale_id: o.id, invoice: o.invoice, partner: o.partner_name, amount: o.amount })),
       // Paid to the courier at delivery, not yet paid over to the shop.

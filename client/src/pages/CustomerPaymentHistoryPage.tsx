@@ -4,10 +4,11 @@ import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Receipt, Download, Copy, Check, Wallet, Truck } from "lucide-react";
 import RefundSlipButton from "../components/RefundSlipButton";
 import { api, ApiRequestError } from "../lib/api";
-import { Customer } from "../lib/types";
+import { BusinessInfo, Customer, ExchangeOutcome } from "../lib/types";
 import { downloadTabularReport, rangeLabelFor, buildReportFilename, todayLongDate } from "../lib/reportPdf";
 import { useKeyboardShortcut } from "../lib/useKeyboardShortcut";
 import { downloadBalanceSlip } from "../lib/balanceSlip";
+import { shopBankDetails } from "../lib/receipts";
 import { PageHeader, Card, Table, Th, Td, EmptyState, ErrorText, DateRangePicker, Button, RefLink, Badge, BadgeTone } from "../components/ui";
 import { formatDate, formatTime } from "../lib/dates";
 
@@ -136,6 +137,8 @@ export default function CustomerPaymentHistoryPage({ customerId }: { customerId?
   const [refundOwed, setRefundOwed] = useState(0);
   const [withCourier, setWithCourier] = useState<WithCourier[]>([]);
   const [onDelivery, setOnDelivery] = useState<WithCourier[]>([]);
+  // Exchanges whose old items haven't come back — said in the statement's closing summary.
+  const [exchangeOutcomes, setExchangeOutcomes] = useState<ExchangeOutcome[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [slipping, setSlipping] = useState(false);
@@ -150,7 +153,7 @@ export default function CustomerPaymentHistoryPage({ customerId }: { customerId?
       setLoading(true);
       setError(null);
       try {
-        const result = await api.get<{ customer: Customer; entries: LedgerEntry[]; final_balance: number; refund_owed?: number; with_courier: WithCourier[]; on_delivery: WithCourier[] }>(
+        const result = await api.get<{ customer: Customer; entries: LedgerEntry[]; final_balance: number; refund_owed?: number; exchange_outcomes?: ExchangeOutcome[]; with_courier: WithCourier[]; on_delivery: WithCourier[] }>(
           `/customers/${id}/payment-history`
         );
         if (cancelled) return;
@@ -160,6 +163,7 @@ export default function CustomerPaymentHistoryPage({ customerId }: { customerId?
         setRefundOwed(result.refund_owed ?? 0);
         setWithCourier(result.with_courier ?? []);
         setOnDelivery(result.on_delivery ?? []);
+        setExchangeOutcomes(result.exchange_outcomes ?? []);
       } catch (err) {
         if (!cancelled) setError(err instanceof ApiRequestError ? err.message : "Failed to load payment history");
       } finally {
@@ -218,7 +222,7 @@ export default function CustomerPaymentHistoryPage({ customerId }: { customerId?
     }
   }
 
-  function downloadPdf() {
+  async function downloadPdf() {
     if (!customer) return;
     // A statement reads oldest to newest, so the balance builds down the
     // page and the closing balance is the last thing on it. If the date
@@ -239,7 +243,8 @@ export default function CustomerPaymentHistoryPage({ customerId }: { customerId?
         const isSale = entry.kind === "sale";
         const detailParts = [
           entry.transaction_code ? `Transaction ID ${entry.transaction_code}` : "",
-          ...(entry.details ?? []).map((line) => pdfText(isSale ? `Note: ${line}` : line)),
+          // The "old items on the way back" explanation is in the closing summary, so its row stays a one-line entry.
+          ...(entry.kind === "exchange" ? [] : entry.details ?? []).map((line) => pdfText(isSale ? `Note: ${line}` : line)),
         ].filter(Boolean);
         return {
           cells: [entry.date.slice(0, 10), pdfText(entry.title), PILL[entry.kind].text, entry.amount_label ? `${num(entry.amount)} ${entry.amount_label}` : signedAmount(entry.effect, true), balanceText(entry.running_balance, false).text],
@@ -248,6 +253,39 @@ export default function CustomerPaymentHistoryPage({ customerId }: { customerId?
         };
       }),
     ];
+    // The closing balance is the last row's balance (not today's): where the statement ends.
+    const closing = filteredEntries.length > 0 ? filteredEntries[filteredEntries.length - 1].running_balance : broughtForward ?? 0;
+    const closingText = closing > 0 ? money(closing) : closing < 0 ? `${money(-closing)} credit` : "Settled";
+    const bank = shopBankDetails(await api.get<BusinessInfo | null>("/business-info").catch(() => null));
+    const accountSummary = {
+      total: { label: "Closing balance", amount: closingText },
+      after: [
+        { label: "Store credit available", amount: money(credit) },
+        ...(Math.abs(closing - finalBalance) >= 0.5 ? [{ label: "Balance today", amount: finalBalance > 0 ? money(finalBalance) : finalBalance < 0 ? `${money(-finalBalance)} credit` : "Settled" }] : []),
+        ...(courierTotal > 0 ? [{ label: "Paid to courier, awaiting payout", amount: money(courierTotal) }] : []),
+        ...(onDeliveryTotal > 0 ? [{ label: "To pay on delivery (COD)", amount: money(onDeliveryTotal) }] : []),
+      ],
+      notes: [
+        ...(exchangeOutcomes.length > 0
+          ? [{ heading: "Pending", lines: exchangeOutcomes.flatMap((o) => [pdfText(`${o.waiting_items.map((i) => `${i.name} ${i.worth.toLocaleString()}`).join("  ·  ")}`), pdfText(`${o.lead}. ${o.text}.`)]) }]
+          : []),
+      ],
+      // Owing something: "Pay" with the amount and "Pay Here" with the shop's account, as on the invoice and the balance slip.
+      payRows:
+        closing > 0
+          ? [
+              { label: "Pay", value: money(closing) },
+              ...(bank.accountNumber
+                ? [
+                    { label: "Pay Here", value: bank.accountName },
+                    { label: "", value: bank.accountNumber },
+                    { label: "", value: bank.bankName },
+                    { label: "Ref", value: customer.customer_code },
+                  ]
+                : []),
+            ]
+          : [],
+    };
     downloadTabularReport({
       headerLabel: "M&M Clothing — Customer Statement",
       headerFields: [
@@ -265,14 +303,7 @@ export default function CustomerPaymentHistoryPage({ customerId }: { customerId?
         { label: "Balance (Rs.)", width: 103, align: "right" },
       ],
       rows,
-      totalSummary: {
-        label: "Closing balance",
-        amount: finalBalance > 0 ? money(finalBalance) : finalBalance < 0 ? `${money(-finalBalance)} credit` : "Settled",
-        note:
-          `Owed on invoices ${money(owed)}  |  Store credit available ${money(credit)}` +
-          (courierTotal > 0 ? `  |  Paid to courier, awaiting payout ${money(courierTotal)}` : "") +
-          (onDeliveryTotal > 0 ? `  |  To pay on delivery (COD) ${money(onDeliveryTotal)}` : ""),
-      },
+      accountSummary,
       filename: buildReportFilename("Customer Statement", `${customer.customer_code}-${toISODate(new Date())}`),
     });
   }

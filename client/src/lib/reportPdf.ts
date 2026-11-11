@@ -34,6 +34,18 @@ export interface ReportSummaryLine {
   bold?: boolean;
 }
 
+// A statement's closing block, the way a bank or utility statement ends: the closing figure (with optional label / amount rows that lead to it, already
+// formatted by the report, so it decides the signs and the wording), a few facts under it, then plain notes in full width.
+export interface ReportAccountSummary {
+  rows?: { label: string; amount: string }[];
+  total: { label: string; amount: string };
+  after?: { label: string; amount: string }[];
+  notes?: { heading: string; lines: string[] }[];
+  // Closing label / value rows in the invoice's own key-value style ("Pay  Rs. 3,700", "Pay Here  account name"); a row with no label continues
+  // the one above it.
+  payRows?: { label: string; value: string }[];
+}
+
 // The one number a report is actually for — rendered the same
 // restrained way the invoice's own Total row is: a hairline rule, the
 // label at normal weight, and just the amount itself sized up a couple
@@ -70,6 +82,8 @@ export interface TabularReportOptions {
   rows: ReportRow[];
   summaryLines?: ReportSummaryLine[];
   totalSummary?: ReportTotalSummary;
+  // When given, this closes the report instead of totalSummary.
+  accountSummary?: ReportAccountSummary;
   filename: string;
   // Wide tables (many columns) read better in landscape. Defaults to
   // portrait, which suits the narrower ledger-style reports. "auto"
@@ -460,6 +474,91 @@ export function downloadTabularReport(opts: TabularReportOptions): void {
       y += thisRowHeight;
     }
   });
+
+  if (opts.accountSummary) {
+    const a = opts.accountSummary;
+    const right = marginX + tableWidth;
+    const blockW = 240;
+    const blockX = right - blockW;
+    const noteGap = 12;
+    // A new page when the summary would run into the footer; the page's footer label follows the page before it.
+    const ensureRoom = (needed: number) => {
+      if (y + needed <= footerBandTop) return;
+      doc.addPage();
+      pageNum++;
+      partLabels[pageNum - 1] = partLabels[pageNum - 2] ?? "";
+      y = headerBandBottom + 10;
+    };
+    const rows = a.rows ?? [];
+    ensureRoom(46 + rows.length * 15 + (a.after?.length ?? 0) * 14);
+    y += 24;
+    doc.setFont("helvetica", "normal");
+    if (rows.length > 0) {
+      doc.setFontSize(8);
+      doc.setTextColor(130);
+      doc.text("ACCOUNT SUMMARY", blockX, y);
+      y += 5;
+      doc.setDrawColor(200);
+      doc.line(blockX, y, right, y);
+      for (const row of rows) {
+        y += 15;
+        doc.setFontSize(9.5);
+        doc.setTextColor(110);
+        doc.text(row.label, blockX, y);
+        doc.setTextColor(20);
+        doc.text(row.amount, right, y, { align: "right" });
+      }
+      y += 9;
+    }
+    doc.setDrawColor(200);
+    doc.line(blockX, y, right, y);
+    y += 17;
+    doc.setFontSize(10);
+    doc.setTextColor(20);
+    doc.text(a.total.label, blockX, y);
+    doc.setFontSize(13);
+    doc.text(a.total.amount, right, y, { align: "right" });
+    for (const row of a.after ?? []) {
+      y += 15;
+      doc.setFontSize(9);
+      doc.setTextColor(130);
+      doc.text(row.label, blockX, y);
+      doc.text(row.amount, right, y, { align: "right" });
+    }
+    for (const block of a.notes ?? []) {
+      // Wrapped at the size they are printed at, so a line never runs past the right edge.
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9.5);
+      const wrapped = block.lines.flatMap((line) => doc.splitTextToSize(line, tableWidth) as string[]);
+      ensureRoom(34 + wrapped.length * noteGap);
+      y += 26;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.setTextColor(130);
+      doc.text(block.heading.toUpperCase(), marginX, y);
+      y += 4;
+      doc.setFontSize(9.5);
+      doc.setTextColor(60);
+      for (const line of wrapped) {
+        y += noteGap;
+        doc.text(line, marginX, y);
+      }
+    }
+    if (a.payRows && a.payRows.length > 0) {
+      ensureRoom(26 + a.payRows.length * 16);
+      y += 14;
+      for (const row of a.payRows) {
+        y += 16;
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(10.5);
+        doc.setTextColor(150);
+        if (row.label) doc.text(row.label, marginX, y);
+        doc.setTextColor(20);
+        doc.text(row.value, marginX + 72, y);
+      }
+    }
+    y += 6;
+  }
 
   if (opts.totalSummary) {
     y += 8;
