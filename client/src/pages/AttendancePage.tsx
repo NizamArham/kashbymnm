@@ -1,116 +1,47 @@
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
-import { PageLoader } from "../components/Loader";
-import { ClipboardCheck } from "lucide-react";
-import { api, ApiRequestError } from "../lib/api";
-import { DailyAttendanceRow, AttendanceStatus } from "../lib/types";
-import { PageHeader, Card, EmptyState, ErrorText } from "../components/ui";
-import { formatDate, formatTime } from "../lib/dates";
+import { useSearchParams } from "react-router-dom";
+import { PageHeader, TabToggle } from "../components/ui";
+import AttendanceDaily from "../components/AttendanceDaily";
+import AttendanceMonth from "../components/AttendanceMonth";
+import { todayInSriLanka } from "../lib/time";
 
-const STATUS_OPTIONS: { value: AttendanceStatus; label: string; activeClass: string }[] = [
-  { value: "present", label: "Present", activeClass: "bg-green-600 text-white" },
-  { value: "half_day", label: "Half day", activeClass: "bg-amber-500 text-white" },
-  { value: "leave", label: "Leave", activeClass: "bg-gray-500 text-white" },
-  { value: "absent", label: "Absent", activeClass: "bg-red-600 text-white" },
-];
+type AttendanceTab = "day" | "month";
 
-function toISODate(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
+const isDate = (v: string | null): v is string => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
+const isMonth = (v: string | null): v is string => !!v && /^\d{4}-(0[1-9]|1[0-2])$/.test(v);
 
+// Who came in. The Daily tab is where it's marked (one day at a time); the Monthly tab is the register — every person, every day, and the
+// month's totals — which is what a month's pay is worked out from. The tab, day and month live in the address, so a link or a refresh keeps them.
 export default function AttendancePage() {
-  const navigate = useNavigate();
-  const [date, setDate] = useState(() => toISODate(new Date()));
-  const [staff, setStaff] = useState<DailyAttendanceRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [savingId, setSavingId] = useState<number | null>(null);
+  const [params, setParams] = useSearchParams();
+  const today = todayInSriLanka();
+  const tab: AttendanceTab = params.get("tab") === "month" ? "month" : "day";
+  const date = isDate(params.get("date")) && params.get("date")! <= today ? params.get("date")! : today;
+  const month = isMonth(params.get("month")) && params.get("month")! <= today.slice(0, 7) ? params.get("month")! : today.slice(0, 7);
 
-  async function load() {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await api.get<{ date: string; staff: DailyAttendanceRow[] }>(`/attendance?date=${date}`);
-      setStaff(result.staff);
-    } catch (err) {
-      setError(err instanceof ApiRequestError ? err.message : "Failed to load attendance");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [date]);
-
-  async function mark(userId: number, status: AttendanceStatus) {
-    setSavingId(userId);
-    try {
-      await api.post("/attendance", { user_id: userId, attendance_date: date, status });
-      await load();
-    } catch (err) {
-      setError(err instanceof ApiRequestError ? err.message : "Failed to save attendance");
-    } finally {
-      setSavingId(null);
-    }
-  }
-
-  const markedCount = staff.filter((s) => s.status).length;
+  const go = (next: Record<string, string>) => setParams(next, { replace: true });
+  const showDay = (d: string) => go(d === today ? {} : { date: d });
+  const showMonth = (m: string) => go({ tab: "month", ...(m === today.slice(0, 7) ? {} : { month: m }) });
 
   return (
     <div>
       <PageHeader
         title="Attendance"
-        subtitle="Mark each staff member's attendance for the selected day."
-        action={
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="border border-gray-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-gray-400"
+        subtitle={tab === "day" ? "Mark each staff member's attendance for the day." : "Every person, every day, and the month's totals."}
+        tabs={
+          <TabToggle
+            value={tab}
+            onChange={(v) => (v === "day" ? go(date === today ? {} : { date }) : showMonth(month))}
+            options={[
+              { value: "day", label: "Daily" },
+              { value: "month", label: "Monthly" },
+            ]}
           />
         }
       />
-
-      {error && <ErrorText>{error}</ErrorText>}
-
-      {!loading && (
-        <p className="text-xs text-gray-500 mb-3">
-          {markedCount} of {staff.length} marked for {formatDate(date)}
-        </p>
-      )}
-
-      {loading ? (
-        <PageLoader />
-      ) : staff.length === 0 ? (
-        <EmptyState icon={ClipboardCheck} title="No staff accounts yet" actions={[{ label: "Add staff", primary: true, onClick: () => navigate("/staff/add") }]} />
+      {tab === "day" ? (
+        <AttendanceDaily date={date} today={today} onDateChange={showDay} />
       ) : (
-        <div className="space-y-2">
-          {staff.map((s) => (
-            <Card key={s.user_id} className="flex items-center justify-between gap-2 py-3 flex-wrap">
-              <div>
-                <p className="text-sm font-medium text-gray-900">{s.name ?? "—"}</p>
-                <p className="text-xs text-gray-500">{s.job_title ?? "—"}</p>
-              </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                {s.status && <span className="text-xs text-gray-500 mr-1">Marked {formatTime(s.marked_at) ?? ""}</span>}
-                {STATUS_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    onClick={() => mark(s.user_id, opt.value)}
-                    disabled={savingId === s.user_id}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition disabled:opacity-50 ${
-                      s.status === opt.value ? opt.activeClass : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </Card>
-          ))}
-        </div>
+        <AttendanceMonth month={month} today={today} onMonthChange={showMonth} onOpenDay={showDay} />
       )}
     </div>
   );

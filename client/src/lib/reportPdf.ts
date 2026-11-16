@@ -10,6 +10,8 @@ export interface ReportColumn {
   // it onto one — use for a field like "Reason" or "Notes" where the
   // full text matters more than keeping every row the same height.
   wrap?: boolean;
+  // A narrow column of short values (a day number, a single letter, a count): trims the usual cell padding so the text isn't cut short.
+  tight?: boolean;
 }
 
 export interface ReportCellStyle {
@@ -374,12 +376,12 @@ export function downloadTabularReport(opts: TabularReportOptions): void {
       doc.setTextColor(80);
       let hx = marginX + 6;
       for (const col of cols) {
-        const maxWidth = col.align === "center" ? col.width - 6 : col.width - 14;
+        const maxWidth = col.tight ? col.width - 2 : col.align === "center" ? col.width - 6 : col.width - 14;
         col.label.split("\n").forEach((part, li) => {
           const label = fitText(doc, part, maxWidth);
           const ty = yPos + 14 + li * lineGap;
           if (col.align === "right") {
-            doc.text(label, hx + col.width - 12, ty, { align: "right" });
+            doc.text(label, hx + col.width - (col.tight ? 8 : 12), ty, { align: "right" });
           } else if (col.align === "center") {
             doc.text(label, hx + col.width / 2, ty, { align: "center" });
           } else {
@@ -404,7 +406,8 @@ export function downloadTabularReport(opts: TabularReportOptions): void {
         const style = row.styles?.[colIdxs[k]];
         doc.setFont("helvetica", style?.bold ? "bold" : "normal");
         const raw = row.cells[colIdxs[k]] ?? "";
-        return col.wrap ? wrapLines(doc, raw, col.width - 14) : [fitText(doc, raw, col.width - 14)];
+        const room = col.tight ? col.width - 2 : col.width - 14;
+        return col.wrap ? wrapLines(doc, raw, room) : [fitText(doc, raw, room)];
       });
       const linesInRow = Math.max(1, ...cellLines.map((lines) => lines.length));
       const lastMainBaseline = 14 + (linesInRow - 1) * lineGap;
@@ -438,7 +441,7 @@ export function downloadTabularReport(opts: TabularReportOptions): void {
         cellLines[k].forEach((lineText, li) => {
           const ty = y + 14 + li * lineGap;
           if (col.align === "right") {
-            doc.text(lineText, x + col.width - 12, ty, { align: "right" });
+            doc.text(lineText, x + col.width - (col.tight ? 8 : 12), ty, { align: "right" });
           } else if (col.align === "center") {
             doc.text(lineText, x + col.width / 2, ty, { align: "center" });
           } else {
@@ -447,7 +450,7 @@ export function downloadTabularReport(opts: TabularReportOptions): void {
           if (style?.strikethrough && lineText) {
             const w = doc.getTextWidth(lineText);
             const lineY = ty - 3;
-            const startX = col.align === "right" ? x + col.width - 12 - w : col.align === "center" ? x + col.width / 2 - w / 2 : x;
+            const startX = col.align === "right" ? x + col.width - (col.tight ? 8 : 12) - w : col.align === "center" ? x + col.width / 2 - w / 2 : x;
             setDrawColorFrom(doc, style?.color, 30);
             doc.setLineWidth(0.6);
             doc.line(startX, lineY, startX + w, lineY);

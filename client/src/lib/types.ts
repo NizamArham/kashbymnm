@@ -54,6 +54,35 @@ export interface DailyAttendanceRow {
   notes: string | null;
 }
 
+// One day's attendance screen: who is on the list, how each was marked, and the logins attendance isn't kept for.
+export interface DailyAttendance {
+  date: string;
+  today: string;
+  staff: DailyAttendanceRow[];
+  not_tracked: { user_id: number; name: string }[];
+}
+
+// One person's row in the monthly register: each day's mark and the month's totals.
+export interface MonthRegisterRow {
+  user_id: number;
+  name: string;
+  job_title: string | null;
+  joined_date: string | null;
+  tracked: boolean;
+  days: Record<string, AttendanceStatus>;
+  notes: Record<string, string>;
+  totals: { present: number; half_day: number; leave: number; absent: number; unmarked: number; worked_days: number };
+}
+
+export interface MonthRegister {
+  month: string;
+  start: string;
+  end: string;
+  days_in_month: number;
+  today: string;
+  staff: MonthRegisterRow[];
+}
+
 export interface LoginActivityEntry {
   id: number;
   user_id: number;

@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS users (
   bank_account_name TEXT,
   -- Self-referencing: who this person reports to, for a simple org chart.
   reports_to INTEGER REFERENCES users(id),
+  -- 0 = attendance isn't kept for this login (the technical System Admin account, or someone who has left but whose history must stay).
+  attendance_enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes'))
 );
 

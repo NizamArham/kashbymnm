@@ -73,7 +73,11 @@ export type AuditAction =
   | "sale_wholesale"
   | "cashier_mode_on"
   | "cashier_mode_off"
-  | "till_approval";
+  | "till_approval"
+  | "attendance_mark"
+  | "attendance_mark_all"
+  | "attendance_clear"
+  | "attendance_tracking";
 
 export function logAudit(
   actor: AuthUser,
