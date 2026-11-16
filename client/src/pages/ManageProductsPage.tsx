@@ -687,6 +687,14 @@ export default function ManageProductsPage() {
       } else {
         manageProduct(p, tab);
       }
+      // Sent here from the product's own page (lib/productView.ts): bring its panel into view once it has drawn.
+      if (readMemory<number>("products.focus") === p.id) {
+        writeMemory("products.focus", null);
+        setTimeout(() => {
+          const panel = [...document.querySelectorAll<HTMLElement>(`[data-product-open="${p.id}"]`)].find((el) => el.offsetParent !== null);
+          panel?.scrollIntoView({ block: "start", behavior: "smooth" });
+        }, 400);
+      }
     }
     setViewReady(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -981,7 +989,7 @@ export default function ManageProductsPage() {
   function renderExpanded(p: Product) {
     const units = inventoryByProduct[p.id] ?? [];
     return (
-                            <div className="bg-white rounded-xl shadow-sm p-4 space-y-4">
+                            <div data-product-open={p.id} className="bg-white rounded-xl shadow-sm p-4 space-y-4 scroll-mt-4">
                                 <div className="flex items-center gap-1 border-b border-gray-200">
                                   {(["stock", "restock", "details"] as ExpandedTab[]).map((tab) => (
                                     <button
