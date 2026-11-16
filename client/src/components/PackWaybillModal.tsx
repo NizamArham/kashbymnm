@@ -53,14 +53,18 @@ export default function PackWaybillModal({
   const courierApi = delivery.delivery_partner ? COURIER_API[delivery.delivery_partner] : undefined;
   const [creatingShipment, setCreatingShipment] = useState(false);
   const [shipmentError, setShipmentError] = useState<string | null>(null);
+  // Something the courier wouldn't take, but the parcel was booked anyway (e.g. the second phone number).
+  const [shipmentNotice, setShipmentNotice] = useState<string | null>(null);
 
   async function createShipment() {
     if (!courierApi) return;
     setShipmentError(null);
+    setShipmentNotice(null);
     setCreatingShipment(true);
     try {
-      const result = await api.post<{ tracking_number: string }>(`/deliveries/${delivery.id}/${courierApi.endpoint}`);
+      const result = await api.post<{ tracking_number: string; notice?: string }>(`/deliveries/${delivery.id}/${courierApi.endpoint}`);
       setTrackingNumber(result.tracking_number);
+      setShipmentNotice(result.notice ?? null);
     } catch (err) {
       setShipmentError(err instanceof ApiRequestError ? err.message : `Failed to create the shipment with ${courierApi.name}`);
     } finally {
@@ -360,6 +364,7 @@ export default function PackWaybillModal({
                   {creatingShipment ? "Creating shipment..." : `Create shipment with ${courierApi.name}`}
                 </button>
                 {shipmentError && <ErrorText>{shipmentError}</ErrorText>}
+                {shipmentNotice && <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">{shipmentNotice}</p>}
               </div>
             )}
 

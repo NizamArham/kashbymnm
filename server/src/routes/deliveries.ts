@@ -369,7 +369,7 @@ deliveriesRouter.post(
     const description = (isExchange ? `EXCHANGE - ${itemsText}` : itemsText).slice(0, 150);
 
     const phone2 = toLocalPhone(delivery.customer_phone2);
-    const waybill = await fardarCreateParcel({
+    const booking = await fardarCreateParcel({
       order_id: delivery.invoice,
       parcel_weight: delivery.package_weight_kg && delivery.package_weight_kg > 0 ? delivery.package_weight_kg : 0.5,
       parcel_description: description,
@@ -385,8 +385,12 @@ deliveriesRouter.post(
       exchange: isExchange,
     });
 
-    db.prepare(`UPDATE deliveries SET tracking_number = ? WHERE id = ?`).run(waybill, delivery.id);
-    res.json({ tracking_number: waybill });
+    db.prepare(`UPDATE deliveries SET tracking_number = ? WHERE id = ?`).run(booking.waybill, delivery.id);
+    // `notice` says what Fardar wouldn't take, so the pack screen can tell the person — the parcel itself is booked either way.
+    res.json({
+      tracking_number: booking.waybill,
+      ...(booking.droppedSecondPhone ? { notice: `Fardar didn't accept the customer's second phone number, so the parcel was booked with ${phone1} only.` } : {}),
+    });
   })
 );
 

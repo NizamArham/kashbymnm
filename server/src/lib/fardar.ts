@@ -112,23 +112,43 @@ async function postParcel(params: FardarParcelParams): Promise<string> {
   return waybill;
 }
 
+// What booking a parcel gave back: Fardar's waybill number, and which optional details Fardar refused and were left out so the parcel could still be
+// booked (the order reference, and the recipient's second phone number).
+export interface FardarBooking {
+  waybill: string;
+  droppedOrderReference: boolean;
+  droppedSecondPhone: boolean;
+}
+
 // Creates the parcel on Fardar's side and returns their waybill number,
-// which doubles as the tracking number. The order reference is optional
-// on their end; if they reject it (202 — their docs don't say what format
-// it must be, and our invoice numbers have letters in them), it's sent
-// again without it and the invoice number travels in the description
-// instead, so the parcel can still be matched to the order.
-export async function fardarCreateParcel(params: FardarParcelParams): Promise<string> {
-  try {
-    return await postParcel(params);
-  } catch (err) {
-    if (err instanceof FardarRejection && err.fardarStatus === 202 && params.order_id) {
-      return postParcel({
-        ...params,
-        order_id: undefined,
-        parcel_description: `${params.order_id} — ${params.parcel_description}`.slice(0, 150),
-      });
+// which doubles as the tracking number. Two details are optional on their
+// end, and the parcel is booked without whichever one they refuse rather than
+// failing the whole booking:
+//  - the order reference (202 — their docs don't say what format it must be,
+//    and our invoice numbers have letters in them): sent again without it,
+//    with the invoice number in the description so the parcel can still be
+//    matched to the order;
+//  - the recipient's second phone number (207): sent again with the first only.
+// A first phone number they refuse (206) can't be left out, so that still stops.
+export async function fardarCreateParcel(params: FardarParcelParams): Promise<FardarBooking> {
+  let current = params;
+  const booking = { droppedOrderReference: false, droppedSecondPhone: false };
+  // At most one retry per optional detail.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return { waybill: await postParcel(current), ...booking };
+    } catch (err) {
+      if (!(err instanceof FardarRejection)) throw err;
+      if (err.fardarStatus === 202 && current.order_id) {
+        current = { ...current, order_id: undefined, parcel_description: `${current.order_id} — ${current.parcel_description}`.slice(0, 150) };
+        booking.droppedOrderReference = true;
+      } else if (err.fardarStatus === 207 && current.recipient_contact_2) {
+        current = { ...current, recipient_contact_2: undefined };
+        booking.droppedSecondPhone = true;
+      } else {
+        throw err;
+      }
     }
-    throw err;
   }
+  throw new ApiError(502, "Fardar kept rejecting the parcel — try again");
 }
