@@ -273,6 +273,19 @@ function priceItems(
   notInStock: { unit_price: number; quantity: number }[] = []
 ): ItemPricing {
   const approvalReasons = new Set<string>();
+  // One unit is one physical piece. The same unit on two lines would sell a piece that isn't there (and leave the stock short),
+  // so it is refused, whichever screen the sale came from.
+  const seenUnits = new Set<number>();
+  for (const item of items) {
+    if (seenUnits.has(item.inventory_id)) {
+      const dup = db.prepare(`SELECT sku FROM inventory WHERE id = ?`).get(item.inventory_id) as { sku: string } | undefined;
+      throw new ApiError(
+        409,
+        `${dup?.sku ?? `Unit ${item.inventory_id}`} is in this sale twice. Each piece can only be sold once — if you really have another one, add it to stock first, or sell it as "Item not in stock".`
+      );
+    }
+    seenUnits.add(item.inventory_id);
+  }
   const inventoryRows = items.map((item) => {
     const row = db.prepare(`SELECT * FROM inventory WHERE id = ?`).get(item.inventory_id) as any;
     if (!row) {

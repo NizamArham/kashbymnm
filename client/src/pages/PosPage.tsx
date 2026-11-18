@@ -798,6 +798,14 @@ export default function PosPage() {
     e.preventDefault();
     const trimmed = productQuery.trim().toLowerCase();
     if (!trimmed) return;
+    // The same code typed or scanned again: say so plainly instead of "no exact match".
+    const inCart = cart.flatMap((l) => l.units).find((u) => u.id > 0 && (u.barcode?.toLowerCase() === trimmed || u.sku.toLowerCase() === trimmed));
+    if (inCart) {
+      setProductResults([]);
+      setProductSearchOpen(false);
+      setProductSearchError(`${inCart.sku} is already in the cart — only one piece has this code. For another piece, add it to stock or use "Item not in stock".`);
+      return;
+    }
     const units = await ensureUnitsLoaded();
     const exact = units.find((u) => u.barcode?.toLowerCase() === trimmed || u.sku.toLowerCase() === trimmed);
     if (exact) {
@@ -812,6 +820,13 @@ export default function PosPage() {
   }
 
   function addToCart(unit: InventoryUnit, keepSearch = false) {
+    // A code identifies one piece: scanning or typing it a second time must not put the same piece in the cart twice.
+    if (unit.id > 0 && cart.some((l) => l.units.some((u) => u.id === unit.id))) {
+      setProductResults([]);
+      setProductSearchOpen(false);
+      setProductSearchError(`${unit.sku} is already in the cart — only one piece has this code. For another piece, add it to stock or use "Item not in stock".`);
+      return;
+    }
     const key = cartLineKey(unit);
     const existingLine = cart.find((l) => cartLineKey(l.units[0]) === key);
 
