@@ -1,4 +1,4 @@
-import { Fragment, ReactNode, useState, useRef, useEffect, useLayoutEffect, forwardRef } from "react";
+import { CSSProperties, Fragment, ReactNode, useState, useRef, useEffect, useLayoutEffect, forwardRef } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { ChevronDown, ChevronUp, Check, Plus, CalendarDays, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowRight, Minus, X, MoreVertical } from "lucide-react";
@@ -625,6 +625,7 @@ export function Modal({
   height,
   flush = false,
   widthClass,
+  tabs,
 }: {
   title: ReactNode;
   subtitle?: ReactNode;
@@ -638,6 +639,7 @@ export function Modal({
   flush?: boolean;
   // A width of its own for the rare dialog that is a picture of something with fixed proportions (the cheque) rather than a form.
   widthClass?: string;
+  tabs?: ReactNode;
 }) {
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
@@ -668,15 +670,25 @@ export function Modal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex flex-shrink-0 items-start justify-between gap-4 border-b border-gray-100 px-6 py-4">
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <h2 className="text-base font-semibold text-gray-900">{title}</h2>
             {subtitle && <p className="mt-0.5 text-xs text-gray-500">{subtitle}</p>}
           </div>
+          {tabs && <div className="hidden flex-shrink-0 self-center sm:block">{tabs}</div>}
           <button type="button" onClick={onClose} aria-label="Close" className="-mr-1 flex-shrink-0 rounded-lg p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600">
             <X size={18} />
           </button>
         </div>
-        <div className={flush ? "min-h-0 flex-1 overflow-hidden" : "min-h-0 flex-1 overflow-y-auto px-6 py-5"}>{children}</div>
+        {/* On a phone there is no room beside the title, so the strip gets its own band. */}
+        {tabs && <div className="flex-shrink-0 border-b border-gray-100 px-6 py-2.5 sm:hidden">{tabs}</div>}
+        {/* A table's pinned header sticks to the very top of this scrolling body, not below the page's own top bar (the page sets that
+            via --sticky-top). The body has 1.25rem of top padding, which a pinned header would otherwise sit below, so offset for it. */}
+        <div
+          className={flush ? "min-h-0 flex-1 overflow-hidden" : "min-h-0 flex-1 overflow-y-auto px-6 py-5"}
+          style={{ "--sticky-top": flush ? "0px" : "-1.25rem" } as CSSProperties}
+        >
+          {children}
+        </div>
         {footer && (
           <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2 border-t border-gray-100 bg-gray-50 px-6 py-3.5">{footer}</div>
         )}

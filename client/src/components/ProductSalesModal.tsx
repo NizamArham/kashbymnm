@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { ReactNode, useEffect, useMemo, useState } from "react";
 import { api, ApiRequestError } from "../lib/api";
 import { Badge, Button, ErrorText, Modal, RefLink, Table, Td, Th } from "./ui";
+import { PRODUCT_POPUP } from "./ProductViewTabs";
 import { formatDateTime } from "../lib/dates";
 
 interface SoldRow {
@@ -30,7 +31,8 @@ interface ProductSales {
 // Every invoice a product was sold on — date and invoice both open that invoice —
 // with the colour/size, the buyer and what each piece sold for. Admin only: the
 // list comes from an admin-only endpoint.
-export default function ProductSalesModal({ productId, productTitle, onClose }: { productId: number; productTitle: string; onClose: () => void }) {
+// tabs: a strip to switch to the product's other views. The popup always uses the shared frame (PRODUCT_POPUP) so switching between them doesn't jump.
+export default function ProductSalesModal({ productId, productTitle, onClose, tabs }: { productId: number; productTitle: string; onClose: () => void; tabs?: ReactNode }) {
   const [data, setData] = useState<ProductSales | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -91,7 +93,7 @@ export default function ProductSalesModal({ productId, productTitle, onClose }: 
     : "Loading…";
 
   return (
-    <Modal size="lg" onClose={onClose} title={`Sold invoices — ${productTitle}`} subtitle={subtitle} footer={<Button onClick={onClose}>Close</Button>}>
+    <Modal size={PRODUCT_POPUP.size} height={PRODUCT_POPUP.height} tabs={tabs} onClose={onClose} title={`Sold invoices — ${productTitle}`} subtitle={subtitle} footer={<Button onClick={onClose}>Close</Button>}>
       {error && <ErrorText>{error}</ErrorText>}
       {data && data.rows.length === 0 && <p className="text-sm text-gray-500">No piece of this product has been sold on an invoice yet.</p>}
       {priceRange && (

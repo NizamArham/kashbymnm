@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronRight,
   ChevronDown,
@@ -13,11 +13,16 @@ import {
   FileText,
   AlertTriangle,
   Receipt,
+  BarChart3,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { api, ApiRequestError } from "../lib/api";
 import { InventoryUnit } from "../lib/types";
 import { useAuth } from "../context/AuthContext";
 import ProductSalesModal from "../components/ProductSalesModal";
+import ProductAnalyticsModal from "../components/ProductAnalyticsModal";
+import ProductViewTabs, { PRODUCT_POPUP, type ProductView } from "../components/ProductViewTabs";
 import ProductsViewToggle from "../components/ProductsViewToggle";
 import {
   buildCategoryTree,
@@ -48,6 +53,37 @@ type SortDir = "asc" | "desc";
 const summarizeVariants = summarizeProductVariants<InventoryUnit>;
 const ALL = "__all__";
 
+// The colour × size grid of a product's stock, with row/column totals — one calculation for both the PDF and the preview next to it.
+function buildStockMatrix(rows: { size: string; color: string; qty: number }[]) {
+  const sizes = Array.from(new Set(rows.map((r) => r.size))).sort((a, b) => {
+    const [aw, ai] = a.split("/").map((n) => parseInt(n, 10));
+    const [bw, bi] = b.split("/").map((n) => parseInt(n, 10));
+    if (!isNaN(aw) && !isNaN(bw) && aw !== bw) return aw - bw;
+    if (!isNaN(ai) && !isNaN(bi) && ai !== bi) return ai - bi;
+    return a.localeCompare(b);
+  });
+
+  const colors = Array.from(new Set(rows.map((r) => r.color))).sort((a, b) =>
+    a.localeCompare(b)
+  );
+
+  const grid: Record<string, Record<string, number>> = {};
+  for (const c of colors) {
+    grid[c] = {};
+    for (const s of sizes) grid[c][s] = 0;
+  }
+  for (const r of rows) {
+    grid[r.color][r.size] = (grid[r.color][r.size] ?? 0) + r.qty;
+  }
+
+  const sizeTotals: Record<string, number> = {};
+  for (const s of sizes) {
+    sizeTotals[s] = colors.reduce((sum, c) => sum + grid[c][s], 0);
+  }
+  const grandTotal = Object.values(sizeTotals).reduce((a, b) => a + b, 0);
+  return { sizes, colors, grid, sizeTotals, grandTotal };
+}
+
 // ---------------------------------------------------------------------------
 // Product download modal — matrix report (Color × Size)
 // ---------------------------------------------------------------------------
@@ -55,41 +91,19 @@ function ProductDownloadModal({
   title,
   rows,
   onClose,
+  tabs,
 }: {
   title: string;
   rows: { size: string; color: string; qty: number; sku: string; barcode: string; supplier: string; status: string }[];
   onClose: () => void;
+  tabs?: ReactNode;
 }) {
   const [error, setError] = useState<string | null>(null);
+  const matrix = useMemo(() => buildStockMatrix(rows), [rows]);
 
   function handleDownloadA4() {
     try {
-      const sizes = Array.from(new Set(rows.map((r) => r.size))).sort((a, b) => {
-        const [aw, ai] = a.split("/").map((n) => parseInt(n, 10));
-        const [bw, bi] = b.split("/").map((n) => parseInt(n, 10));
-        if (!isNaN(aw) && !isNaN(bw) && aw !== bw) return aw - bw;
-        if (!isNaN(ai) && !isNaN(bi) && ai !== bi) return ai - bi;
-        return a.localeCompare(b);
-      });
-
-      const colors = Array.from(new Set(rows.map((r) => r.color))).sort((a, b) =>
-        a.localeCompare(b)
-      );
-
-      const grid: Record<string, Record<string, number>> = {};
-      for (const c of colors) {
-        grid[c] = {};
-        for (const s of sizes) grid[c][s] = 0;
-      }
-      for (const r of rows) {
-        grid[r.color][r.size] = (grid[r.color][r.size] ?? 0) + r.qty;
-      }
-
-      const sizeTotals: Record<string, number> = {};
-      for (const s of sizes) {
-        sizeTotals[s] = colors.reduce((sum, c) => sum + grid[c][s], 0);
-      }
-      const grandTotal = Object.values(sizeTotals).reduce((a, b) => a + b, 0);
+      const { sizes, colors, grid, sizeTotals, grandTotal } = buildStockMatrix(rows);
 
       // An empty cell reads as a light "-" rather than a 0, so the pieces
       // that actually exist stand out in the grid.
@@ -144,29 +158,86 @@ function ProductDownloadModal({
   }
 
   return (
-    <Modal size="sm" onClose={onClose} title="Download report" subtitle={title} footer={<Button onClick={onClose}>Close</Button>}>
-      <div className="space-y-2.5">
-          <button
-            onClick={handleDownloadA4}
-            className="w-full flex items-center gap-3 px-4 py-3 border border-gray-200 rounded-xl hover:border-black hover:shadow-sm transition text-left"
-          >
-            <div className="w-9 h-9 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
-              <FileText size={16} className="text-gray-700" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-gray-900">Stock Breakdown (PDF)</p>
-              <p className="text-xs text-gray-500">Color × Size matrix with totals</p>
-            </div>
-          </button>
+    <Modal size={PRODUCT_POPUP.size} height={PRODUCT_POPUP.height} tabs={tabs} onClose={onClose} title="Download report" subtitle={title} footer={<Button onClick={onClose}>Close</Button>}>
+      <div className="space-y-5">
+        <button
+          onClick={handleDownloadA4}
+          className="w-full max-w-sm flex items-center gap-3 px-4 py-3 border border-gray-200 rounded-xl hover:border-black hover:shadow-sm transition text-left"
+        >
+          <div className="w-9 h-9 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
+            <FileText size={16} className="text-gray-700" />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-gray-900">Stock Breakdown (PDF)</p>
+            <p className="text-xs text-gray-500">Color × Size matrix with totals</p>
+          </div>
+        </button>
 
-          {error && (
-            <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-1">
-              <AlertTriangle size={12} className="text-amber-600 flex-shrink-0 mt-0.5" />
-              <p className="text-xs text-amber-800">{error}</p>
-            </div>
+        {error && (
+          <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            <AlertTriangle size={12} className="text-amber-600 flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-amber-800">{error}</p>
+          </div>
+        )}
+
+        {/* What the PDF will contain, so the numbers can be checked before downloading */}
+        <div>
+          <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-gray-500">In the report</p>
+          {matrix.colors.length === 0 ? (
+            <p className="text-sm text-gray-500">No stock to report.</p>
+          ) : (
+            <Table>
+              <thead>
+                <tr>
+                  <Th>Color</Th>
+                  {matrix.sizes.map((sz) => (
+                    <Th key={sz} className="text-center whitespace-nowrap">
+                      {sz}
+                    </Th>
+                  ))}
+                  <Th className="text-center">Total</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {matrix.colors.map((c) => (
+                  <tr key={c}>
+                    <Td className="whitespace-nowrap font-medium">{c}</Td>
+                    {matrix.sizes.map((sz) => (
+                      <Td key={sz} className={`text-center tabular-nums ${matrix.grid[c][sz] === 0 ? "text-gray-300" : ""}`}>
+                        {matrix.grid[c][sz] === 0 ? "-" : matrix.grid[c][sz]}
+                      </Td>
+                    ))}
+                    <Td className="text-center tabular-nums font-medium">{matrix.sizes.reduce((sum, sz) => sum + matrix.grid[c][sz], 0)}</Td>
+                  </tr>
+                ))}
+                <tr className="bg-gray-50">
+                  <Td className="font-medium">Total</Td>
+                  {matrix.sizes.map((sz) => (
+                    <Td key={sz} className="text-center tabular-nums font-medium">
+                      {matrix.sizeTotals[sz]}
+                    </Td>
+                  ))}
+                  <Td className="text-center tabular-nums font-medium">{matrix.grandTotal}</Td>
+                </tr>
+              </tbody>
+            </Table>
           )}
+        </div>
       </div>
     </Modal>
+  );
+}
+
+const rupees = (n: number) => `Rs. ${Math.round(n).toLocaleString()}`;
+
+function StockStat({ label, value, note, tone }: { label: string; value: string; note?: string; tone?: "good" | "bad" }) {
+  const color = tone === "good" ? "text-emerald-600" : tone === "bad" ? "text-red-600" : "text-gray-900";
+  return (
+    <div className="min-w-0">
+      <dt className="text-xs text-gray-500">{label}</dt>
+      <dd className={`mt-0.5 text-lg font-medium tabular-nums ${color}`}>{value}</dd>
+      {note && <p className="text-xs text-gray-500">{note}</p>}
+    </div>
   );
 }
 
@@ -242,11 +313,14 @@ export default function InventoryCategoriesPage() {
 
   // ---- Per-row menu + download modal ----
   const [openMenuId, setOpenMenuId] = useState<number | null>(null);
-  const [downloadTarget, setDownloadTarget] = useState<{ title: string; rows: any[] } | null>(null);
+  const [downloadTarget, setDownloadTarget] = useState<{ productId: number; title: string; rows: any[] } | null>(null);
   // Admin only: the product whose sold-invoices list is open.
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   const [salesFor, setSalesFor] = useState<{ id: number; title: string } | null>(null);
+  const [analyticsFor, setAnalyticsFor] = useState<{ id: number; title: string } | null>(null);
+  // The money figures stay out of sight until asked for (anyone glancing at the screen shouldn't see them); not remembered between visits.
+  const [showStockValue, setShowStockValue] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const searchBoxRef = useRef<HTMLDivElement>(null);
@@ -476,6 +550,29 @@ export default function InventoryCategoriesPage() {
     });
   }, [units, selectedFilter, appliedQuery, searchIndex]);
 
+  // What the pieces currently shown add up to (follows the search and filters): sellable pieces at cost and at selling price.
+  // Damaged pieces aren't sellable, so they're counted apart instead of inflating the stock value.
+  const stockTotals = useMemo(() => {
+    const products = new Set<number>();
+    let pieces = 0;
+    let cost = 0;
+    let worth = 0;
+    let damaged = 0;
+    let damagedCost = 0;
+    for (const u of filteredUnits) {
+      if (u.status === "damaged") {
+        damaged += 1;
+        damagedCost += u.cost_price ?? 0;
+      } else if (u.status === "available") {
+        pieces += 1;
+        products.add(u.product_id);
+        cost += u.cost_price ?? 0;
+        worth += u.selling_price ?? u.product_selling_price ?? 0;
+      }
+    }
+    return { pieces, products: products.size, cost, worth, profit: worth - cost, damaged, damagedCost };
+  }, [filteredUnits]);
+
   // ---- Grouped + sorted ----
   const groups = useMemo(() => {
     const g = groupByProduct(filteredUnits);
@@ -551,6 +648,23 @@ export default function InventoryCategoriesPage() {
       supplier: v.batchSupplierCode ?? "—",
       status: v.status,
     }));
+  }
+
+  // The "⋮" menu's three views share one popup frame; the strip across its top moves between them without closing.
+  function showProductView(view: ProductView, id: number, title: string) {
+    setSalesFor(null);
+    setAnalyticsFor(null);
+    setDownloadTarget(null);
+    if (view === "sales") setSalesFor({ id, title });
+    else if (view === "analytics") setAnalyticsFor({ id, title });
+    else {
+      const group = groups.find((g) => g.product_id === id);
+      if (group) setDownloadTarget({ productId: id, title, rows: buildDownloadRows(group) });
+    }
+  }
+  // Only an admin has more than one view (invoices and analytics are admin-only), so a cashier gets no strip.
+  function productTabs(view: ProductView, id: number, title: string) {
+    return isAdmin ? <ProductViewTabs current={view} onSelect={(v) => showProductView(v, id, title)} /> : undefined;
   }
 
   return (
@@ -770,11 +884,46 @@ export default function InventoryCategoriesPage() {
                 )}
               </p>
             </div>
-            <p className="text-xs text-gray-500 tabular-nums flex-shrink-0">
-              {groups.length} product{groups.length === 1 ? "" : "s"}, {filteredUnits.length} unit
-              {filteredUnits.length === 1 ? "" : "s"}
-            </p>
+            <div className="flex flex-shrink-0 items-center gap-3">
+              {isAdmin && stockTotals.pieces > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowStockValue((v) => !v)}
+                  aria-pressed={showStockValue}
+                  className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-gray-500 transition hover:bg-gray-100 hover:text-gray-800"
+                >
+                  {showStockValue ? <EyeOff size={13} /> : <Eye size={13} />}
+                  {showStockValue ? "Hide stock value" : "Stock value"}
+                </button>
+              )}
+              <p className="text-xs text-gray-500 tabular-nums">
+                {groups.length} product{groups.length === 1 ? "" : "s"}, {filteredUnits.length} unit
+                {filteredUnits.length === 1 ? "" : "s"}
+              </p>
+            </div>
           </div>
+
+          {/* Stock in hand: pieces, what they cost, what they'd sell for. Admin only (cost prices are never shown to staff) and hidden until asked for. */}
+          {isAdmin && showStockValue && stockTotals.pieces > 0 && (
+            <div className="border-b border-gray-100 px-1 py-3 lg:px-5">
+              <dl className="grid grid-cols-2 gap-x-6 gap-y-3 lg:grid-cols-4">
+                <StockStat label="In stock" value={`${stockTotals.pieces.toLocaleString()} pcs`} note={`${stockTotals.products} product${stockTotals.products === 1 ? "" : "s"}`} />
+                <StockStat label="Stock at cost" value={rupees(stockTotals.cost)} note="money tied up" />
+                <StockStat label="Worth at selling price" value={rupees(stockTotals.worth)} note="if all sold at today's prices" />
+                <StockStat
+                  label="Profit if all sells"
+                  value={`${stockTotals.profit < 0 ? "−" : "+"}${rupees(Math.abs(stockTotals.profit))}`}
+                  note={stockTotals.worth > 0 ? `${Math.round((stockTotals.profit / stockTotals.worth) * 100)}% of selling price` : undefined}
+                  tone={stockTotals.profit >= 0 ? "good" : "bad"}
+                />
+              </dl>
+              {stockTotals.damaged > 0 && (
+                <p className="mt-2.5 text-xs text-gray-500">
+                  Not counted above: {stockTotals.damaged} damaged piece{stockTotals.damaged === 1 ? "" : "s"} ({rupees(stockTotals.damagedCost)} at cost)
+                </p>
+              )}
+            </div>
+          )}
 
           {groups.length === 0 ? (
             <EmptyState
@@ -917,6 +1066,7 @@ export default function InventoryCategoriesPage() {
                                   onClick={() => {
                                     setOpenMenuId(null);
                                     setDownloadTarget({
+                                      productId: group.product_id,
                                       title: group.product_title,
                                       rows: buildDownloadRows(group),
                                     });
@@ -936,6 +1086,18 @@ export default function InventoryCategoriesPage() {
                                   >
                                     <Receipt size={14} />
                                     Sold invoices
+                                  </button>
+                                )}
+                                {isAdmin && (
+                                  <button
+                                    onClick={() => {
+                                      setOpenMenuId(null);
+                                      setAnalyticsFor({ id: group.product_id, title: group.product_title });
+                                    }}
+                                    className="w-full flex items-center gap-2 px-3.5 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition"
+                                  >
+                                    <BarChart3 size={14} />
+                                    Analytics
                                   </button>
                                 )}
                               </div>
@@ -1059,8 +1221,9 @@ export default function InventoryCategoriesPage() {
                       <div className="flex flex-shrink-0 items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
                         <ActionMenu
                           items={[
-                            { label: "Download report", icon: <Download size={14} />, onClick: () => setDownloadTarget({ title: group.product_title, rows: buildDownloadRows(group) }) },
+                            { label: "Download report", icon: <Download size={14} />, onClick: () => setDownloadTarget({ productId: group.product_id, title: group.product_title, rows: buildDownloadRows(group) }) },
                             ...(isAdmin ? [{ label: "Sold invoices", icon: <Receipt size={14} />, onClick: () => setSalesFor({ id: group.product_id, title: group.product_title }) }] : []),
+                            ...(isAdmin ? [{ label: "Analytics", icon: <BarChart3 size={14} />, onClick: () => setAnalyticsFor({ id: group.product_id, title: group.product_title }) }] : []),
                           ]}
                         />
                         {isExpanded ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-300" />}
@@ -1125,13 +1288,15 @@ export default function InventoryCategoriesPage() {
         </div>
       )}
 
-      {salesFor && <ProductSalesModal productId={salesFor.id} productTitle={salesFor.title} onClose={() => setSalesFor(null)} />}
+      {salesFor && <ProductSalesModal productId={salesFor.id} productTitle={salesFor.title} tabs={productTabs("sales", salesFor.id, salesFor.title)} onClose={() => setSalesFor(null)} />}
+      {analyticsFor && <ProductAnalyticsModal productId={analyticsFor.id} productTitle={analyticsFor.title} tabs={productTabs("analytics", analyticsFor.id, analyticsFor.title)} onClose={() => setAnalyticsFor(null)} />}
 
       {/* ---------- Product download modal ---------- */}
       {downloadTarget && (
         <ProductDownloadModal
           title={downloadTarget.title}
           rows={downloadTarget.rows}
+          tabs={productTabs("report", downloadTarget.productId, downloadTarget.title)}
           onClose={() => setDownloadTarget(null)}
         />
       )}
